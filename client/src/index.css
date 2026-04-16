@@ -1,0 +1,159 @@
+@import "tailwindcss";
+
+.hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.made-in-india {
+  font-family: "Poppins", sans-serif;
+  font-weight: 400;
+  font-style: normal;
+}
+
+.no-spinner::-webkit-inner-spin-button,
+.no-spinner::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.no-spinner {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* --------- */
+.btn-grey {
+  @apply bg-gray-200 px-4 py-2 rounded-xl font-medium hover:bg-gray-300 transition;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(35px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slideUp {
+  animation: slideUp 0.25s ease-out;
+}
+
+@keyframes fadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes zoomIn {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.animate-zoomIn {
+  animation: zoomIn 0.25s ease-out;
+}
+
+/* --------- */
+@keyframes heartPop {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+.heart-animation {
+  animation: heartPop 1.5s ease-out forwards;
+}
+
+/* --------- Then apply class instead of translate. */
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.animate-slideUp {
+  animation: slideUp 0.35s ease-out;
+}
+
+/* --------- */
+.story-slide-left {
+  transform: translateX(-100%) rotateY(-15deg);
+  opacity: 0;
+}
+
+.story-slide-right {
+  transform: translateX(100%) rotateY(15deg);
+  opacity: 0;
+}
+
+/* -------- */
+@keyframes flashBorder {
+  0% {
+    border: 2px solid yellow;
+  }
+  50% {
+    border: 2px solid transparent;
+  }
+  100% {
+    border: 2px solid yellow;
+  }
+}
+
+.flash-highlight {
+  animation: flashBorder 1.5s ease-in-out;
+  border-radius: 1rem;
+}
+
+/* Nested reply chains */
+.reply-chain {
+  transition: background 0.2s ease;
+}
+
+/* Flash highlight when clicked */
+.flash-highlight {
+  animation: flashBorder 1.5s ease-in-out;
+  border-radius: 0.5rem;
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
