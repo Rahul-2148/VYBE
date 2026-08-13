@@ -31,7 +31,7 @@ const sampleStoryMedia = [
 
 const seedActiveStories = async () => {
   try {
-    const mongoUri = process.env.MONGODB_URL || "mongodb://127.0.0.1:27017/vybe";
+    const mongoUri = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/vybe";
     await mongoose.connect(mongoUri);
     console.log("Connected to MongoDB for story seeding...");
 
