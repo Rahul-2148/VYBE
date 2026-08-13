@@ -12,7 +12,7 @@ import api from "../lib/axios";
 import TwoFactorModal from "../components/TwoFactorModal";
 import GoogleUsernameModal from "../components/GoogleUsernameModal";
 import { Sparkles, Mail, ArrowLeft, ShieldCheck, Zap } from "lucide-react";
-import { useTheme } from "../lib/theme.jsx";
+import { useTheme } from "../lib/themeContext";
 import { addLinkedAccount, setActiveAccountId } from "../lib/accountManager";
 import VybeInput from "../components/VybeInput";
 

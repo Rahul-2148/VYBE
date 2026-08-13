@@ -174,7 +174,9 @@ export const InstagramLiveModal = ({ isOpen, onClose }) => {
         await api.post(`/live/end/${streamId}`);
         const socket = getSocket();
         socket?.emit("end-live-stream", { streamId });
-      } catch {}
+      } catch (e) {
+        console.warn("InstagramLiveModal: handleEndLive API call failed", e);
+      }
     }
     setIsLive(false);
     onClose();

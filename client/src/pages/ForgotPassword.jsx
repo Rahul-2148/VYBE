@@ -5,7 +5,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ClipLoader } from "react-spinners";
 import logo2 from "../assets/logo2.png";
 import api from "../lib/axios";
-import { useTheme } from "../lib/theme.jsx";
+import { useTheme } from "../lib/themeContext";
 import VybeInput from "../components/VybeInput";
 import { Mail, ShieldCheck, Key } from "lucide-react";
 

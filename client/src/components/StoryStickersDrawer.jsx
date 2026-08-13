@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
   ArrowLeft,
@@ -114,12 +113,16 @@ export const StoryStickersDrawer = ({ open, onClose, onAddSticker }) => {
   const [musicArtist, setMusicArtist] = useState("");
   const [emojiCategory, setEmojiCategory] = useState("Smileys");
 
-  // Reset when drawer opens/closes
+  // Reset when drawer opens/closes — defer to avoid sync setState-in-effect
   useEffect(() => {
     if (open) {
-      setActiveView(null);
-      setSearchQuery("");
+      const id = setTimeout(() => {
+        setActiveView(null);
+        setSearchQuery("");
+      }, 0);
+      return () => clearTimeout(id);
     }
+    return undefined;
   }, [open]);
 
   if (!open) return null;

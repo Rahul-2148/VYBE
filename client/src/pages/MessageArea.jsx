@@ -21,12 +21,12 @@ import useMessageSocketEvents from "../hooks/useMessageSocketEvents";
 import useTypingIndicator from "../hooks/useTypingIndicator";
 import {
   addMessage, addOptimisticMessage, replaceOptimisticMessage, markOptimisticFailed,
-  setMessages, prependHistoricalMessages, updateConversationLastMessage,
+  setMessages, prependHistoricalMessages, updateConversationLastMessage, setConversations,
   clearSelectedChatUser, setChatInfoOpen, setForwardModal,
 } from "../redux/features/messageSlice";
 import api from "../lib/axios";
 import { getSocket } from "../lib/socket";
-import { useTheme } from "../lib/theme.jsx";
+import { useTheme } from "../lib/themeContext";
 
 const getDateLabel = (date) => {
   const d = moment(date);
@@ -107,6 +107,7 @@ export const MessageArea = () => {
   const currentUserId = userData?.user?._id || userData?._id;
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const tempIdCounter = useRef(0);
 
   const currentConv = conversations.find(
     (c) => (c._id || c.conversationId)?.toString() === selectedChatUser?.conversationId?.toString()
@@ -171,7 +172,7 @@ export const MessageArea = () => {
 
   const handleSendSticker = async (stickerUrl) => {
     setShowPicker({ open: false, tab: "emojis" });
-    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const tempId = `temp_${tempIdCounter.current++}`;
     const optimisticMessage = {
       _id: tempId,
       conversation: selectedChatUser.conversationId,
@@ -212,6 +213,12 @@ export const MessageArea = () => {
   const messageRefs = useRef({});
   const inputRef = useRef(null);
 
+  const scrollToBottom = useCallback((behavior = "smooth") => {
+    requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior });
+    });
+  }, []);
+
   const isGroup = Boolean(selectedChatUser?.user?.isGroup || selectedChatUser?.isGroup);
   const otherUser = isGroup ? null : selectedChatUser?.user;
 
@@ -248,12 +255,21 @@ export const MessageArea = () => {
     }
   };
 
+  const markConversationSeen = async () => {
+    try {
+      if (!selectedChatUser?.conversationId) return;
+      await api.post(`/message/seen/${selectedChatUser.conversationId}`);
+    } catch (e) {
+      console.warn("MessageArea: markConversationSeen failed", e);
+    }
+  };
+
   useEffect(() => {
     if (!selectedChatUser?.conversationId) return;
     (async () => {
       await fetchMessages(1);
       scrollToBottom("auto");
-      markConversationSeen();
+      await markConversationSeen();
     })();
   }, [selectedChatUser?.conversationId]);
 
@@ -276,12 +292,6 @@ export const MessageArea = () => {
     return () => socket.off("incoming-call", handleIncomingCall);
   }, []);
 
-  const scrollToBottom = useCallback((behavior = "smooth") => {
-    requestAnimationFrame(() => {
-      bottomRef.current?.scrollIntoView({ behavior });
-    });
-  }, []);
-
   const scrollToMessage = (id) => {
     const el = messageRefs.current[id];
     if (!el) return;
@@ -299,12 +309,6 @@ export const MessageArea = () => {
     }
     if (messages.length && !search) scrollToBottom();
   }, [messages.length]);
-
-  const markConversationSeen = async () => {
-    try {
-      await api.post(`/message/seen/${selectedChatUser.conversationId}`);
-    } catch {}
-  };
 
   const handleScroll = async () => {
     const container = containerRef.current;
@@ -749,12 +753,15 @@ export const MessageArea = () => {
         {/* Initial loading skeleton */}
         {loadingMessages ? (
           <div className="flex-1 flex flex-col justify-end gap-3 py-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className={`flex ${i % 2 === 0 ? "justify-end" : "justify-start"}`}>
-                <div className={`animate-pulse rounded-2xl ${i % 2 === 0 ? "bg-blue-500/10" : "bg-surface-hover/60"}`}
-                  style={{ width: `${Math.random() * 40 + 30}%`, height: `${Math.random() * 20 + 28}px` }} />
-              </div>
-            ))}
+            {Array.from({ length: 6 }).map((_, i) => {
+              const w = 30 + ((i * 37) % 40); // deterministic width
+              const h = 28 + ((i * 17) % 20); // deterministic height
+              return (
+                <div key={i} className={`flex ${i % 2 === 0 ? "justify-end" : "justify-start"}`}>
+                  <div className={`animate-pulse rounded-2xl ${i % 2 === 0 ? "bg-blue-500/10" : "bg-surface-hover/60"}`} style={{ width: `${w}%`, height: `${h}px` }} />
+                </div>
+              );
+            })}
           </div>
         ) : (
           <>

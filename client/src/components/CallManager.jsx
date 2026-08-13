@@ -5,7 +5,7 @@ import { getSocket } from "../lib/socket";
 import api from "../lib/axios";
 import CallScreen from "./CallScreen";
 import { useWebRTC } from "../hooks/useWebRTC";
-import toast from "../lib/hotToastAdapter";
+import toast from "../lib/toast";
 import {
   startOutgoingSound,
   stopOutgoingSound,

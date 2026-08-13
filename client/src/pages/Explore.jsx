@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Search, Compass, Heart, MessageCircle, Play, ArrowLeft, TrendingUp, Grid3X3, Film, Bookmark, Users, Eye } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import SearchModal from "../components/SearchModal";
@@ -43,7 +43,7 @@ const ExploreMediaCard = ({ post, index, activeTab, navigate, formatCount, getVi
   const isLarge = activeTab === "grid" && (index % 10 === 0 || index % 10 === 6);
   const thumbnail = isVideo ? getVideoThumbnail(post) : null;
   const videoRef = useRef(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [, setIsPlaying] = useState(false);
 
   const getOptimizedImageUrl = (url) => {
     if (url && url.includes("cloudinary.com") && url.includes("/image/upload/")) {
@@ -173,12 +173,58 @@ export const Explore = () => {
   const cacheRef = useRef({});
   const categoryScrollRef = useRef(null);
 
-  useEffect(() => {
-    if (activeTab === "accounts") {
-      fetchSuggestedUsers();
-    } else {
-      fetchExploreFeed();
+  const fetchExploreFeed = async () => {
+    if (cacheRef.current[selectedCategory]) {
+      setPosts(cacheRef.current[selectedCategory].posts);
+      setLoops(cacheRef.current[selectedCategory].loops);
+      setLoading(false);
+      return;
     }
+    try {
+      setLoading(true);
+      const res = await api.get(`/search/explore?category=${selectedCategory}`);
+      if (res.data.success) {
+        const p = res.data.posts || [];
+        const l = res.data.loops || [];
+        cacheRef.current[selectedCategory] = { posts: p, loops: l };
+        setPosts(p);
+        setLoops(l);
+      }
+    } catch (err) {
+      console.warn(err);
+      toast.error("Failed to load explore feed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  const fetchSuggestedUsers = async () => {
+    try {
+      setLoading(true);
+      const res = await api.get(`/user/suggested?category=${selectedCategory}`);
+      if (res.data?.success || res.data?.users) {
+        setSuggestedUsers(res.data.users || res.data.suggestedUsers || []);
+      }
+    } catch (err) {
+      console.warn(err);
+      toast.error("Failed to load suggested users.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!mounted) return;
+      if (activeTab === "accounts") {
+        await fetchSuggestedUsers();
+      } else {
+        await fetchExploreFeed();
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, [selectedCategory, activeTab]);
 
   useEffect(() => {
@@ -190,45 +236,6 @@ export const Explore = () => {
       }, 100);
     }
   }, [loading]);
-
-  const fetchExploreFeed = async () => {
-    if (cacheRef.current[selectedCategory]) {
-      setPosts(cacheRef.current[selectedCategory].posts);
-      setLoops(cacheRef.current[selectedCategory].loops);
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const res = await api.get(`/search/explore?category=${selectedCategory}`);
-      if (res.data.success) {
-        const p = res.data.posts || [];
-        const l = res.data.loops || [];
-        cacheRef.current[selectedCategory] = { posts: p, loops: l };
-        setPosts(p);
-        setLoops(l);
-      }
-    } catch {
-      toast.error("Failed to load explore feed.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchSuggestedUsers = async () => {
-    try {
-      setLoading(true);
-      const res = await api.get(`/user/suggested?category=${selectedCategory}`);
-      if (res.data?.success || res.data?.users) {
-        setSuggestedUsers(res.data.users || res.data.suggestedUsers || []);
-      }
-    } catch {
-      toast.error("Failed to load suggested users.");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const formatCount = (n) => {
     if (!n) return "0";

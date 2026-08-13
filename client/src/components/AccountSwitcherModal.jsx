@@ -62,7 +62,9 @@ const AccountSwitcherModal = ({ isOpen, onClose }) => {
           // Update cached user
           try {
             localStorage.setItem("vybe_cached_user", JSON.stringify(res.data.user));
-          } catch {}
+          } catch (e) {
+            console.warn("AccountSwitcherModal: failed to write cached user", e);
+          }
 
           // Reconnect socket with new user
           const newUserId = res.data.user._id;

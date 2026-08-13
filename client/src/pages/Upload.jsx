@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { FiPlusSquare } from "react-icons/fi";
 import { MdOutlineKeyboardBackspace } from "react-icons/md";
@@ -26,7 +26,7 @@ import StoryCreator from "../components/StoryCreator";
 import StoryMusicPickerModal from "../components/StoryMusicPickerModal";
 import { setLoopData } from "../redux/features/loopSlice";
 import { setPostData } from "../redux/features/postSlice";
-import { setStoryFeed } from "../redux/features/storySlice";
+// removed unused setStoryFeed import
 import api from "../lib/axios";
 import dp from "../assets/dp3.png";
 
@@ -87,7 +87,9 @@ export const Upload = () => {
         setLocationSuggestions(combined);
         return;
       }
-    } catch {}
+    } catch (e) {
+      console.warn("Upload: handleLocationChange reverse geocode failed", e);
+    }
 
     setLocationSuggestions(filtered);
   };
@@ -112,7 +114,8 @@ export const Upload = () => {
       if (res.data.success) {
         setUserSuggestions(res.data.users || []);
       }
-    } catch {
+    } catch (e) {
+      console.warn("Upload: handleUserTagChange search failed", e);
       setUserSuggestions([]);
     }
   };
@@ -442,9 +445,10 @@ export const Upload = () => {
       setIsLoading(false);
       navigate("/");
     } catch (err) {
-      toast.error("Failed to save draft");
-      setIsLoading(false);
-    }
+        console.warn("Failed to save draft:", err);
+        toast.error("Failed to save draft");
+        setIsLoading(false);
+      }
   };
 
   const handleUploadClick = () => {

@@ -33,14 +33,16 @@ export const VoiceRecorder = ({ onSendVoiceNote, onCancel }) => {
       stopTimer();
       cleanupMedia();
     };
-  }, []);
+  }, [startRecording]);
 
-  const cleanupMedia = () => {
+  function cleanupMedia() {
     // Stop recording
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       try {
         mediaRecorderRef.current.stop();
-      } catch {}
+      } catch (e) {
+        console.warn("VoiceRecorder: failed to stop media recorder", e);
+      }
     }
     // Stop tracks
     if (streamRef.current) {
@@ -64,20 +66,20 @@ export const VoiceRecorder = ({ onSendVoiceNote, onCancel }) => {
     if (audioContextRef.current && audioContextRef.current.state !== "closed") {
       audioContextRef.current.close();
     }
-  };
+  }
 
-  const startTimer = () => {
+  function startTimer() {
     setDuration(0);
     timerRef.current = setInterval(() => {
       setDuration((prev) => prev + 1);
     }, 1000);
-  };
+  }
 
-  const stopTimer = () => {
+  function stopTimer() {
     if (timerRef.current) clearInterval(timerRef.current);
-  };
+  }
 
-  const startRecording = async () => {
+  const startRecording = React.useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -97,11 +99,12 @@ export const VoiceRecorder = ({ onSendVoiceNote, onCancel }) => {
 
       // Set up real-time audio visualizer
       setupVisualizer(stream);
-    } catch (err) {
+    } catch (e) {
+      console.warn("VoiceRecorder: startRecording failed", e);
       toast.error("Microphone access denied or error starting recording.");
       onCancel();
     }
-  };
+  }, [onCancel]);
 
   const setupVisualizer = (stream) => {
     try {

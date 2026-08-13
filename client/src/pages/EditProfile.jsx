@@ -8,7 +8,7 @@ import { ClipLoader } from "react-spinners";
 import { toast } from "sonner";
 import { Link2, Trash2, Plus, User, Lock, Sliders, Palette, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
 import api from "../lib/axios";
-import { useTheme } from "../lib/theme.jsx";
+import { useTheme } from "../lib/themeContext";
 import VybeInput from "../components/VybeInput";
 
 const CATEGORIES = [

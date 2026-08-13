@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+// framer-motion not used directly in this file
 import { 
   Users, Hash, Volume2, Video, Plus, Search, Send, Image, Mic, MicOff,
   VideoOff, Monitor, Settings, LogOut, Compass, Sparkles, Copy, X, Lock, Check,
@@ -9,7 +9,7 @@ import { useSelector } from "react-redux";
 import api from "../lib/axios";
 import { getSocket } from "../lib/socket";
 import { useWebRTC } from "../hooks/useWebRTC";
-import toast from "../lib/hotToastAdapter";
+import toast from "../lib/toast";
 import { playMessageSound } from "../lib/sounds";
 
 export const Communities = () => {
@@ -56,13 +56,9 @@ export const Communities = () => {
         }
       }
     } catch (err) {
-      console.error("Failed to load communities:", err);
+      console.warn("Failed to load communities:", err);
     }
   };
-
-  useEffect(() => {
-    fetchCommunities();
-  }, []);
 
   // Select community and load details + channels
   const handleSelectCommunity = async (comm) => {
@@ -77,9 +73,24 @@ export const Communities = () => {
         }
       }
     } catch (err) {
+      console.warn("Failed to load community details:", err);
       toast.error("Failed to load community details");
     }
   };
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!mounted) return;
+      await fetchCommunities();
+    })();
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  
 
   // Load channel messages and handle socket room joining
   useEffect(() => {
@@ -88,7 +99,8 @@ export const Communities = () => {
     // Join room for text channel messaging
     const socket = getSocket();
     if (selectedChannel.type === "text") {
-      setMessages([]);
+      // Defer clearing messages to avoid sync setState-in-effect warnings
+      setTimeout(() => setMessages([]), 0);
       // Fetch history
       const fetchHistory = async () => {
         try {

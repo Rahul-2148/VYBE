@@ -21,7 +21,9 @@ const GetCurrentUser = () => {
           dispatch(setUserData(parsed));
         }
       }
-    } catch {}
+    } catch (e) {
+      console.warn("GetCurrentUser: failed to read cached user", e);
+    }
 
     const fetchUser = async () => {
       try {
@@ -31,7 +33,9 @@ const GetCurrentUser = () => {
         if (result.data?.user) {
           try {
             localStorage.setItem("vybe_cached_user", JSON.stringify(result.data.user));
-          } catch {}
+          } catch (e) {
+            console.warn("GetCurrentUser: failed to write cached user", e);
+          }
           dispatch(setUserData(result.data.user));
           dispatch(setAuthInitialized(true));
 
@@ -41,7 +45,9 @@ const GetCurrentUser = () => {
         } else {
           try {
             localStorage.removeItem("vybe_cached_user");
-          } catch {}
+          } catch (e) {
+            console.warn("GetCurrentUser: failed to remove cached user", e);
+          }
           dispatch(setUserData(null));
           dispatch(setAuthInitialized(true));
         }
@@ -66,7 +72,9 @@ const GetCurrentUser = () => {
             if (active && retryResult.data?.user) {
               try {
                 localStorage.setItem("vybe_cached_user", JSON.stringify(retryResult.data.user));
-              } catch {}
+              } catch (e) {
+                console.warn("GetCurrentUser: failed to write cached user on retry", e);
+              }
               dispatch(setUserData(retryResult.data.user));
               dispatch(setAuthInitialized(true));
 
@@ -75,11 +83,15 @@ const GetCurrentUser = () => {
               setActiveAccountId(retryResult.data.user._id);
               return;
             }
-          } catch {}
+          } catch (e) {
+            console.warn("GetCurrentUser: refresh attempt failed", e);
+          }
 
           try {
             localStorage.removeItem("vybe_cached_user");
-          } catch {}
+          } catch (e) {
+            console.warn("GetCurrentUser: failed to remove cached user after refresh failure", e);
+          }
           dispatch(setUserData(null));
           dispatch(setAuthInitialized(true));
         } else {
@@ -88,7 +100,9 @@ const GetCurrentUser = () => {
           if (isAuthRevoked) {
             try {
               localStorage.removeItem("vybe_cached_user");
-            } catch {}
+            } catch (e) {
+              console.warn("GetCurrentUser: failed to remove cached user on auth revoke", e);
+            }
             dispatch(setUserData(null));
           }
           dispatch(setAuthInitialized(true));

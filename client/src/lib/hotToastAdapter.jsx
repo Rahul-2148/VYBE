@@ -1,17 +1,5 @@
 import React from "react";
-import { toast as sonnerToast, Toaster as SonnerToaster } from "sonner";
-
-// High-fidelity Sonner toast wrapper that matches react-hot-toast API signature
-const toast = (message, options) => {
-  return sonnerToast(message, options);
-};
-
-toast.success = (message, options) => sonnerToast.success(message, options);
-toast.error = (message, options) => sonnerToast.error(message, options);
-toast.info = (message, options) => sonnerToast.info(message, options);
-toast.warning = (message, options) => sonnerToast.warning(message, options);
-toast.loading = (message, options) => sonnerToast.loading(message, options);
-toast.dismiss = (id) => sonnerToast.dismiss(id);
+import { Toaster as SonnerToaster } from "sonner";
 
 // Pre-styled Toaster matching custom dark/light premium theme styles
 export const Toaster = (props) => {
@@ -39,5 +27,4 @@ export const Toaster = (props) => {
   );
 };
 
-export { toast };
-export default toast;
+export default Toaster;

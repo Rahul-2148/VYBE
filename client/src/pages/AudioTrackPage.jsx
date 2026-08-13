@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+// framer-motion not used directly in this file
 import { Music, Play, ArrowLeft, Disc, Video } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/axios";
@@ -23,6 +23,7 @@ export const AudioTrackPage = () => {
           if (res.data.audioTrackName) setAudioName(res.data.audioTrackName);
         }
       } catch (err) {
+        console.warn("Failed to load audio track details:", err);
         toast.error("Failed to load audio track details.");
       } finally {
         setLoading(false);

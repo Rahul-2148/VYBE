@@ -1,5 +1,4 @@
-import React, { useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import React, { useEffect, useState, useCallback } from "react";
 import { Archive, Plus, Trash2, ArrowLeft, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
@@ -12,7 +11,7 @@ export const StoryArchive = () => {
   const [loading, setLoading] = useState(true);
   const [isHighlightModalOpen, setIsHighlightModalOpen] = useState(false);
 
-  const fetchArchive = async () => {
+  const fetchArchive = useCallback(async () => {
     try {
       setLoading(true);
       const res = await api.get("/story/archive");
@@ -20,15 +19,23 @@ export const StoryArchive = () => {
         setStories(res.data.stories);
       }
     } catch (err) {
+      console.warn("Failed to load Story Archive:", err);
       toast.error("Failed to load Story Archive.");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchArchive();
-  }, []);
+    let mounted = true;
+    (async () => {
+      if (!mounted) return;
+      await fetchArchive();
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [fetchArchive]);
 
   const handleDeleteStory = async (storyId) => {
     if (!window.confirm("Permanently delete this story from your archive?")) return;
@@ -40,6 +47,7 @@ export const StoryArchive = () => {
         setStories(stories.filter((s) => s._id !== storyId));
       }
     } catch (err) {
+      console.warn("Failed to delete story:", err);
       toast.error("Failed to delete story.");
     }
   };

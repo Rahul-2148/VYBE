@@ -12,7 +12,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../lib/axios";
 import { setPostData } from "../redux/features/postSlice";
 import GetStoryFeed from "../hooks/GetStoryFeed";
-import { useTheme } from "../lib/theme.jsx";
+import { useTheme } from "../lib/themeContext";
 
 const Feed = () => {
   const themeCtx = useTheme();
@@ -65,7 +65,9 @@ const Feed = () => {
       if (res.data.success) {
         setFeedAds(res.data.ads || []);
       }
-    } catch {}
+    } catch (e) {
+      console.warn("Feed: fetchAds failed", e);
+    }
   };
 
   const fetchRankedFeed = async (mode) => {
@@ -75,7 +77,9 @@ const Feed = () => {
       if (res.data.success) {
         dispatch(setPostData(res.data.posts));
       }
-    } catch {} finally {
+    } catch (e) {
+      console.warn("Feed: fetchRankedFeed failed", e);
+    } finally {
       setLoadingFeed(false);
     }
   };

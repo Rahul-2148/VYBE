@@ -21,7 +21,8 @@ export const getLinkedAccounts = () => {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
-  } catch {
+  } catch (e) {
+    console.warn("accountManager: getLinkedAccounts failed", e);
     return [];
   }
 };
@@ -57,7 +58,9 @@ export const addLinkedAccount = (user) => {
 
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(accounts));
-  } catch {}
+  } catch (e) {
+    console.warn("accountManager: addLinkedAccount failed to write storage", e);
+  }
 
   return true;
 };
@@ -71,13 +74,17 @@ export const removeLinkedAccount = (userId) => {
   const accounts = getLinkedAccounts().filter((a) => a.userId !== userId);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(accounts));
-  } catch {}
+  } catch (e) {
+    console.warn("accountManager: removeLinkedAccount failed to write storage", e);
+  }
 
   // If the removed account was active, clear active marker
   if (getActiveAccountId() === userId) {
     try {
       localStorage.removeItem(ACTIVE_KEY);
-    } catch {}
+    } catch (e) {
+      console.warn("accountManager: failed to remove active account key", e);
+    }
   }
 };
 
@@ -88,7 +95,8 @@ export const removeLinkedAccount = (userId) => {
 export const getActiveAccountId = () => {
   try {
     return localStorage.getItem(ACTIVE_KEY) || null;
-  } catch {
+  } catch (e) {
+    console.warn("accountManager: getActiveAccountId failed", e);
     return null;
   }
 };
@@ -101,7 +109,9 @@ export const setActiveAccountId = (userId) => {
   if (!userId) return;
   try {
     localStorage.setItem(ACTIVE_KEY, userId);
-  } catch {}
+  } catch (e) {
+    console.warn("accountManager: setActiveAccountId failed", e);
+  }
 };
 
 /**
@@ -111,7 +121,9 @@ export const clearAllAccounts = () => {
   try {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(ACTIVE_KEY);
-  } catch {}
+  } catch (e) {
+    console.warn("accountManager: clearAllAccounts failed", e);
+  }
 };
 
 /**

@@ -24,7 +24,7 @@ import dp from "../assets/dp3.png";
 import { setUserData } from "../redux/features/userSlice";
 import SearchModal from "./SearchModal";
 import api from "../lib/axios";
-import { useTheme } from "../lib/theme.jsx";
+import { useTheme } from "../lib/themeContext";
 import { removeLinkedAccount, getNextAccount, setActiveAccountId } from "../lib/accountManager";
 import { disconnectSocket, initializeSocket } from "../lib/socket";
 
@@ -57,7 +57,9 @@ const LeftHome = () => {
             setActiveAccountId(switchRes.data.user._id);
             try {
               localStorage.setItem("vybe_cached_user", JSON.stringify(switchRes.data.user));
-            } catch {}
+            } catch (e) {
+              console.warn("LeftHome: failed to write cached user on switch", e);
+            }
             initializeSocket(switchRes.data.user._id);
             toast.success(`Switched to @${switchRes.data.user.userName}`);
             navigate("/", { replace: true });
@@ -72,7 +74,9 @@ const LeftHome = () => {
       dispatch(setUserData(null));
       try {
         localStorage.removeItem("vybe_cached_user");
-      } catch {}
+      } catch (e) {
+        console.warn("LeftHome: failed to remove cached user on logout", e);
+      }
       disconnectSocket();
       toast.success("Logged out");
       navigate("/signin");

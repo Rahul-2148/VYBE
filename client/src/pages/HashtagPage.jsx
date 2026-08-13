@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Hash, ArrowLeft, Heart, MessageCircle, UserPlus, UserCheck } from "lucide-react";
-import { motion } from "framer-motion";
+// framer-motion not used directly in this file
 import { toast } from "sonner";
 import api from "../lib/axios";
 
@@ -15,24 +15,28 @@ export const HashtagPage = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchHashtagDetails();
-  }, [hashtag]);
-
-  const fetchHashtagDetails = async () => {
-    try {
-      setLoading(true);
-      const res = await api.get(`/search/tag/${hashtag}`);
-      if (res.data.success) {
-        setPosts(res.data.posts || []);
-        setPostCount(res.data.postCount || 0);
-        setIsFollowing(res.data.isFollowing);
+    let mounted = true;
+    (async () => {
+      try {
+        setLoading(true);
+        const res = await api.get(`/search/tag/${hashtag}`);
+        if (!mounted) return;
+        if (res.data.success) {
+          setPosts(res.data.posts || []);
+          setPostCount(res.data.postCount || 0);
+          setIsFollowing(res.data.isFollowing);
+        }
+      } catch {
+        if (mounted) toast.error("Failed to load hashtag details.");
+      } finally {
+        if (mounted) setLoading(false);
       }
-    } catch {
-      toast.error("Failed to load hashtag details.");
-    } finally {
-      setLoading(false);
-    }
-  };
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [hashtag]);
 
   const handleToggleFollow = async () => {
     try {

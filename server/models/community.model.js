@@ -70,7 +70,6 @@ const communitySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-communitySchema.index({ inviteCode: 1 });
 communitySchema.index({ "members.user": 1 });
 
 export const Community = mongoose.model("Community", communitySchema);

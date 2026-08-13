@@ -2,19 +2,13 @@
 // Zero-rerender theme switching via CSS class toggling on <html>
 // Enterprise-grade sync with user settings on the server
 
-import { createContext, useContext, useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useSelector } from "react-redux";
 import api from "./axios";
+import ThemeContext from "./themeContext";
 
 const STORAGE_KEY = "vybe-theme";
 const THEMES = ["light", "dark", "system"];
-
-const ThemeContext = createContext({
-  theme: "system",
-  resolvedTheme: "dark",
-  setTheme: () => {},
-  toggleTheme: () => {},
-});
 
 /**
  * Resolves "system" to actual theme based on OS preference.
@@ -76,11 +70,12 @@ export function ThemeProvider({ children, defaultTheme = "system" }) {
   // Apply theme on mount and when theme changes
   useEffect(() => {
     const resolved = theme === "system" ? getSystemTheme() : theme;
-    setResolvedTheme(resolved);
+    // Defer to avoid calling setState synchronously within the effect body
+    const id = setTimeout(() => setResolvedTheme(resolved), 0);
     applyThemeToDOM(resolved);
 
     if (!mounted) {
-      setMounted(true);
+      const mountId = setTimeout(() => setMounted(true), 0);
       // Briefly disable transitions to prevent flash on initial mount
       document.documentElement.classList.add("no-transitions");
       requestAnimationFrame(() => {
@@ -88,7 +83,10 @@ export function ThemeProvider({ children, defaultTheme = "system" }) {
           document.documentElement.classList.remove("no-transitions");
         });
       });
+      return () => clearTimeout(mountId);
     }
+
+    return () => clearTimeout(id);
   }, [theme, mounted]);
 
   // Sync theme from server when user logs in
@@ -103,7 +101,9 @@ export function ThemeProvider({ children, defaultTheme = "system" }) {
           setThemeState(serverTheme);
           try {
             localStorage.setItem(STORAGE_KEY, serverTheme);
-          } catch (e) {}
+          } catch {
+            // ignore storage errors (private mode, quota, etc.)
+          }
         }
       } catch (err) {
         console.error("Failed to fetch theme from server:", err);
@@ -161,21 +161,6 @@ export function ThemeProvider({ children, defaultTheme = "system" }) {
       {children}
     </ThemeContext.Provider>
   );
-}
-
-/**
- * useTheme — Hook to access and control the theme.
- */
-export function useTheme() {
-  const context = useContext(ThemeContext);
-  if (!context) {
-    throw new Error("useTheme must be used within a ThemeProvider");
-  }
-  return {
-    ...context,
-    isDark: context.resolvedTheme === "dark",
-    isLight: context.resolvedTheme === "light",
-  };
 }
 
 export default ThemeProvider;

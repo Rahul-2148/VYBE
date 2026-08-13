@@ -24,7 +24,9 @@ const ReceiverMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onForw
     try {
       const res = await api.post(`/message/react/${message._id}`, { emoji: "❤️" });
       dispatch(updateMessage(res.data.message));
-    } catch {}
+    } catch (e) {
+      console.warn("ReceiverMessage: double-click react failed", e);
+    }
   };
 
   // Refs
@@ -97,7 +99,9 @@ const ReceiverMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onForw
       const res = await api.post(`/message/react/${message._id}`, { emoji });
       dispatch(updateMessage(res.data.message));
       setShowReactions(false);
-    } catch {}
+    } catch (e) {
+      console.warn("ReceiverMessage: handleReact failed", e);
+    }
   };
 
   if (message.deletedForEveryone) {

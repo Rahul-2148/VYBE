@@ -42,8 +42,8 @@ export const Loops = () => {
 
     if (idx !== -1) {
       initialScrollDone.current = true;
-      setCurrentIndex(idx);
       setTimeout(() => {
+        setCurrentIndex(idx);
         if (containerRef.current) {
           const height = containerRef.current.clientHeight || window.innerHeight;
           containerRef.current.scrollTo({
@@ -59,8 +59,8 @@ export const Loops = () => {
         .then((res) => {
           if (res.data?.loop) {
             dispatch(setLoopData([res.data.loop, ...loopData]));
-            setCurrentIndex(0);
             setTimeout(() => {
+              setCurrentIndex(0);
               containerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
             }, 150);
           }

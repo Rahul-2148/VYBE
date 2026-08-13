@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { Vote, CheckCircle2, XCircle, Send, ExternalLink, Clock, HelpCircle, AtSign, Hash, Flame, MapPin, Music, PlusCircle, Link2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -66,7 +65,7 @@ const LyricPlayer = ({ title }) => {
   );
 };
 
-export const StoryStickers = ({ stickers = [], storyId, isOwner, currentUserId, pollVotes = [], quizAnswers = [] }) => {
+export const StoryStickers = ({ stickers = [], storyId, currentUserId, pollVotes = [] }) => {
   const navigate = useNavigate();
   const userIdStr = (u) => (u?._id ? u._id.toString() : u?.toString());
 
@@ -76,22 +75,25 @@ export const StoryStickers = ({ stickers = [], storyId, isOwner, currentUserId, 
   });
 
   const [localPollVotes, setLocalPollVotes] = useState(pollVotes);
-  const [userQuizAnswer, setUserQuizAnswer] = useState(() => {
-    const existing = quizAnswers.find((a) => userIdStr(a.user) === currentUserId?.toString());
-    return existing ? existing : null;
-  });
+  // quiz state removed (unused)
 
   const [questionText, setQuestionText] = useState("");
   const [questionSubmitted, setQuestionSubmitted] = useState(false);
   const [sliderVal, setSliderVal] = useState(50);
 
-  // Live countdown timer
-  const [countdownNow, setCountdownNow] = useState(Date.now());
+  // Live countdown timer: update `countdownNow` every second without calling setState synchronously
+  const [countdownNow, setCountdownNow] = useState(0);
   useEffect(() => {
     const hasCountdown = stickers.some((s) => s.type === "countdown");
-    if (!hasCountdown) return;
-    const interval = setInterval(() => setCountdownNow(Date.now()), 1000);
-    return () => clearInterval(interval);
+    if (!hasCountdown) return undefined;
+    const tick = () => setCountdownNow(Date.now());
+    const id = setInterval(tick, 1000);
+    // defer initial update so setState isn't called synchronously in the effect body
+    const t0 = setTimeout(tick, 0);
+    return () => {
+      clearInterval(id);
+      clearTimeout(t0);
+    };
   }, [stickers]);
 
   if (!stickers || stickers.length === 0) return null;
@@ -105,27 +107,12 @@ export const StoryStickers = ({ stickers = [], storyId, isOwner, currentUserId, 
       if (res.data.success && res.data.pollVotes) {
         setLocalPollVotes(res.data.pollVotes);
       }
-    } catch (err) {
+    } catch {
       toast.error("Failed to submit poll vote.");
     }
   };
 
-  const handleQuizAnswer = async (optionIndex) => {
-    if (userQuizAnswer) return;
-
-    try {
-      const res = await api.post(`/story/quiz/${storyId}/answer`, { optionIndex });
-      if (res.data.success) {
-        setUserQuizAnswer({
-          optionIndex,
-          isCorrect: res.data.isCorrect,
-          correctOptionIndex: res.data.correctOptionIndex,
-        });
-      }
-    } catch (err) {
-      toast.error("Failed to submit quiz answer.");
-    }
-  };
+  // quiz handler removed (not used)
 
   const handleQuestionSubmit = async (e) => {
     e.preventDefault();
@@ -138,14 +125,16 @@ export const StoryStickers = ({ stickers = [], storyId, isOwner, currentUserId, 
         setQuestionSubmitted(true);
         setQuestionText("");
       }
-    } catch (err) {
+    } catch {
       toast.error("Failed to send response.");
     }
   };
 
   // Countdown helper
   const getCountdownParts = (targetDate) => {
-    const diff = Math.max(0, new Date(targetDate).getTime() - countdownNow);
+    if (!countdownNow) return { hrs: "00", min: "00", sec: "00", expired: false };
+    const now = countdownNow;
+    const diff = Math.max(0, new Date(targetDate).getTime() - now);
     const hrs = Math.floor(diff / 3600000);
     const min = Math.floor((diff % 3600000) / 60000);
     const sec = Math.floor((diff % 60000) / 1000);
@@ -164,6 +153,9 @@ export const StoryStickers = ({ stickers = [], storyId, isOwner, currentUserId, 
         const timeDate = new Date();
         const hourDeg = (timeDate.getHours() % 12) * 30 + timeDate.getMinutes() * 0.5;
         const minDeg = timeDate.getMinutes() * 6;
+
+        // Precompute countdown parts when needed to avoid IIFE in JSX
+        const cd = sticker.type === "countdown" ? getCountdownParts(sticker.countdown?.targetDate) : null;
 
         return (
           <div
@@ -292,37 +284,33 @@ export const StoryStickers = ({ stickers = [], storyId, isOwner, currentUserId, 
             )}
 
             {/* 5. COUNTDOWN STICKER (LIVE) */}
-            {sticker.type === "countdown" && (() => {
-              const cd = getCountdownParts(sticker.countdown?.targetDate);
-              return (
-                <div className={`rounded-2xl p-3.5 shadow-2xl text-center space-y-2 border transition ${
-                  styleIdx === 1
-                    ? "bg-surface-inset text-text border-border"
-                    : styleIdx === 2
-                    ? "bg-white/25 backdrop-blur text-text border-white/20"
-                    : "bg-gradient-to-r from-cyan-600 to-blue-700 text-text border-white/30"
-                }`}>
-                  <div className="flex items-center justify-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-cyan-200" />
-                    <span className="font-bold text-[10px] uppercase tracking-wider">{sticker.countdown?.title || "Countdown"}</span>
-                  </div>
-                  <div className={`flex justify-center gap-2.5 text-base font-black font-mono py-1.5 rounded-xl border ${
-                    styleIdx === 2 ? "bg-white/10 border-white/10" : "bg-bg/30 border-white/5"
-                  }`}>
-                    {cd.expired ? (
-                      <span className="text-xs font-bold text-yellow-300 animate-pulse">🎉 Time's Up!</span>
-                    ) : (
-                      <>
-                        <div>{cd.hrs}<span className="text-[8px] block font-normal text-cyan-200">HRS</span></div>
-                        <div>{cd.min}<span className="text-[8px] block font-normal text-cyan-200">MIN</span></div>
-                        <div>{cd.sec}<span className="text-[8px] block font-normal text-cyan-200">SEC</span></div>
-                      </>
-                    )}
-                  </div>
+            {sticker.type === "countdown" && sticker.countdown && (
+              <div className={`rounded-2xl p-3.5 shadow-2xl text-center space-y-2 border transition ${
+                styleIdx === 1
+                  ? "bg-surface-inset text-text border-border"
+                  : styleIdx === 2
+                  ? "bg-white/25 backdrop-blur text-text border-white/20"
+                  : "bg-gradient-to-r from-cyan-600 to-blue-700 text-text border-white/30"
+              }`}>
+                <div className="flex items-center justify-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-cyan-200" />
+                  <span className="font-bold text-[10px] uppercase tracking-wider">{sticker.countdown?.title || "Countdown"}</span>
                 </div>
-              );
-            })()}
-
+                <div className={`flex justify-center gap-2.5 text-base font-black font-mono py-1.5 rounded-xl border ${
+                  styleIdx === 2 ? "bg-white/10 border-white/10" : "bg-bg/30 border-white/5"
+                }`}>
+                  {cd?.expired ? (
+                    <span className="text-xs font-bold text-yellow-300 animate-pulse">🎉 Time's Up!</span>
+                  ) : (
+                    <>
+                      <div>{cd?.hrs}<span className="text-[8px] block font-normal text-cyan-200">HRS</span></div>
+                      <div>{cd?.min}<span className="text-[8px] block font-normal text-cyan-200">MIN</span></div>
+                      <div>{cd?.sec}<span className="text-[8px] block font-normal text-cyan-200">SEC</span></div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
             {/* 6. QUESTION BOX STICKER */}
             {sticker.type === "question" && sticker.question && (
               <div className={`rounded-2xl p-4 shadow-2xl text-center border transition-all duration-300 ${

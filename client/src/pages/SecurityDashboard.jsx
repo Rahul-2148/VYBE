@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+// framer-motion not used directly in this file
 import {
   ShieldCheck,
   ShieldAlert,
@@ -33,7 +33,7 @@ import {
   ToggleLeft,
   ToggleRight,
 } from "lucide-react";
-import toast from "../lib/hotToastAdapter";
+import toast from "../lib/toast";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/axios";
 import TwoFactorModal from "../components/TwoFactorModal";
@@ -132,6 +132,7 @@ export const SecurityDashboard = () => {
         toast.success("Security status refreshed! 🛡️");
       }
     } catch (err) {
+      console.warn("Failed to load security center data:", err);
       toast.error("Failed to load security center data.");
     } finally {
       setLoading(false);
@@ -153,7 +154,14 @@ export const SecurityDashboard = () => {
   };
 
   useEffect(() => {
-    fetchData();
+    let active = true;
+    (async () => {
+      await fetchData();
+      if (!active) return;
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleStart2FaSetup = async () => {

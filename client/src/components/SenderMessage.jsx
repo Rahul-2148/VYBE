@@ -46,7 +46,9 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
     try {
       const res = await api.post(`/message/react/${message._id}`, { emoji: "❤️" });
       dispatch(updateMessage(res.data.message));
-    } catch {}
+    } catch (e) {
+      console.warn("SenderMessage: double-click react failed", e);
+    }
   };
 
   // Refs
@@ -128,7 +130,9 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
       const res = await api.post(`/message/react/${message._id}`, { emoji });
       dispatch(updateMessage(res.data.message));
       setShowReactions(false);
-    } catch {}
+    } catch (e) {
+      console.warn("SenderMessage: handleReact failed", e);
+    }
   };
 
   const handleDelete = async (type) => {
@@ -141,7 +145,9 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
         dispatch(removeMessage(message._id));
       }
       setShowOptions(false);
-    } catch {}
+    } catch (e) {
+      console.warn("SenderMessage: handleDelete failed", e);
+    }
   };
 
   const handleEdit = async () => {
@@ -149,7 +155,9 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
       const res = await api.patch(`/message/edit/${message._id}`, { text: editText });
       dispatch(updateMessage(res.data.message));
       setIsEditing(false);
-    } catch {}
+    } catch (e) {
+      console.warn("SenderMessage: handleEdit failed", e);
+    }
   };
 
   if (message.deletedForEveryone) {
@@ -454,7 +462,9 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
                   if (res.data.success) {
                     dispatch(updateMessage({ ...message, isPinned: res.data.isPinned }));
                   }
-                } catch {}
+                } catch (e) {
+                  console.warn("SenderMessage: pin/unpin failed", e);
+                }
                 setShowOptions(false);
               }}
               className="flex items-center gap-2.5 px-4 py-2.5 hover:bg-surface-hover w-full text-left text-text transition-colors cursor-pointer"

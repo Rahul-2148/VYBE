@@ -25,25 +25,8 @@ export const NotificationsPage = () => {
     directMessages: true,
   });
 
-  useEffect(() => {
-    fetchNotifications(1);
-    fetchFollowRequests();
-    markAsRead();
-  }, []);
-
-  useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return;
-
-    const handleNotification = ({ notification }) => {
-      setNotifications((prev) => [notification, ...prev]);
-    };
-
-    socket.on("notification-received", handleNotification);
-    return () => socket.off("notification-received", handleNotification);
-  }, []);
-
-  const fetchNotifications = async (pageNo = 1, append = false) => {
+  // Helper functions hoisted so effects can call them safely
+  async function fetchNotifications(pageNo = 1, append = false) {
     try {
       if (pageNo === 1) setLoading(true);
       let url = `/notification/feed?limit=30`;
@@ -59,26 +42,62 @@ export const NotificationsPage = () => {
         setNotifications((prev) => (append ? [...prev, ...fetched] : fetched));
         setHasMore(res.data.hasMore !== false && fetched.length === 30);
       }
-    } catch {
+    } catch (e) {
       toast.error("Failed to load notifications.");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const handleLoadMore = () => {
-    const next = page + 1;
-    setPage(next);
-    fetchNotifications(next, true);
-  };
-
-  const fetchFollowRequests = async () => {
+  async function fetchFollowRequests() {
     try {
       const res = await api.get("/user/follow-requests");
       if (res.data.success) {
         setRequests(res.data.requests || []);
       }
-    } catch {}
+    } catch (e) {
+      console.warn("NotificationsPage: fetchFollowRequests failed", e);
+    }
+  }
+
+  async function markAsRead() {
+    try {
+      await api.post("/notification/read");
+    } catch (e) {
+      console.warn("NotificationsPage: markAsRead failed", e);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      await fetchNotifications(1);
+      if (!active) return;
+      await fetchFollowRequests();
+      if (!active) return;
+      await markAsRead();
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleNotification = ({ notification }) => {
+      setNotifications((prev) => [notification, ...prev]);
+    };
+
+    socket.on("notification-received", handleNotification);
+    return () => socket.off("notification-received", handleNotification);
+  }, []);
+
+  const handleLoadMore = () => {
+    const next = page + 1;
+    setPage(next);
+    fetchNotifications(next, true);
   };
 
   const handleAction = async (senderId, action) => {
@@ -91,12 +110,6 @@ export const NotificationsPage = () => {
     } catch {
       toast.error(`Failed to ${action} request.`);
     }
-  };
-
-  const markAsRead = async () => {
-    try {
-      await api.post("/notification/read");
-    } catch {}
   };
 
   const handleSaveSettings = async (newSettings) => {

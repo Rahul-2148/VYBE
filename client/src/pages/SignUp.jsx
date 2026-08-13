@@ -11,7 +11,7 @@ import { setUserData } from "../redux/features/userSlice";
 import { GoogleLogin } from "@react-oauth/google";
 import api from "../lib/axios";
 import { Sparkles, ShieldCheck, Check, Info, ArrowLeft } from "lucide-react";
-import { useTheme } from "../lib/theme.jsx";
+import { useTheme } from "../lib/themeContext";
 import { addLinkedAccount, setActiveAccountId } from "../lib/accountManager";
 import VybeInput from "../components/VybeInput";
 

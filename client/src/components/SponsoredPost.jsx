@@ -9,7 +9,9 @@ export const SponsoredPost = ({ ad }) => {
   const handleCtaClick = async () => {
     try {
       await api.post(`/monetization/ad/click/${ad._id}`, { type: "click" });
-    } catch {}
+    } catch (e) {
+      console.warn("SponsoredPost: handleCtaClick failed", e);
+    }
     setHasClicked(true);
     window.open(ad.targetUrl, "_blank");
   };

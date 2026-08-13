@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Radio, Eye, Heart, Send, ArrowLeft, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -17,8 +17,28 @@ export const LiveRoom = () => {
   const videoRef = useRef(null);
   const pcRef = useRef(null);
 
+  const fetchLiveDetails = async () => {
+    try {
+      setLoading(true);
+      const res = await api.get("/live/active");
+      if (res.data.success) {
+        const active = res.data.lives?.find((l) => l._id === streamId);
+        setLiveStream(active || null);
+      }
+    } catch (err) {
+      toast.error("Failed to load live stream.");
+      console.warn('fetchLiveDetails error', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetchLiveDetails();
+    let mounted = true;
+    (async () => {
+      if (!mounted) return;
+      await fetchLiveDetails();
+    })();
 
     const socket = getSocket();
     if (!socket) return;
@@ -95,23 +115,9 @@ export const LiveRoom = () => {
         pcRef.current.close();
         pcRef.current = null;
       }
+      mounted = false;
     };
   }, [streamId]);
-
-  const fetchLiveDetails = async () => {
-    try {
-      setLoading(true);
-      const res = await api.get("/live/active");
-      if (res.data.success) {
-        const active = res.data.lives?.find((l) => l._id === streamId);
-        setLiveStream(active || null);
-      }
-    } catch {
-      toast.error("Failed to load live stream.");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSendComment = (e) => {
     e.preventDefault();

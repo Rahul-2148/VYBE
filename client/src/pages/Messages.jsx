@@ -119,10 +119,6 @@ export const Messages = () => {
   const [contextMenu, setContextMenu] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
 
-  useEffect(() => {
-    fetchConversations();
-  }, []);
-
   const fetchConversations = async () => {
     try {
       setLoading(true);
@@ -131,11 +127,23 @@ export const Messages = () => {
         dispatch(setConversations(res.data.conversations));
       }
     } catch (err) {
+      console.warn(err);
       toast.error("Failed to load conversations.");
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      await fetchConversations();
+      if (!active) return;
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Sync active conversation from URL parameter
   useEffect(() => {
@@ -302,6 +310,7 @@ export const Messages = () => {
         }
       }
     } catch (err) {
+      console.warn("Conversation action failed:", err);
       toast.error("Action failed");
     }
   }, [dispatch]);

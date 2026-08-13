@@ -80,12 +80,6 @@ const MonetizationDashboard = () => {
       setSimulating(false);
     }
   };
-
-  useEffect(() => {
-    fetchMonetizationData();
-    fetchPremiumPlans();
-  }, []);
-
   const fetchMonetizationData = async () => {
     try {
       setLoading(true);
@@ -111,6 +105,18 @@ const MonetizationDashboard = () => {
       toast.error("Failed to load premium plans.");
     }
   };
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      await fetchMonetizationData();
+      if (!active) return;
+      await fetchPremiumPlans();
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleBuyPlan = async (plan) => {
     try {
@@ -145,6 +151,7 @@ const MonetizationDashboard = () => {
               await fetchMonetizationData();
             }
           } catch (err) {
+            console.warn("Simulated payment verification failed:", err);
             toast.error("Simulated payment verification failed.");
           } finally {
             setBuyingPlanId(null);

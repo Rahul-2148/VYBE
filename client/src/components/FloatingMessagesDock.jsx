@@ -93,7 +93,9 @@ const FloatingMessagesDock = () => {
         }, 0);
         setUnreadCount(totalUnread);
       }
-    } catch {} finally {
+    } catch (e) {
+      console.warn("FloatingMessagesDock: fetchConversations failed", e);
+    } finally {
       setLoading(false);
     }
   };
@@ -106,7 +108,9 @@ const FloatingMessagesDock = () => {
         setMessages(res.data.messages);
         await api.post(`/message/seen/${convoId}`);
       }
-    } catch {} finally {
+    } catch (e) {
+      console.warn("FloatingMessagesDock: fetchMessages failed", e);
+    } finally {
       setLoadingMessages(false);
     }
   };
@@ -129,7 +133,8 @@ const FloatingMessagesDock = () => {
         setMessages((prev) => [...prev, res.data.message]);
         fetchConversations();
       }
-    } catch {
+    } catch (e) {
+      console.warn("FloatingMessagesDock: handleSendMessage failed", e);
       setMessageText(textToSend);
     } finally {
       setSending(false);

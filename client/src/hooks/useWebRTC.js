@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { getSocket } from "../lib/socket";
-import toast from "../lib/hotToastAdapter";
+import toast from "../lib/toast";
 import api from "../lib/axios";
 import { playJoinSound, playLeaveSound, playHandRaiseSound } from "../lib/sounds";
 
@@ -293,6 +293,8 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
       console.error("[WebRTC] No socket available");
       return;
     }
+    // assignment to ref is intentional; silence immutability rule for this lifecycle assignment
+    // eslint-disable-next-line react-hooks/immutability
     socketRef.current = socket;
     cleanedUpRef.current = false;
 
@@ -525,7 +527,8 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
   useEffect(() => {
     if (!isMediaReady) return;
     if (selectedAudioInput || selectedVideo) {
-      switchDevice(selectedAudioInput, selectedVideo);
+      // Defer switching device to avoid calling setState synchronously inside effect
+      setTimeout(() => switchDevice(selectedAudioInput, selectedVideo), 0);
     }
   }, [selectedAudioInput, selectedVideo, isMediaReady, switchDevice]);
 
@@ -551,36 +554,6 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
       }
     }
   }, [isVideoOff, room]);
-
-  const toggleScreenShare = useCallback(async () => {
-    try {
-      if (!isScreenSharing) {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        screenStreamRef.current = stream;
-        const screenTrack = stream.getVideoTracks()[0];
-
-        // Replace video track in all peer connections
-        Object.keys(peerConnections.current).forEach((socketId) => {
-          const pc = peerConnections.current[socketId];
-          const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
-          if (sender) {
-            sender.replaceTrack(screenTrack);
-          } else {
-            pc.addTrack(screenTrack, stream);
-          }
-        });
-
-        screenTrack.onended = () => stopScreenSharing();
-        setIsScreenSharing(true);
-        socketRef.current?.emit("call:action", { room, action: "screen", value: true });
-      } else {
-        stopScreenSharing();
-      }
-    } catch (err) {
-      console.error("[WebRTC] Screen share failed:", err);
-      toast.error("Failed to share screen");
-    }
-  }, [isScreenSharing, room]);
 
   const stopScreenSharing = useCallback(() => {
     if (screenStreamRef.current) {
@@ -615,6 +588,40 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
     setIsScreenSharing(false);
     socketRef.current?.emit("call:action", { room, action: "screen", value: false });
   }, [room]);
+
+  const toggleScreenShare = useCallback(async () => {
+    try {
+      if (!isScreenSharing) {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        screenStreamRef.current = stream;
+        const screenTrack = stream.getVideoTracks()[0];
+
+        // Replace video track in all peer connections
+        Object.keys(peerConnections.current).forEach((socketId) => {
+          const pc = peerConnections.current[socketId];
+          const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
+          if (sender) {
+            sender.replaceTrack(screenTrack);
+          } else {
+            pc.addTrack(screenTrack, stream);
+          }
+        });
+
+        screenTrack.onended = () => stopScreenSharing();
+        setIsScreenSharing(true);
+        socketRef.current?.emit("call:action", { room, action: "screen", value: true });
+      } else {
+        stopScreenSharing();
+      }
+    } catch (err) {
+      console.error("[WebRTC] Screen share failed:", err);
+      toast.error("Failed to share screen");
+    }
+  }, [isScreenSharing, room]);
+
+  
+
+ 
 
   // ========== Explicit leave for external callers ==========
   const leaveRoom = useCallback(() => {

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { MapPin, ArrowLeft, Heart, MessageCircle, Video, Image } from "lucide-react";
-import { motion } from "framer-motion";
+// framer-motion not used directly in this file
 import { toast } from "sonner";
 import api from "../lib/axios";
 
@@ -13,11 +13,6 @@ export const LocationPage = () => {
   const [loops, setLoops] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("posts"); // posts vs reels
-
-  useEffect(() => {
-    fetchLocationDetails();
-  }, [locationName]);
-
   const fetchLocationDetails = async () => {
     try {
       setLoading(true);
@@ -26,12 +21,24 @@ export const LocationPage = () => {
         setPosts(res.data.posts || []);
         setLoops(res.data.loops || []);
       }
-    } catch {
+    } catch (err) {
       toast.error("Failed to load location details.");
+      console.warn('fetchLocationDetails error', err);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!mounted) return;
+      await fetchLocationDetails();
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [locationName]);
 
   const displayItems = activeTab === "posts" ? posts : loops;
 

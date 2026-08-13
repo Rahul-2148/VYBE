@@ -232,7 +232,9 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
       } else {
         handleCopyLink();
       }
-    } catch {}
+    } catch (e) {
+      console.warn("ShareSheet: system share failed", e);
+    }
   };
 
   const handleAddToStory = () => {

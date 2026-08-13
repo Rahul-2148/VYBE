@@ -241,8 +241,15 @@ const Profile = () => {
   }, [dispatch, userName]);
 
   useEffect(() => {
+    let active = true;
     window.scrollTo(0, 0);
-    handleProfile();
+    (async () => {
+      if (!active) return;
+      await handleProfile();
+    })();
+    return () => {
+      active = false;
+    };
   }, [handleProfile]);
 
   const handleLogOut = async () => {
@@ -814,7 +821,9 @@ const FullScreenDPViewer = ({ imageUrl, userName, onClose }) => {
         setIsBlackout(true);
         try {
           navigator.clipboard.writeText("");
-        } catch {}
+          } catch (e) {
+            console.warn("Profile: navigator.clipboard.writeText failed", e);
+          }
         setScreenshotAlert(true);
         setTimeout(() => setScreenshotAlert(false), 3000);
       }

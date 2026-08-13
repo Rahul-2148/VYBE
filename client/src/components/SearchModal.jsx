@@ -27,7 +27,9 @@ export const SearchModal = ({ isOpen, onClose }) => {
       if (res.data.success) {
         setSearchHistory(res.data.searchHistory || []);
       }
-    } catch {}
+    } catch (e) {
+      console.warn("SearchModal: fetchSearchHistory failed", e);
+    }
   };
 
   const handleDeleteHistoryItem = async (itemId, e) => {
@@ -90,7 +92,9 @@ export const SearchModal = ({ isOpen, onClose }) => {
   const handleSelectUser = async (user) => {
     try {
       await api.post("/search/history", { targetUserId: user._id });
-    } catch {}
+    } catch (e) {
+      console.warn("SearchModal: handleSelectUser failed to record history", e);
+    }
     onClose();
     navigate(`/profile/${user.userName}`);
   };
@@ -98,7 +102,9 @@ export const SearchModal = ({ isOpen, onClose }) => {
   const handleSelectTag = async (tagName) => {
     try {
       await api.post("/search/history", { targetTag: tagName });
-    } catch {}
+    } catch (e) {
+      console.warn("SearchModal: handleSelectTag failed to record history", e);
+    }
     onClose();
     navigate(`/explore/tag/${tagName}`);
   };

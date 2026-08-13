@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { MdOutlineKeyboardBackspace } from "react-icons/md";
 import { useNavigate } from "react-router-dom";
 import { Calendar, RefreshCw, Sparkles, Trash2, Eye } from "lucide-react";
@@ -11,11 +11,7 @@ export const StoryArchivePage = () => {
   const [archivedStories, setArchivedStories] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchArchivedStories();
-  }, []);
-
-  const fetchArchivedStories = async () => {
+  const fetchArchivedStories = useCallback(async () => {
     try {
       setLoading(true);
       const res = await api.get("/story/archive");
@@ -27,7 +23,18 @@ export const StoryArchivePage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!mounted) return;
+      await fetchArchivedStories();
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [fetchArchivedStories]);
 
   const handleRestore = async (storyId) => {
     try {

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Maximize2, Minimize2, MicOff, Users, MessageSquare, Shield, Sparkles, X } from "lucide-react";
 import CallControls from "./CallControls";
 import { getSocket } from "../lib/socket";
-import toast from "../lib/hotToastAdapter";
+import toast from "../lib/toast";
 
 export const CallScreen = ({
   localStream,

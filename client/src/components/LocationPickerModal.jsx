@@ -93,7 +93,9 @@ export const LocationPickerModal = ({ isOpen, onClose, onSendLocation }) => {
         const shortName = data.address.road || data.address.suburb || data.address.city || data.address.town || data.display_name.split(",")[0];
         setLocationName(shortName);
       }
-    } catch {}
+    } catch (e) {
+      console.warn("LocationPickerModal: reverseGeocode failed", e);
+    }
   };
 
   const handleShare = () => {

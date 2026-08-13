@@ -22,7 +22,9 @@ export const NotesBar = () => {
       if (res.data?.notes) {
         setNotes(res.data.notes);
       }
-    } catch {}
+    } catch (e) {
+      console.warn("NotesBar: fetchNotes failed", e);
+    }
   };
 
   useEffect(() => {
@@ -68,7 +70,8 @@ export const NotesBar = () => {
       toast.success("Note deleted.");
       setShowNoteModal(false);
       fetchNotes();
-    } catch {
+    } catch (e) {
+      console.warn("NotesBar: handleDeleteMyNote failed", e);
       toast.error("Failed to delete note.");
     }
   };

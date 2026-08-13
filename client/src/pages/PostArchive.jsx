@@ -10,22 +10,26 @@ export const PostArchive = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchArchivedPosts();
-  }, []);
-
-  const fetchArchivedPosts = async () => {
-    try {
-      setLoading(true);
-      const res = await api.get("/post/archived-posts");
-      if (res.data.success) {
-        setPosts(res.data.posts || []);
+    let mounted = true;
+    (async () => {
+      try {
+        setLoading(true);
+        const res = await api.get("/post/archived-posts");
+        if (!mounted) return;
+        if (res.data.success) {
+          setPosts(res.data.posts || []);
+        }
+      } catch {
+        if (mounted) toast.error("Failed to load archived posts.");
+      } finally {
+        if (mounted) setLoading(false);
       }
-    } catch {
-      toast.error("Failed to load archived posts.");
-    } finally {
-      setLoading(false);
-    }
-  };
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleUnarchive = async (postId) => {
     try {
