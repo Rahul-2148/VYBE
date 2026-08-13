@@ -1,16 +1,31 @@
-import axios from "axios";
-import { SmilePlus } from "lucide-react";
+import { SmilePlus, MapPin, ExternalLink, Heart, CornerUpLeft, CornerUpRight, Pin, EllipsisVertical, Clock } from "lucide-react";
 import moment from "moment";
 import { useEffect, useRef, useState } from "react";
 import { useDispatch } from "react-redux";
-import { SERVER_URL } from "../App";
+import api from "../lib/axios";
 import { updateMessage } from "../redux/features/messageSlice";
+import SharedContentCard from "./SharedContentCard";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
+import MediaLightboxModal from "./MediaLightboxModal";
 
 const EMOJIS = ["❤️", "😂", "👍", "🔥", "😢", "🙏", "👏", "💯", "✨", "🎉"];
 
-const ReceiverMessage = ({ message, setReplyTo }) => {
+const ReceiverMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onForwardMessage }) => {
   const dispatch = useDispatch();
   const [showReactions, setShowReactions] = useState(false);
+  const [showHeart, setShowHeart] = useState(false);
+  const [lightboxData, setLightboxData] = useState({ open: false, url: null, type: "image" });
+
+  const handleDoubleClick = async () => {
+    setShowHeart(true);
+    setTimeout(() => setShowHeart(false), 1000);
+    try {
+      const res = await api.post(`/message/react/${message._id}`, { emoji: "❤️" });
+      dispatch(updateMessage(res.data.message));
+    } catch {}
+  };
 
   // Refs
   const reactionsRef = useRef(null);
@@ -22,6 +37,10 @@ const ReceiverMessage = ({ message, setReplyTo }) => {
     ? message.content.media
     : message.content?.media
     ? [message.content.media]
+    : message.content?.sharedData?.mediaUrl
+    ? [{ url: message.content.sharedData.mediaUrl, type: message.type === "sticker" ? "sticker" : "image" }]
+    : message.sharedData?.mediaUrl
+    ? [{ url: message.sharedData.mediaUrl, type: message.type === "sticker" ? "sticker" : "image" }]
     : [];
 
   // Click outside handler
@@ -74,18 +93,16 @@ const ReceiverMessage = ({ message, setReplyTo }) => {
   }, [showReactions]);
 
   const handleReact = async (emoji) => {
-    const res = await axios.post(
-      `${SERVER_URL}/api/v1/message/react/${message._id}`,
-      { emoji },
-      { withCredentials: true }
-    );
-    dispatch(updateMessage(res.data.message));
-    setShowReactions(false);
+    try {
+      const res = await api.post(`/message/react/${message._id}`, { emoji });
+      dispatch(updateMessage(res.data.message));
+      setShowReactions(false);
+    } catch {}
   };
 
   if (message.deletedForEveryone) {
     return (
-      <div className="mr-auto text-xs text-gray-400 my-2">
+      <div className="mr-auto text-xs text-text-secondary my-2">
         This message was deleted
       </div>
     );
@@ -117,10 +134,10 @@ const ReceiverMessage = ({ message, setReplyTo }) => {
           }
         }}
       >
-        <span className="text-xs font-semibold text-gray-200">
+        <span className="text-xs font-semibold text-text-primary">
           {reply?.sender?.userName || "User"}:
         </span>{" "}
-        <span className="text-sm text-gray-100 truncate">
+        <span className="text-sm text-text-primary truncate">
           {reply.content?.text || "Media"}
         </span>
       </div>
@@ -133,7 +150,7 @@ const ReceiverMessage = ({ message, setReplyTo }) => {
       {showReactions && (
         <div
           ref={emojiPickerRef}
-          className="fixed z-50 bg-gray-900/95 backdrop-blur-md rounded-full shadow-2xl border border-gray-700/50 transition-all duration-200"
+          className="fixed z-50 bg-card/95 backdrop-blur-md rounded-full shadow-2xl border border-border-subtle/50 transition-all duration-200"
           style={{
             animation: "fadeInScale 0.2s ease-out",
           }}
@@ -162,34 +179,67 @@ const ReceiverMessage = ({ message, setReplyTo }) => {
 
           {/* Pointer triangle */}
           <div className="absolute -bottom-1.5 left-1/2 transform -translate-x-1/2">
-            <div className="w-3 h-3 bg-gray-900/95 transform rotate-45 border-b border-r border-gray-700/50"></div>
+            <div className="w-3 h-3 bg-card/95 transform rotate-45 border-b border-r border-border-subtle/50"></div>
           </div>
         </div>
       )}
 
       <div
         ref={messageRef}
-        className={`relative mr-auto max-w-[65%] p-3 rounded-2xl flex flex-col gap-2 ${
-          highlight ? "bg-yellow-500/20" : "bg-[#1a1f1f]"
+        onDoubleClick={handleDoubleClick}
+        className={`relative mr-auto max-w-[75%] sm:max-w-[65%] px-4 py-2.5 rounded-3xl flex flex-col gap-1.5 cursor-pointer select-none transition-all duration-200 ${
+          highlight
+            ? "bg-yellow-500/20 rounded-3xl ring-2 ring-yellow-400"
+            : "bg-surface border border-border/90 text-text shadow-sm hover:border-border-strong/80"
         }`}
       >
+        {/* Forwarded indicator */}
+        {message.isForwarded && (
+          <div className="flex items-center gap-1 text-[10px] text-text-muted font-medium">
+            <CornerUpRight className="w-3 h-3" />
+            <span>Forwarded</span>
+          </div>
+        )}
+        {/* Double Tap Floating Heart Overlay */}
+        {showHeart && (
+          <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
+            <Heart className="w-12 h-12 text-rose-500 fill-rose-500 animate-ping drop-shadow-lg" />
+          </div>
+        )}
+
         {/* REPLY PREVIEW */}
         {message.replyTo && renderReplyChain(message.replyTo)}
 
         {/* MEDIA */}
         {mediaList.map((m, i) => {
+          if (m.type === "sticker" || message.type === "sticker") {
+            return (
+              <img
+                key={i}
+                src={m.url}
+                alt="Sticker"
+                className="w-36 h-36 object-contain drop-shadow-md select-none hover:scale-105 transition-transform"
+              />
+            );
+          }
           if (m.type === "image" || m.type === "gif") {
             return (
               <img
                 key={i}
                 src={m.url}
-                className="rounded-xl max-h-[250px] object-cover"
+                onClick={(e) => { e.stopPropagation(); setLightboxData({ open: true, url: m.url, type: "image" }); }}
+                className="rounded-xl max-h-[250px] object-cover cursor-pointer hover:opacity-95 transition"
               />
             );
           }
           if (m.type === "video") {
             return (
-              <video key={i} controls className="rounded-xl max-h-[300px]">
+              <video
+                key={i}
+                controls
+                onClick={(e) => { e.stopPropagation(); setLightboxData({ open: true, url: m.url, type: "video" }); }}
+                className="rounded-xl max-h-[300px] cursor-pointer"
+              >
                 <source src={m.url} />
               </video>
             );
@@ -200,7 +250,7 @@ const ReceiverMessage = ({ message, setReplyTo }) => {
                 key={i}
                 href={m.url}
                 target="_blank"
-                className="text-sm underline text-gray-300"
+                className="text-sm underline text-text-primary"
               >
                 📄 {m.name || "Document"}
               </a>
@@ -210,8 +260,8 @@ const ReceiverMessage = ({ message, setReplyTo }) => {
         })}
 
         {/* TEXT */}
-        {message.type === "text" && (
-          <p className="text-white break-words">
+        {(message.type === "text" || message.content?.text) && message.content?.text?.trim() && (
+          <p className="text-text break-words">
             {message.content?.text}
             {message.edited && (
               <span className="text-xs ml-1 opacity-60">(edited)</span>
@@ -225,7 +275,7 @@ const ReceiverMessage = ({ message, setReplyTo }) => {
             {message.reactions.map((r, i) => (
               <span
                 key={i}
-                className="text-sm bg-black/30 px-2 py-0.5 rounded-full"
+                className="text-sm bg-bg/30 px-2 py-0.5 rounded-full"
               >
                 {r.emoji}
               </span>
@@ -234,9 +284,14 @@ const ReceiverMessage = ({ message, setReplyTo }) => {
         )}
 
         {/* TIME */}
-        <span className="text-[10px] text-gray-400 self-end">
-          {moment(message.createdAt).format("hh:mm A")}
-        </span>
+        <div className="flex items-center gap-1 self-end mt-0.5">
+          {message.edited && <span className="text-[9px] text-text-muted">edited</span>}
+          <span className="text-[10px] text-text-muted">
+            {moment(message.createdAt).format("h:mm A")}
+          </span>
+          {message.isPinned && <Pin size={10} className="text-amber-400" />}
+          {message.disappear?.enabled && <Clock size={10} className="text-amber-400/70" />}
+        </div>
 
         {/* REACTION BUTTON */}
         <button
@@ -245,24 +300,46 @@ const ReceiverMessage = ({ message, setReplyTo }) => {
             e.stopPropagation();
             setShowReactions(!showReactions);
           }}
-          className={`absolute -right-6 bottom-2 cursor-pointer bg-gray-800/80 backdrop-blur-sm p-1.5 rounded-full shadow-lg transition-all duration-300 ${
+          className={`absolute -right-6 bottom-2 cursor-pointer bg-card-hover/80 backdrop-blur-sm p-1.5 rounded-full shadow-lg transition-all duration-300 ${
             showReactions
-              ? "text-white scale-110 ring-2 ring-blue-400"
-              : "text-white/70 hover:text-white hover:scale-110"
+              ? "text-text scale-110 ring-2 ring-blue-400"
+              : "text-white/70 hover:text-text hover:scale-110"
           }`}
           style={{ zIndex: 10 }}
         >
           <SmilePlus size={16} />
         </button>
 
-        {/* REPLY BUTTON */}
-        <button
-          onClick={() => setReplyTo(message)}
-          className="absolute top-1 right-2 text-xs text-blue-500 hover:text-blue-400 transition-colors duration-200"
-        >
-          Reply
-        </button>
+        {/* REPLY & FORWARD BUTTON */}
+        <div className="absolute top-1 right-2 flex items-center gap-1">
+          <button
+            onClick={() => setReplyTo(message)}
+            className="p-1 text-text-muted hover:text-text rounded-full hover:bg-surface-active/50 transition cursor-pointer opacity-0 group-hover:opacity-100"
+            title="Reply"
+          >
+            <CornerUpLeft size={14} />
+          </button>
+          {onForwardMessage && (
+            <button
+              onClick={() => onForwardMessage(message)}
+              className="p-1 text-text-muted hover:text-text rounded-full hover:bg-surface-active/50 transition cursor-pointer opacity-0 group-hover:opacity-100"
+              title="Forward"
+            >
+              <CornerUpRight size={14} />
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Full-Screen Media Lightbox Modal */}
+      {lightboxData.open && (
+        <MediaLightboxModal
+          isOpen={lightboxData.open}
+          onClose={() => setLightboxData({ open: false, url: null, type: "image" })}
+          mediaUrl={lightboxData.url}
+          mediaType={lightboxData.type}
+        />
+      )}
     </>
   );
 };

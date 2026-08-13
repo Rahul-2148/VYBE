@@ -7,7 +7,7 @@ const PinnedChatItem = ({ chat, unreadCount }) => {
       <ChatListItem chat={chat} unreadCount={unreadCount} />
       <Pin
         size={14}
-        className="absolute top-3 right-4 text-gray-400"
+        className="absolute top-3 right-4 text-text-secondary"
       />
     </div>
   );

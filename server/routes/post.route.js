@@ -9,32 +9,47 @@ import {
   likePost,
   savePost,
   uploadPost,
+  uploadCarouselPost,
+  toggleArchivePost,
+  getArchivedPosts,
+  createCollection,
+  getUserCollections,
+  addPostToCollection,
+  saveDraft,
+  getUserDrafts,
+  getRankedFeed,
 } from "../controllers/post.controller.js";
 import isAuthenticated from "../middlewares/isAuthenticated.js";
 import { upload } from "../middlewares/multer.js";
 
 const postRouter = express.Router();
 
+// Upload & Feed
 postRouter.post("/upload", isAuthenticated, upload.single("media"), uploadPost);
-postRouter.get(
-  "/get-all-Of-logged-in-user",
-  isAuthenticated,
-  getAllPostsOfLoggedInUser
-); // get all posts of current user
+postRouter.post("/upload-carousel", isAuthenticated, upload.array("media", 10), uploadCarouselPost);
+postRouter.get("/get-all-posts", isAuthenticated, getAllPosts);
+postRouter.get("/ranked-feed", isAuthenticated, getRankedFeed);
+postRouter.get("/get-all-Of-logged-in-user", isAuthenticated, getAllPostsOfLoggedInUser);
+
+// Archiving & Private Grid
+postRouter.post("/archive/:postId", isAuthenticated, toggleArchivePost);
+postRouter.get("/archived-posts", isAuthenticated, getArchivedPosts);
+
+// Custom Collections & Bookmarks
+postRouter.post("/save-post/:postId", isAuthenticated, savePost);
+postRouter.post("/collections", isAuthenticated, createCollection);
+postRouter.get("/collections", isAuthenticated, getUserCollections);
+postRouter.post("/collections/add-post", isAuthenticated, addPostToCollection);
+
+// Drafts
+postRouter.post("/drafts", isAuthenticated, saveDraft);
+postRouter.get("/drafts", isAuthenticated, getUserDrafts);
+
+// Likes, Comments & Delete
 postRouter.post("/like/:postId", isAuthenticated, likePost);
 postRouter.post("/comment/:postId", isAuthenticated, commentPost);
-postRouter.post("/save-post/:postId", isAuthenticated, savePost);
-postRouter.get("/get-all-posts", isAuthenticated, getAllPosts); // get all posts of all users
 postRouter.delete("/delete-post/:postId", isAuthenticated, deletePost);
-postRouter.delete(
-  "/delete-comment/:postId/:commentId",
-  isAuthenticated,
-  deleteComment
-);
-postRouter.patch(
-  "/edit-comment/:postId/:commentId",
-  isAuthenticated,
-  editComment
-);
+postRouter.delete("/delete-comment/:postId/:commentId", isAuthenticated, deleteComment);
+postRouter.patch("/edit-comment/:postId/:commentId", isAuthenticated, editComment);
 
 export default postRouter;

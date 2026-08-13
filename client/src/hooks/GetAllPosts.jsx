@@ -1,30 +1,29 @@
-import axios from "axios";
 import { useEffect } from "react";
-import { SERVER_URL } from "../App";
 import { useDispatch, useSelector } from "react-redux";
 import { setPostData } from "../redux/features/postSlice";
+import api from "../lib/axios";
 
 const GetAllPosts = () => {
   const dispatch = useDispatch();
   const { userData } = useSelector((state) => state.user);
 
   useEffect(() => {
+    if (!userData?._id) return;
+
     const fetchAllPosts = async () => {
       try {
-        const result = await axios.get(
-          `${SERVER_URL}/api/v1/post/get-all-posts`,
-          {
-            withCredentials: true,
-          }
-        );
-        // console.log(result);
-        dispatch(setPostData(result?.data?.posts));
+        const result = await api.get("/post/get-all-posts");
+        if (result.data?.posts) {
+          dispatch(setPostData(result.data.posts));
+        }
       } catch (error) {
-        console.log(error);
+        console.error("GetAllPosts error:", error);
       }
     };
     fetchAllPosts();
-  }, [dispatch, userData]);
+  }, [dispatch, userData?._id]);
+
+  return null;
 };
 
 export default GetAllPosts;

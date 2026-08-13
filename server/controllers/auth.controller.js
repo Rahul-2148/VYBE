@@ -1,336 +1,1073 @@
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import QRCode from "qrcode";
 import uploadOnCloudinary from "../config/cloudinary.js";
-import generateToken from "../config/generateToken.js";
+import { generateAccessToken, generateRefreshToken } from "../config/generateToken.js";
 import {
+  getAccessTokenCookieOptions,
+  getRefreshTokenCookieOptions,
   getAuthCookieOptions,
   getClearCookieOptions,
 } from "../config/cookieOptions.js";
 import { User } from "../models/user.model.js";
+import { Session } from "../models/session.model.js";
+import { SecurityLog } from "../models/securityLog.model.js";
+import { parseDeviceDetails } from "../utils/deviceParser.js";
+import {
+  generateTwoFactorSecret,
+  generateQrCodeDataUrl,
+  verifyTwoFactorToken,
+  generateRecoveryCodes,
+  verifyAndConsumeRecoveryCode,
+} from "../utils/twoFactor.js";
 import { forgotPasswordTemplate } from "../utils/emailTemplates/ForgotPasswordTemplate.js";
 import { passwordResetSuccessTemplate } from "../utils/emailTemplates/PasswordResetSuccessTemplate.js";
 import sendEmail from "../utils/sendEmail.js";
+import { signUpOtpTemplate } from "../utils/emailTemplates/SignUpOtpTemplate.js";
 
-// signup controller
+// Helper to hash token string
+const hashToken = (token) => crypto.createHash("sha256").update(token).digest("hex");
+
+// Helper to log security audit event
+const createSecurityAuditLog = async (userId, eventType, req, metadata = {}) => {
+  try {
+    const { deviceInfo, ipAddress, location, userAgent } = parseDeviceDetails(req);
+    await SecurityLog.create({
+      user: userId,
+      eventType,
+      deviceInfo,
+      ipAddress,
+      location,
+      userAgent,
+      metadata,
+    });
+  } catch (error) {
+    console.error("Security audit logging error:", error.message);
+  }
+};
+
+const getOrCreateDeviceGroupId = (req, res) => {
+  let deviceGroupId = req.cookies?.deviceGroupId;
+  if (!deviceGroupId) {
+    deviceGroupId = crypto.randomBytes(16).toString("hex");
+    res.cookie("deviceGroupId", deviceGroupId, {
+      httpOnly: true,
+      secure: process.env.COOKIE_SECURE === "true" || false,
+      sameSite: process.env.COOKIE_SAME_SITE || "lax",
+      maxAge: 365 * 24 * 60 * 60 * 1000,
+      path: "/",
+    });
+  }
+  return deviceGroupId;
+};
+
+// 1. SignUp Controller (Modified to require Email OTP Verification first)
 export const signUp = async (req, res) => {
   try {
     const { name, email, password, userName } = req.body || {};
 
     if (!name || !email || !password || !userName) {
-      return res
-        .status(400)
-        .json({ message: "name, email, password, userName are required" });
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Name, email, password, and username are required",
+      });
     }
 
-    const findByEmail = await User.findOne({ email });
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanUserName = userName.trim().toLowerCase();
+
+    // Check email uniqueness and delete unverified expired accounts to release lock
+    const findByEmail = await User.findOne({ email: cleanEmail });
     if (findByEmail) {
-      return res.status(400).json({ message: "Email already exists!" });
+      if (!findByEmail.isEmailVerified && findByEmail.otpExpiresAt < Date.now()) {
+        await User.deleteOne({ _id: findByEmail._id });
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: true,
+          message: "An account with this email already exists!",
+        });
+      }
     }
-    const findByUserName = await User.findOne({ userName });
+
+    // Check username uniqueness and delete unverified expired accounts to release lock
+    const findByUserName = await User.findOne({
+      userName: { $regex: new RegExp("^" + cleanUserName + "$", "i") },
+    });
     if (findByUserName) {
-      return res.status(400).json({ message: "Username already exists!" });
+      if (!findByUserName.isEmailVerified && findByUserName.otpExpiresAt < Date.now()) {
+        await User.deleteOne({ _id: findByUserName._id });
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: true,
+          message: "Username is already taken!",
+        });
+      }
     }
 
     if (password.length < 6) {
-      return res
-        .status(400)
-        .json({ message: "Password must be at least 6 characters long!" });
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Password must be at least 6 characters long!",
+      });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+    const otpExpiresAt = Date.now() + 15 * 60 * 1000; // 15 mins
 
     const user = await User.create({
-      name,
-      email,
+      name: name.trim(),
+      email: cleanEmail,
       password: hashedPassword,
-      userName,
+      userName: cleanUserName,
+      isEmailVerified: false,
+      otp,
+      otpExpiresAt,
     });
 
-    // GENERATE AND STORE QR CODE
-    const profileUrl = `${process.env.CLIENT_URL}/profile/${user.userName}`;
+    // Send verification OTP email
+    await sendEmail({
+      email: user.email,
+      subject: "Verify Your VYBE Registration",
+      html: signUpOtpTemplate(user.name, otp),
+      message: `Hi ${user.name}, welcome to VYBE! Your verification code is ${otp}.`,
+    });
 
-    // Generate QR as Data URL
-    const qrDataUrl = await QRCode.toDataURL(profileUrl);
-
-    // Upload QR to Cloudinary
-    const qrUpload = await uploadOnCloudinary(qrDataUrl, "VYBE/user-qr-codes");
-
-    // Save QR info in DB as object
-    user.qrCode = {
-      url: qrUpload.url,
-      public_id: qrUpload.public_id,
-    };
-
-    await user.save();
-
-    const token = await generateToken(user._id);
-    res.cookie("token", token, getAuthCookieOptions());
-
-    return res.status(201).json({
-      message: "Account created successfully! Welcome to VYBE",
-      token,
-      user,
+    return res.status(200).json({
+      success: true,
+      error: false,
+      message: "Verification code sent to your email address.",
+      requiresVerification: true,
+      email: cleanEmail,
     });
   } catch (error) {
-    return res.status(500).json({ message: `signup error: ${error.message}` });
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `SignUp Error: ${error.message}`,
+    });
   }
 };
 
-// signin controller
-export const signIn = async (req, res) => {
+// 1.5. Verify SignUp OTP Controller
+export const verifySignUpOtp = async (req, res) => {
   try {
-    const { userName, password } = req.body || {};
-
-    if (!userName || !password) {
-      return res
-        .status(400)
-        .json({ message: "userName and password are required" });
+    const { email, otp } = req.body || {};
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Email and verification code are required",
+      });
     }
 
-    const user = await User.findOne({ userName });
+    const cleanEmail = email.trim().toLowerCase();
+    const user = await User.findOne({ email: cleanEmail, isEmailVerified: false });
     if (!user) {
-      return res
-        .status(400)
-        .json({ message: "User not found with this userName!" });
+      return res.status(404).json({
+        success: false,
+        error: true,
+        message: "Registration session not found or already verified.",
+      });
+    }
+
+    if (String(user.otp) !== String(otp)) {
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Invalid verification code",
+      });
+    }
+
+    if (user.otpExpiresAt < Date.now()) {
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Verification code has expired. Please sign up again.",
+      });
+    }
+
+    // Mark verified
+    user.isEmailVerified = true;
+    user.otp = null;
+    user.otpExpiresAt = null;
+    await user.save();
+
+    // GENERATE AND STORE PROFILE QR CODE
+    const profileUrl = `${process.env.CLIENT_URL || "http://localhost:5173"}/profile/${user.userName}`;
+    try {
+      const qrDataUrl = await QRCode.toDataURL(profileUrl);
+      const qrUpload = await uploadOnCloudinary(qrDataUrl, "VYBE/user-qr-codes");
+      user.qrCode = {
+        url: qrUpload.url,
+        public_id: qrUpload.public_id,
+      };
+      await user.save();
+    } catch (qrErr) {
+      console.warn("QR code generation skipped/fallback:", qrErr.message);
+    }
+
+    // CREATE USER SESSION
+    const { deviceInfo, browser, os, ipAddress, location, userAgent } = parseDeviceDetails(req);
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+
+    const session = await Session.create({
+      user: user._id,
+      refreshTokenHash: "pending",
+      deviceGroupId: getOrCreateDeviceGroupId(req, res),
+      deviceInfo,
+      browser,
+      os,
+      ipAddress,
+      location,
+      userAgent,
+      expiresAt,
+    });
+
+    const accessToken = generateAccessToken(user._id, session._id);
+    const refreshToken = generateRefreshToken(user._id, session._id);
+
+    session.refreshTokenHash = hashToken(refreshToken);
+    await session.save();
+
+    res.cookie("accessToken", accessToken, getAccessTokenCookieOptions());
+    res.cookie("refreshToken", refreshToken, getRefreshTokenCookieOptions(true));
+    res.cookie("token", accessToken, getAuthCookieOptions()); // 30-day persistent cookie
+
+    await createSecurityAuditLog(user._id, "login_success", req, { method: "signup" });
+
+    const userResponse = user.toObject();
+    delete userResponse.password;
+    delete userResponse.twoFactorSecret;
+    delete userResponse.twoFactorRecoveryCodes;
+
+    return res.status(201).json({
+      success: true,
+      error: false,
+      message: "Account verified and created successfully! Welcome to VYBE",
+      token: accessToken,
+      user: userResponse,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `SignUp Verification Error: ${error.message}`,
+    });
+  }
+};
+
+// 2. SignIn Controller
+export const signIn = async (req, res) => {
+  try {
+    const { userName, password, rememberMe = true } = req.body || {};
+
+    if (!userName || !password) {
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Username and password are required",
+      });
+    }
+
+    const escapedUserName = userName.trim().replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
+    const user = await User.findOne({
+      $or: [
+        { userName: { $regex: new RegExp("^" + escapedUserName + "$", "i") } },
+        { email: userName.trim().toLowerCase() },
+      ],
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Invalid credentials. User not found.",
+      });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(400).json({ message: "Incorrect password" });
+      await createSecurityAuditLog(user._id, "login_failed", req, { reason: "incorrect_password" });
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Incorrect password. Please try again.",
+      });
     }
 
-    const token = await generateToken(user._id);
-    res.cookie("token", token, getAuthCookieOptions());
+    // 2FA CHECK
+    if (user.twoFactorEnabled) {
+      const pendingTwoFactorToken = crypto.randomBytes(32).toString("hex");
+      user.pendingTwoFactorToken = pendingTwoFactorToken;
+      user.pendingTwoFactorExpiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
+      await user.save();
+
+      await createSecurityAuditLog(user._id, "2fa_prompt", req);
+
+      return res.status(200).json({
+        success: true,
+        error: false,
+        requiresTwoFactor: true,
+        pendingToken: pendingTwoFactorToken,
+        message: "Two-Factor Authentication required.",
+      });
+    }
+
+    // CREATE SESSION
+    const { deviceInfo, browser, os, ipAddress, location, userAgent } = parseDeviceDetails(req);
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+    const session = await Session.create({
+      user: user._id,
+      refreshTokenHash: "pending",
+      deviceGroupId: getOrCreateDeviceGroupId(req, res),
+      deviceInfo,
+      browser,
+      os,
+      ipAddress,
+      location,
+      userAgent,
+      expiresAt,
+    });
+
+    const accessToken = generateAccessToken(user._id, session._id);
+    const refreshToken = generateRefreshToken(user._id, session._id);
+
+    session.refreshTokenHash = hashToken(refreshToken);
+    await session.save();
+
+    res.cookie("accessToken", accessToken, getAccessTokenCookieOptions());
+    res.cookie("refreshToken", refreshToken, getRefreshTokenCookieOptions(rememberMe));
+    res.cookie("token", accessToken, getAuthCookieOptions());
+
+    await createSecurityAuditLog(user._id, "login_success", req, { method: "password" });
+
+    const userResponse = user.toObject();
+    delete userResponse.password;
+    delete userResponse.twoFactorSecret;
+    delete userResponse.twoFactorRecoveryCodes;
+
+    return res.status(200).json({
+      success: true,
+      error: false,
+      message: `Welcome back, ${user.name}`,
+      token: accessToken,
+      user: userResponse,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `SignIn Error: ${error.message}`,
+    });
+  }
+};
+
+// 3. Verify 2FA Challenge Controller (Login Challenge)
+export const verifyTwoFactorChallenge = async (req, res) => {
+  try {
+    const { pendingToken, code, isRecoveryCode = false, rememberMe = true } = req.body || {};
+
+    if (!pendingToken || !code) {
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Pending token and verification code are required",
+      });
+    }
+
+    const user = await User.findOne({
+      pendingTwoFactorToken: pendingToken,
+      pendingTwoFactorExpiresAt: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Invalid or expired 2FA session token. Please sign in again.",
+      });
+    }
+
+    let isValid = false;
+
+    if (isRecoveryCode) {
+      const recoveryCheck = await verifyAndConsumeRecoveryCode(code, user.twoFactorRecoveryCodes);
+      if (recoveryCheck.valid) {
+        isValid = true;
+        user.twoFactorRecoveryCodes = recoveryCheck.updatedCodes;
+        await createSecurityAuditLog(user._id, "2fa_recovery_used", req);
+      }
+    } else {
+      isValid = verifyTwoFactorToken(code, user.twoFactorSecret);
+    }
+
+    if (!isValid) {
+      await createSecurityAuditLog(user._id, "login_failed", req, { reason: "invalid_2fa_code" });
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: isRecoveryCode ? "Invalid recovery code." : "Invalid 6-digit authenticator code.",
+      });
+    }
+
+    // CLEAR PENDING 2FA
+    user.pendingTwoFactorToken = undefined;
+    user.pendingTwoFactorExpiresAt = undefined;
+    await user.save();
+
+    // CREATE SESSION
+    const { deviceInfo, browser, os, ipAddress, location, userAgent } = parseDeviceDetails(req);
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+    const session = await Session.create({
+      user: user._id,
+      refreshTokenHash: "pending",
+      deviceGroupId: getOrCreateDeviceGroupId(req, res),
+      deviceInfo,
+      browser,
+      os,
+      ipAddress,
+      location,
+      userAgent,
+      expiresAt,
+    });
+
+    const accessToken = generateAccessToken(user._id, session._id);
+    const refreshToken = generateRefreshToken(user._id, session._id);
+
+    session.refreshTokenHash = hashToken(refreshToken);
+    await session.save();
+
+    res.cookie("accessToken", accessToken, getAccessTokenCookieOptions());
+    res.cookie("refreshToken", refreshToken, getRefreshTokenCookieOptions(rememberMe));
+    res.cookie("token", accessToken, getAuthCookieOptions());
+
+    await createSecurityAuditLog(user._id, "login_success", req, { method: "2fa" });
+
+    const userResponse = user.toObject();
+    delete userResponse.password;
+    delete userResponse.twoFactorSecret;
+    delete userResponse.twoFactorRecoveryCodes;
+
+    return res.status(200).json({
+      success: true,
+      error: false,
+      message: `2FA Verification Successful. Welcome back ${user.name}`,
+      token: accessToken,
+      user: userResponse,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `2FA Verification Error: ${error.message}`,
+    });
+  }
+};
+
+// 4. Refresh Token Rotation Engine
+export const refreshToken = async (req, res) => {
+  try {
+    const rawRefreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
+
+    if (!rawRefreshToken) {
+      return res.status(401).json({
+        success: false,
+        error: true,
+        message: "Refresh token missing. Please sign in.",
+      });
+    }
+
+    const refreshSecret = process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET || "vybe_super_secret_refresh_key_2026";
+    let decoded;
+
+    try {
+      decoded = jwt.verify(rawRefreshToken, refreshSecret);
+    } catch (err) {
+      return res.status(401).json({
+        success: false,
+        error: true,
+        message: "Refresh token expired or invalid.",
+      });
+    }
+
+    const session = await Session.findById(decoded.sessionId);
+
+    if (!session || session.isRevoked || session.user.toString() !== decoded.userId.toString()) {
+      res.clearCookie("accessToken", getClearCookieOptions());
+      res.clearCookie("refreshToken", getClearCookieOptions());
+      res.clearCookie("token", getClearCookieOptions());
+
+      return res.status(401).json({
+        success: false,
+        error: true,
+        code: "SESSION_EXPIRED",
+        message: "Session expired or invalid. Please sign in again.",
+      });
+    }
+
+    const incomingHash = hashToken(rawRefreshToken);
+
+    if (incomingHash !== session.refreshTokenHash) {
+      // Replay attack check
+      const isGraceWindowActive =
+        session.oldRefreshTokenHash &&
+        session.oldRefreshTokenHash === incomingHash &&
+        session.rotatedAt &&
+        (Date.now() - new Date(session.rotatedAt).getTime()) < 15000;
+
+      if (isGraceWindowActive) {
+        // Return active accessToken, reuse same refreshToken
+        const newAccessToken = generateAccessToken(session.user, session._id);
+        res.cookie("accessToken", newAccessToken, getAccessTokenCookieOptions());
+        res.cookie("token", newAccessToken, getAuthCookieOptions());
+
+        return res.status(200).json({
+          success: true,
+          token: newAccessToken,
+          message: "Session renewed successfully (grace window).",
+        });
+      } else {
+        // Reuse detected outside grace period, revoke entire session
+        session.isRevoked = true;
+        await session.save();
+
+        res.clearCookie("accessToken", getClearCookieOptions());
+        res.clearCookie("refreshToken", getClearCookieOptions());
+        res.clearCookie("token", getClearCookieOptions());
+
+        await createSecurityAuditLog(session.user, "refresh_token_reuse_breach", req, {
+          sessionId: session._id,
+        });
+
+        return res.status(401).json({
+          success: false,
+          error: true,
+          code: "SECURITY_BREACH",
+          message: "Security violation detected. All sessions revoked.",
+        });
+      }
+    }
+
+    // ISSUE NEW PAIR (ROTATE TOKEN SEAMLESSLY)
+    const newAccessToken = generateAccessToken(session.user, session._id);
+    const newRefreshToken = generateRefreshToken(session.user, session._id);
+
+    session.oldRefreshTokenHash = session.refreshTokenHash;
+    session.rotatedAt = new Date();
+    session.refreshTokenHash = hashToken(newRefreshToken);
+    session.lastActive = new Date();
+    session.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await session.save();
+
+    res.cookie("accessToken", newAccessToken, getAccessTokenCookieOptions(true));
+    res.cookie("refreshToken", newRefreshToken, getRefreshTokenCookieOptions(true));
+    res.cookie("token", newAccessToken, getAuthCookieOptions(true));
+
+    return res.status(200).json({
+      success: true,
+      token: newAccessToken,
+      message: "Session renewed successfully.",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `RefreshToken Error: ${error.message}`,
+    });
+  }
+};
+
+// 5. SignOut Controller
+export const signOut = async (req, res) => {
+  try {
+    if (req.sessionId) {
+      await Session.findByIdAndUpdate(req.sessionId, { isRevoked: true });
+    }
+
+    if (req.userId) {
+      await createSecurityAuditLog(req.userId, "session_revoked", req, { type: "signout" });
+    }
+
+    res.clearCookie("accessToken", getClearCookieOptions());
+    res.clearCookie("refreshToken", getClearCookieOptions());
+    res.clearCookie("token", getClearCookieOptions());
+
+    return res.status(200).json({
+      success: true,
+      error: false,
+      message: "User signed out successfully",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `SignOut Error: ${error.message}`,
+    });
+  }
+};
+
+// 6. Setup 2FA (Authenticated)
+export const setupTwoFactor = async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ success: false, error: true, message: "User not found" });
+
+    const { secret, otpauthUrl } = generateTwoFactorSecret(user.email);
+    const qrCodeUrl = await generateQrCodeDataUrl(otpauthUrl);
+
+    // Save temporary secret until verified
+    user.twoFactorSecret = secret;
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      error: false,
+      secret,
+      qrCodeUrl,
+      message: "Scan the QR code in your Authenticator App (Google Authenticator, Duo, etc.)",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `Setup 2FA Error: ${error.message}`,
+    });
+  }
+};
+
+// 7. Verify 2FA Setup & Enable (Authenticated)
+export const verifyTwoFactorSetup = async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) {
+      return res.status(400).json({ success: false, error: true, message: "6-digit code is required" });
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user || !user.twoFactorSecret) {
+      return res.status(400).json({ success: false, error: true, message: "No pending 2FA setup session found." });
+    }
+
+    const isValid = verifyTwoFactorToken(code, user.twoFactorSecret);
+    if (!isValid) {
+      return res.status(400).json({ success: false, error: true, message: "Invalid 6-digit code. Please try again." });
+    }
+
+    const { rawCodes, hashedCodes } = await generateRecoveryCodes();
+
+    user.twoFactorEnabled = true;
+    user.twoFactorRecoveryCodes = hashedCodes;
+    await user.save();
+
+    await createSecurityAuditLog(user._id, "2fa_enabled", req);
+
+    return res.status(200).json({
+      success: true,
+      error: false,
+      recoveryCodes: rawCodes,
+      message: "Two-Factor Authentication enabled successfully! Save these recovery codes in a secure place.",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `Verify 2FA Setup Error: ${error.message}`,
+    });
+  }
+};
+
+// 8. Disable 2FA (Authenticated)
+export const disableTwoFactor = async (req, res) => {
+  try {
+    const { password, code } = req.body;
+    const user = await User.findById(req.userId);
+
+    if (!user) return res.status(404).json({ success: false, error: true, message: "User not found" });
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ success: false, error: true, message: "Incorrect account password" });
+    }
+
+    const isValidCode = verifyTwoFactorToken(code, user.twoFactorSecret);
+    if (!isValidCode) {
+      return res.status(400).json({ success: false, error: true, message: "Invalid authenticator code" });
+    }
+
+    user.twoFactorEnabled = false;
+    user.twoFactorSecret = undefined;
+    user.twoFactorRecoveryCodes = [];
+    await user.save();
+
+    await createSecurityAuditLog(user._id, "2fa_disabled", req);
+
+    return res.status(200).json({
+      success: true,
+      error: false,
+      message: "Two-Factor Authentication disabled successfully.",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `Disable 2FA Error: ${error.message}`,
+    });
+  }
+};
+
+// 9. Request Magic Link Login
+export const requestMagicLink = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, error: true, message: "Email address is required" });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      // Return success to prevent email enumeration attacks
+      return res.status(200).json({
+        success: true,
+        message: "If an account exists for this email, a Magic Link has been sent.",
+      });
+    }
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    user.magicLinkToken = hashToken(rawToken);
+    user.magicLinkExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+    await user.save();
+
+    const magicLinkUrl = `${process.env.CLIENT_URL || "http://localhost:5173"}/magic-link/${rawToken}`;
+
+    await sendEmail({
+      email: user.email,
+      subject: "Your VYBE Magic Login Link 🪄",
+      html: `<div style="font-family: Arial, sans-serif; padding: 20px; color: #111;">
+        <h2>Sign in to VYBE instantly</h2>
+        <p>Hi ${user.name}, click the button below to sign in directly without a password. This link is valid for 15 minutes.</p>
+        <a href="${magicLinkUrl}" style="background: #e1306c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">Sign In To VYBE</a>
+        <p style="margin-top: 20px; font-size: 12px; color: #777;">If you did not request this link, please ignore this email.</p>
+      </div>`,
+      message: `Sign in to VYBE: ${magicLinkUrl}`,
+    });
+
+    await createSecurityAuditLog(user._id, "magic_link_requested", req);
+
+    return res.status(200).json({
+      success: true,
+      error: false,
+      message: "Magic Login Link dispatched to your email address.",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `Request Magic Link Error: ${error.message}`,
+    });
+  }
+};
+
+// 10. Verify Magic Link Login
+export const verifyMagicLink = async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ success: false, error: true, message: "Magic link token is required" });
+    }
+
+    const incomingHash = hashToken(token);
+    const user = await User.findOne({
+      magicLinkToken: incomingHash,
+      magicLinkExpiresAt: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Invalid or expired Magic Link. Please request a new one.",
+      });
+    }
+
+    user.magicLinkToken = undefined;
+    user.magicLinkExpiresAt = undefined;
+    await user.save();
+
+    // CREATE SESSION
+    const { deviceInfo, browser, os, ipAddress, location, userAgent } = parseDeviceDetails(req);
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+    const session = await Session.create({
+      user: user._id,
+      refreshTokenHash: "pending",
+      deviceGroupId: getOrCreateDeviceGroupId(req, res),
+      deviceInfo,
+      browser,
+      os,
+      ipAddress,
+      location,
+      userAgent,
+      expiresAt,
+    });
+
+    const accessToken = generateAccessToken(user._id, session._id);
+    const refreshToken = generateRefreshToken(user._id, session._id);
+
+    session.refreshTokenHash = hashToken(refreshToken);
+    await session.save();
+
+    res.cookie("accessToken", accessToken, getAccessTokenCookieOptions());
+    res.cookie("refreshToken", refreshToken, getRefreshTokenCookieOptions(true));
+    res.cookie("token", accessToken, getAuthCookieOptions());
+
+    await createSecurityAuditLog(user._id, "magic_link_used", req);
+
+    const userResponse = user.toObject();
+    delete userResponse.password;
+    delete userResponse.twoFactorSecret;
+    delete userResponse.twoFactorRecoveryCodes;
 
     return res.status(200).json({
       success: true,
       error: false,
       message: `Welcome back ${user.name}`,
-      token,
-      user,
+      token: accessToken,
+      user: userResponse,
     });
   } catch (error) {
-    return res.status(500).json({ message: `signin error: ${error.message}` });
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `Verify Magic Link Error: ${error.message}`,
+    });
   }
 };
 
-// signout controller
-export const signOut = async (req, res) => {
+// 11. Get Active Sessions (Authenticated)
+export const getActiveSessions = async (req, res) => {
   try {
-    res.clearCookie("token", getClearCookieOptions());
+    const sessions = await Session.find({
+      user: req.userId,
+      isRevoked: false,
+      expiresAt: { $gt: new Date() },
+    }).sort({ lastActive: -1 });
 
-    return res.status(200).json({ message: "User signed out successfully" });
+    const formattedSessions = sessions.map((s) => ({
+      id: s._id,
+      deviceInfo: s.deviceInfo,
+      browser: s.browser,
+      os: s.os,
+      ipAddress: s.ipAddress,
+      location: s.location,
+      lastActive: s.lastActive,
+      isCurrentSession: String(s._id) === String(req.sessionId),
+      createdAt: s.createdAt,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      error: false,
+      sessions: formattedSessions,
+    });
   } catch (error) {
-    return res.status(500).json({ message: `signout error: ${error.message}` });
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `Get Sessions Error: ${error.message}`,
+    });
   }
 };
 
-// send otp controller
+// 12. Revoke Specific Session (Authenticated)
+export const revokeSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const session = await Session.findOne({ _id: sessionId, user: req.userId });
+
+    if (!session) {
+      return res.status(404).json({ success: false, error: true, message: "Session not found" });
+    }
+
+    session.isRevoked = true;
+    await session.save();
+
+    await createSecurityAuditLog(req.userId, "session_revoked", req, { revokedSessionId: sessionId });
+
+    return res.status(200).json({
+      success: true,
+      error: false,
+      message: "Remote session revoked successfully.",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `Revoke Session Error: ${error.message}`,
+    });
+  }
+};
+
+// 13. Revoke All Other Sessions (Authenticated)
+export const revokeAllOtherSessions = async (req, res) => {
+  try {
+    await Session.updateMany(
+      { user: req.userId, _id: { $ne: req.sessionId } },
+      { isRevoked: true }
+    );
+
+    await createSecurityAuditLog(req.userId, "all_sessions_revoked", req);
+
+    return res.status(200).json({
+      success: true,
+      error: false,
+      message: "Logged out from all other active devices.",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `Revoke All Sessions Error: ${error.message}`,
+    });
+  }
+};
+
+// 14. Get Security Audit Logs (Authenticated)
+export const getSecurityLogs = async (req, res) => {
+  try {
+    const logs = await SecurityLog.find({ user: req.userId })
+      .sort({ createdAt: -1 })
+      .limit(25);
+
+    return res.status(200).json({
+      success: true,
+      error: false,
+      logs,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `Get Security Logs Error: ${error.message}`,
+    });
+  }
+};
+
+// Legacy Handlers Retained
 export const sendOtp = async (req, res) => {
   try {
     const { email } = req.body || {};
-    if (!email)
-      return res
-        .status(400)
-        .json({ success: false, error: true, message: "Email is required" });
+    if (!email) return res.status(400).json({ success: false, error: true, message: "Email is required" });
 
     const user = await User.findOne({ email });
-    if (!user)
-      return res
-        .status(404)
-        .json({ success: false, error: true, message: "User not found" });
+    if (!user) return res.status(404).json({ success: false, error: true, message: "User not found" });
 
-    // Generate OTP
-    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+    const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
     const otpExpiresAt = Date.now() + 15 * 60 * 1000; // 15 mins
-
-    // Generate Reset Link Token
     const token = crypto.randomBytes(32).toString("hex");
-    const resetPasswordExpires = Date.now() + 15 * 60 * 1000; // 15 mins
 
-    // Save in DB
     user.otp = otp;
     user.otpExpiresAt = otpExpiresAt;
     user.isOtpVerified = false;
     user.resetPasswordToken = token;
-    user.resetPasswordExpires = resetPasswordExpires;
+    user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // 15 mins
     await user.save();
 
-    // Construct Reset Link
-    const resetLink = `${process.env.CLIENT_URL}/forgot-password/${token}`;
+    const resetLink = `${process.env.CLIENT_URL || "http://localhost:5173"}/forgot-password/${token}`;
 
-    // Send Email (Branded VYBE Template)
     await sendEmail({
       email: user.email,
       subject: "Reset Your VYBE Password",
       html: forgotPasswordTemplate(user.name, otp, resetLink),
-      message: `Hi ${user.name}, your OTP is ${otp}. Reset Link: ${resetLink}`,
+      message: `Hi ${user.name}, reset your password using this link: ${resetLink} or use OTP code: ${otp}`,
     });
 
     return res.status(200).json({
       success: true,
-      message: "OTP and Reset Link sent to your email",
+      message: "Security verification code and password reset link have been sent to your email.",
     });
   } catch (error) {
-    console.error(error);
-    return res
-      .status(500)
-      .json({ message: `requestPasswordReset error: ${error.message}` });
+    return res.status(500).json({ message: `sendOtp error: ${error.message}` });
   }
 };
 
-// verify otp controller
 export const verifyOtp = async (req, res) => {
   try {
     const { email, otp } = req.body || {};
-    if (!email || !otp)
-      return res.status(400).json({
-        success: false,
-        error: true,
-        message: "Email and OTP are required",
-      });
+    if (!email || !otp) return res.status(400).json({ success: false, error: true, message: "Email and OTP are required" });
 
     const user = await User.findOne({ email });
-    if (!user)
-      return res
-        .status(404)
-        .json({ success: false, error: true, message: "User not found" });
+    if (!user) return res.status(404).json({ success: false, error: true, message: "User not found" });
 
-    // Correct length validation
-    if (String(otp).length !== 4)
-      return res.status(400).json({
-        success: false,
-        error: true,
-        message: "OTP must be exactly 4 digits",
-      });
+    if (String(otp).length !== 6) return res.status(400).json({ success: false, error: true, message: "OTP must be 6 digits" });
+    if (String(user.otp) !== String(otp)) return res.status(400).json({ success: false, error: true, message: "Invalid OTP" });
+    if (user.otpExpiresAt < Date.now()) return res.status(400).json({ success: false, error: true, message: "OTP expired" });
 
-    // Compare OTP
-    if (String(user.otp) !== String(otp))
-      return res
-        .status(400)
-        .json({ success: false, error: true, message: "Invalid OTP" });
-
-    // Check expiry
-    if (user.otpExpiresAt < Date.now())
-      return res
-        .status(400)
-        .json({ success: false, error: true, message: "OTP expired" });
-
-    // Update user
     user.isOtpVerified = true;
     user.otp = null;
     user.otpExpiresAt = null;
     await user.save();
 
-    return res.status(200).json({
-      success: true,
-      error: false,
-      message: "OTP verified successfully",
-    });
+    return res.status(200).json({ success: true, error: false, message: "OTP verified successfully" });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({
-      success: false,
-      error: true,
-      message: `verifyOtp error: ${error.message}`,
-    });
+    return res.status(500).json({ success: false, error: true, message: `verifyOtp error: ${error.message}` });
   }
 };
 
-// verify reset token controller
 export const verifyResetToken = async (req, res) => {
   try {
     const { token } = req.body;
-    if (!token)
-      return res
-        .status(400)
-        .json({ success: false, error: true, message: "Token is required" });
+    if (!token) return res.status(400).json({ success: false, error: true, message: "Token is required" });
 
     const user = await User.findOne({
       resetPasswordToken: token,
       resetPasswordExpires: { $gt: Date.now() },
     });
 
-    if (!user)
-      return res.status(400).json({
-        success: false,
-        error: true,
-        message: "Invalid or expired reset link",
-      });
+    if (!user) return res.status(400).json({ success: false, error: true, message: "Invalid or expired reset link" });
 
-    return res.status(200).json({
-      success: true,
-      error: false,
-      message: "Reset link verified successfully",
-    });
+    return res.status(200).json({ success: true, error: false, message: "Reset link verified successfully" });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      error: true,
-      message: `verifyResetToken error: ${error.message}`,
-    });
+    return res.status(500).json({ success: false, error: true, message: `verifyResetToken error: ${error.message}` });
   }
 };
 
-// reset password controller
 export const resetPassword = async (req, res) => {
   try {
     const { email, password, token } = req.body || {};
-
-    if (!password)
-      return res
-        .status(400)
-        .json({ success: false, error: true, message: "Password is required" });
+    if (!password) return res.status(400).json({ success: false, error: true, message: "Password is required" });
 
     let user;
-
     if (token) {
-      // Reset via token
       user = await User.findOne({
         resetPasswordToken: token,
         resetPasswordExpires: { $gt: Date.now() },
       });
-      if (!user)
-        return res.status(400).json({
-          success: false,
-          error: true,
-          message: "Invalid or expired token",
-        });
+      if (!user) return res.status(400).json({ success: false, error: true, message: "Invalid or expired token" });
     } else if (email) {
-      // Reset via OTP
       user = await User.findOne({ email });
-      if (!user)
-        return res
-          .status(404)
-          .json({ success: false, error: true, message: "User not found" });
-
-      if (!user.isOtpVerified)
-        return res
-          .status(400)
-          .json({ success: false, error: true, message: "OTP not verified" });
+      if (!user) return res.status(404).json({ success: false, error: true, message: "User not found" });
+      if (!user.isOtpVerified) return res.status(400).json({ success: false, error: true, message: "OTP not verified" });
     } else {
-      return res.status(400).json({
-        success: false,
-        error: true,
-        message: "Provide either email or token",
-      });
+      return res.status(400).json({ success: false, error: true, message: "Provide either email or token" });
     }
 
-    // Hash new password
     const hashedPassword = await bcrypt.hash(password, 10);
     user.password = hashedPassword;
-
-    // Clear OTP & Token
     user.isOtpVerified = false;
     user.otp = null;
     user.otpExpiresAt = null;
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;
-
     await user.save();
 
-    // Send Email
     await sendEmail({
       email: user.email,
       subject: "Your VYBE Password Has Been Reset",
@@ -338,43 +1075,24 @@ export const resetPassword = async (req, res) => {
       message: `Hi ${user.name}, your password has been successfully reset.`,
     });
 
-    return res.status(200).json({
-      success: true,
-      error: false,
-      message: "Password reset successfully",
-    });
+    await createSecurityAuditLog(user._id, "password_changed", req);
+
+    return res.status(200).json({ success: true, error: false, message: "Password reset successfully" });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({
-      success: false,
-      error: true,
-      message: `resetPassword error: ${error.message}`,
-    });
+    return res.status(500).json({ success: false, error: true, message: `resetPassword error: ${error.message}` });
   }
 };
 
-// suggest username controller
 export const suggestUsername = async (req, res) => {
   try {
     const { query } = req.query;
-
-    if (!query || query.trim() === "") {
-      return res.status(400).json({ suggestions: [] });
-    }
+    if (!query || query.trim() === "") return res.status(400).json({ suggestions: [] });
 
     const base = query.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-    // find existing usernames starting with base
-    const existingUsers = await User.find({
-      userName: { $regex: `^${base}`, $options: "i" },
-    }).select("userName");
-
-    const existing = new Set(
-      existingUsers.map((u) => u.userName.toLowerCase())
-    );
+    const existingUsers = await User.find({ userName: { $regex: `^${base}`, $options: "i" } }).select("userName");
+    const existing = new Set(existingUsers.map((u) => u.userName.toLowerCase()));
 
     const suggestions = [];
-
     const variations = [
       "",
       Math.floor(Math.random() * 90 + 10),
@@ -391,9 +1109,35 @@ export const suggestUsername = async (req, res) => {
 
     return res.json({ suggestions });
   } catch (error) {
-    return res.status(500).json({
-      message: "Error generating username suggestions",
-      error: error.message,
-    });
+    return res.status(500).json({ message: "Error generating username suggestions", error: error.message });
+  }
+};
+
+export const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: "Current and new password are required" });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: "New password must be at least 6 characters" });
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ success: false, message: "Incorrect current password" });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+
+    await createSecurityAuditLog(user._id, "password_changed", req);
+
+    return res.status(200).json({ success: true, message: "Password updated successfully" });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: `changePassword error: ${error.message}` });
   }
 };

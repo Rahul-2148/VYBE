@@ -1,28 +1,29 @@
-import axios from "axios";
 import { useEffect } from "react";
-import { useDispatch } from "react-redux";
-import { SERVER_URL } from "../App";
+import { useDispatch, useSelector } from "react-redux";
 import { setStoryFeed } from "../redux/features/storySlice";
+import api from "../lib/axios";
 
 const GetStoryFeed = () => {
   const dispatch = useDispatch();
+  const { userData } = useSelector((state) => state.user);
 
   useEffect(() => {
+    const userId = userData?._id || userData?.user?._id;
+    if (!userId) return;
+
     const fetchFeed = async () => {
       try {
-        const res = await axios.get(`${SERVER_URL}/api/v1/story/feed`, {
-          withCredentials: true,
-        });
-
-        // console.log(res.data);
-        dispatch(setStoryFeed(res.data.stories));
+        const res = await api.get("/story/feed");
+        if (res.data?.stories) {
+          dispatch(setStoryFeed(res.data.stories));
+        }
       } catch (err) {
-        console.log("Story feed error:", err);
+        console.error("Story feed error:", err);
       }
     };
 
     fetchFeed();
-  }, [dispatch]);
+  }, [dispatch, userData?._id]);
 
   return null;
 };

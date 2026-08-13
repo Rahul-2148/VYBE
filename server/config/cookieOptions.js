@@ -20,6 +20,7 @@ const buildBaseCookieOptions = () => {
     httpOnly: true,
     secure,
     sameSite,
+    path: "/",
   };
 
   if (process.env.COOKIE_DOMAIN) {
@@ -29,9 +30,22 @@ const buildBaseCookieOptions = () => {
   return options;
 };
 
-export const getAuthCookieOptions = () => ({
+// Access Token Cookie (7 Days)
+export const getAccessTokenCookieOptions = (rememberMe = true) => ({
   ...buildBaseCookieOptions(),
-  maxAge: 10 * 365 * 24 * 60 * 60 * 1000,
+  maxAge: rememberMe ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000,
+});
+
+// Refresh Token Cookie (30 Days)
+export const getRefreshTokenCookieOptions = (rememberMe = true) => ({
+  ...buildBaseCookieOptions(),
+  maxAge: rememberMe ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000,
+});
+
+// Legacy single auth token cookie options (30 Days)
+export const getAuthCookieOptions = (rememberMe = true) => ({
+  ...buildBaseCookieOptions(),
+  maxAge: rememberMe ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000,
 });
 
 export const getClearCookieOptions = () => ({

@@ -11,6 +11,7 @@ const store = configureStore({
         post: postSlice,
         story: storySlice,
         loop: loopSlice,
+        reel: loopSlice,
         message: messageSlice,
     },
 });

@@ -6,6 +6,7 @@ const loopSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
     },
     media: {
       url: {
@@ -21,7 +22,31 @@ const loopSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // Remix Reel reference
+    isRemix: {
+      type: Boolean,
+      default: false,
+    },
+    originalLoop: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Loop",
+      default: null,
+    },
+    // Audio Track details
+    audioTrack: {
+      id: { type: String, default: "original_audio" },
+      title: { type: String, default: "Original Audio" },
+      artist: { type: String, default: "" },
+      coverUrl: { type: String, default: "" },
+      audioUrl: { type: String, default: "" },
+    },
     likes: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+    savedBy: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
@@ -37,6 +62,10 @@ const loopSchema = new mongoose.Schema(
         message: {
           type: String,
           required: true,
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
         },
       },
     ],
@@ -63,14 +92,28 @@ const loopSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    captions: [
+      {
+        start: Number,
+        end: Number,
+        text: String,
+      },
+    ],
     score: {
       type: Number,
       default: 0,
+      index: -1,
     },
     watchTime: {
       type: Number,
       default: 0,
     },
+    taggedUsers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
     forwards: {
       type: Number,
       default: 0,
@@ -80,5 +123,7 @@ const loopSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+loopSchema.index({ score: -1, createdAt: -1 });
 
 export const Loop = mongoose.model("Loop", loopSchema);

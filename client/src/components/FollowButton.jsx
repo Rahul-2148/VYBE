@@ -1,24 +1,42 @@
-import axios from "axios";
-import { toast } from "react-hot-toast";
+import React from "react";
+import { toast } from "sonner";
 import { useDispatch, useSelector } from "react-redux";
-import { SERVER_URL } from "../App";
 import { setUserData } from "../redux/features/userSlice";
+import api from "../lib/axios";
 
-const FollowButton = ({ targetUserId, tailwind }) => {
-  const { userData } = useSelector((state) => state.user);
+export const FollowButton = ({ targetUserId, targetUser = null, tailwind, onFollowChange }) => {
+  const { userData, profileData } = useSelector((state) => state.user);
   const dispatch = useDispatch();
 
-  const isFollowing = userData?.user?.following?.some(
-    (u) => u._id?.toString() === targetUserId
+  const currentUserId = userData?.user?._id || userData?._id;
+  const targetIdStr = targetUserId ? (targetUserId._id || targetUserId).toString() : null;
+
+  const isFollowing = Boolean(
+    targetIdStr &&
+      userData?.user?.following?.some(
+        (u) => u && (u._id || u).toString() === targetIdStr
+      )
+  );
+
+  const isFollower = Boolean(
+    targetIdStr &&
+      userData?.user?.followers?.some(
+        (u) => u && (u._id || u).toString() === targetIdStr
+      )
+  );
+
+  const targetUserObj = targetUser || (profileData?.user?._id?.toString() === targetIdStr ? profileData.user : null);
+
+  const isRequested = Boolean(
+    currentUserId &&
+      targetUserObj?.followRequests?.some(
+        (id) => id && (id._id || id).toString() === currentUserId.toString()
+      )
   );
 
   const handleFollow = async () => {
     try {
-      const result = await axios.get(
-        `${SERVER_URL}/api/v1/user/follow/${targetUserId}`,
-        { withCredentials: true }
-      );
-
+      const result = await api.get(`/user/follow/${targetUserId}`);
       dispatch(
         setUserData({
           ...userData,
@@ -27,14 +45,15 @@ const FollowButton = ({ targetUserId, tailwind }) => {
       );
 
       toast.success(result.data.message);
+      if (onFollowChange) onFollowChange();
     } catch (error) {
-      toast.error(error.response?.data?.message);
+      toast.error(error.response?.data?.message || "Follow toggle failed");
     }
   };
 
   return (
     <button className={tailwind} onClick={handleFollow}>
-      {isFollowing ? "Following" : "Follow"}
+      {isFollowing ? "Following" : isRequested ? "Requested" : isFollower ? "Follow Back" : "Follow"}
     </button>
   );
 };

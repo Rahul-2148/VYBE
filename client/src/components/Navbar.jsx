@@ -1,40 +1,57 @@
-import { SquarePlay } from "lucide-react";
-import { AiOutlinePlusSquare } from "react-icons/ai";
+import { MessageCircle, Users, Plus } from "lucide-react";
 import { GoHomeFill } from "react-icons/go";
-import { RiSearchLine } from "react-icons/ri";
 import dp from "../assets/dp3.png";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useSelector } from "react-redux";
 
 const Navbar = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { userData } = useSelector((state) => state.user);
 
   return (
-    <div className="w-[90%] lg:w-[40%] h-[80px] bg-black flex justify-around items-center fixed bottom-[20px] rounded-full shadow-2xl shadow-[#000000] z-100">
-      <div className="" onClick={() => navigate("/")}>
-        <GoHomeFill className="w-[25px] h-[25px] text-white cursor-pointer" />
-      </div>
-      <div onClick={() => navigate("/search")}>
-        <RiSearchLine className="w-[25px] h-[25px] text-white cursor-pointer" />
-      </div>
-      <div onClick={() => navigate("/upload")}>
-        <AiOutlinePlusSquare className="w-[28px] h-[28px] text-white cursor-pointer" />
-      </div>
-      <div onClick={() => navigate("/loops")}>
-        <SquarePlay className="w-[25px] h-[25px] text-white cursor-pointer" />
-      </div>
+    <div
+      className="w-[92%] max-w-[400px] h-14 bg-surface-inset/90 border border-border/80 backdrop-blur-xl flex justify-around items-center fixed left-1/2 -translate-x-1/2 rounded-full shadow-2xl z-50 md:hidden select-none"
+      style={{ bottom: "calc(1rem + env(safe-area-inset-bottom))" }}
+    >
+      <button 
+        onClick={() => navigate("/")} 
+        className={`p-2 rounded-full transition ${location.pathname === "/" ? "text-text scale-110" : "text-text-secondary hover:text-text"}`}
+      >
+        <GoHomeFill className="w-6 h-6" />
+      </button>
 
-      <div
-        className="w-[40px] h-[40px] border-2 border-black rounded-full cursor-pointer overflow-hidden"
+      <button 
+        onClick={() => navigate("/communities")} 
+        className={`p-2 rounded-full transition ${location.pathname === "/communities" ? "text-text scale-110" : "text-text-secondary hover:text-text"}`}
+      >
+        <Users className="w-6 h-6" />
+      </button>
+
+      <button 
+        onClick={() => navigate("/upload")} 
+        className={`p-2 rounded-full transition ${location.pathname === "/upload" ? "text-text scale-110" : "text-text-secondary hover:text-text"}`}
+      >
+        <Plus className="w-6 h-6" />
+      </button>
+
+      <button 
+        onClick={() => navigate("/messages")} 
+        className={`p-2 rounded-full transition ${location.pathname.startsWith("/messages") ? "text-text scale-110" : "text-text-secondary hover:text-text"}`}
+      >
+        <MessageCircle className="w-6 h-6" />
+      </button>
+
+      <button
+        className="w-8 h-8 rounded-full border border-border-strong overflow-hidden cursor-pointer active:scale-95 transition"
         onClick={() => navigate(`/profile/${userData?.user?.userName}`)}
       >
         <img
           src={userData?.user?.profileImage?.url || dp}
           alt=""
-          className="w-full object-cover"
+          className="w-full h-full object-cover"
         />
-      </div>
+      </button>
     </div>
   );
 };

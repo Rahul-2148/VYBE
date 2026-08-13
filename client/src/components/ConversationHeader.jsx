@@ -20,9 +20,9 @@ const ConversationHeader = ({ chat }) => {
     moment(lastSeenMap[otherUser._id]).fromNow();
 
   return (
-    <div className="flex items-center gap-4 px-4 py-3 border-b border-gray-800">
+    <div className="flex items-center gap-4 px-4 py-3 border-b border-border">
       <MdOutlineKeyboardBackspace
-        className="text-white w-6 h-6 cursor-pointer lg:hidden"
+        className="text-text w-6 h-6 cursor-pointer lg:hidden"
         onClick={() => navigate("/messages")}
       />
 
@@ -36,12 +36,12 @@ const ConversationHeader = ({ chat }) => {
       />
 
       <div className="flex-1 min-w-0">
-        <p className="text-white font-semibold truncate">
+        <p className="text-text font-semibold truncate">
           {isGroup ? chat?.groupName : otherUser?.userName}
         </p>
 
         {!isGroup && (
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-text-secondary">
             {isOnline ? "Online" : lastSeen ? `Last seen ${lastSeen}` : ""}
           </p>
         )}

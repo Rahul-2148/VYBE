@@ -2,19 +2,32 @@ import { useRef, useState } from "react";
 import { MdOutlineKeyboardBackspace } from "react-icons/md";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import { SERVER_URL } from "../App";
 import dp from "../assets/dp3.png";
 import { setProfileData, setUserData } from "../redux/features/userSlice";
 import { ClipLoader } from "react-spinners";
-import { toast } from "react-hot-toast";
-import axios from "axios";
+import { toast } from "sonner";
+import { Link2, Trash2, Plus, User, Lock, Sliders, Palette, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
+import api from "../lib/axios";
+import { useTheme } from "../lib/theme.jsx";
+import VybeInput from "../components/VybeInput";
 
-const platformOptions = [
-  "Facebook",
-  "Instagram",
-  "Twitter",
-  "YouTube",
-  "Custom",
+const CATEGORIES = [
+  "Digital Creator",
+  "Artist",
+  "Photographer",
+  "Software Engineer",
+  "Entrepreneur",
+  "Blogger & Writer",
+  "Gamer & Streamer",
+  "Musician",
+  "Fitness Coach",
+];
+
+const SETTINGS_TABS = [
+  { id: "profile", label: "Edit Profile", icon: <User className="w-4 h-4" /> },
+  { id: "password", label: "Change Password", icon: <Lock className="w-4 h-4" /> },
+  { id: "suggestions", label: "Content Suggestions", icon: <Sliders className="w-4 h-4" /> },
+  { id: "appearance", label: "Appearance Theme", icon: <Palette className="w-4 h-4" /> },
 ];
 
 const EditProfile = () => {
@@ -22,6 +35,21 @@ const EditProfile = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const [isLoading, setIsLoading] = useState(false);
+  const { theme, setTheme } = useTheme();
+
+  // Settings Dashboard Tab States
+  const [activeTab, setActiveTab] = useState("profile");
+  const [activeMobileTab, setActiveMobileTab] = useState(null);
+  const [isContactSectionOpen, setIsContactSectionOpen] = useState(false);
+
+  // Change password states
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isChangingPass, setIsChangingPass] = useState(false);
+  const [showCurrentPass, setShowCurrentPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
 
   const imageInput = useRef(null);
 
@@ -35,18 +63,26 @@ const EditProfile = () => {
     userName: userData?.user?.userName || "",
     bio: userData?.user?.bio || "",
     profession: userData?.user?.profession || "",
+    category: userData?.user?.category || "Digital Creator",
+    professionalType: userData?.user?.professionalType || "personal",
+    showCategory: userData?.user?.showCategory !== false,
+    contactEmail: userData?.user?.contactEmail || "",
+    contactPhone: userData?.user?.contactPhone || "",
+    businessAddress: userData?.user?.businessAddress || "",
+    showContactInfo: userData?.user?.showContactInfo !== false,
     gender: userData?.user?.gender || "male",
     age: userData?.user?.age || "",
     location: userData?.user?.location || "",
     website: userData?.user?.website || "",
     accountType: userData?.user?.accountType || "public",
+    sensitiveContentFilter: userData?.user?.sensitiveContentFilter || "medium",
+    snoozeSuggestedPosts: userData?.user?.snoozeSuggestedPosts || false,
   });
 
   const [links, setLinks] = useState(userData?.user?.links || []);
   const [showAddLink, setShowAddLink] = useState(false);
   const [newLink, setNewLink] = useState({
-    platform: "Custom",
-    customPlatform: "",
+    title: "",
     url: "",
   });
 
@@ -57,21 +93,17 @@ const EditProfile = () => {
 
   const handleImage = (e) => {
     const file = e.target.files[0];
-    setBackendImage(file);
-    setFrontendImage(URL.createObjectURL(file));
+    if (file) {
+      setBackendImage(file);
+      setFrontendImage(URL.createObjectURL(file));
+    }
   };
 
   const handleAddLink = () => {
     if (!newLink.url.trim()) return;
 
-    const platformName =
-      newLink.platform === "Custom"
-        ? newLink.customPlatform.trim() || "Custom"
-        : newLink.platform;
-
-    setLinks([...links, { platform: platformName, url: newLink.url }]);
-
-    setNewLink({ platform: "Custom", customPlatform: "", url: "" });
+    setLinks([...links, { title: newLink.title.trim() || "Link", url: newLink.url.trim() }]);
+    setNewLink({ title: "", url: "" });
     setShowAddLink(false);
   };
 
@@ -89,252 +121,565 @@ const EditProfile = () => {
       formData.append("userName", formFields.userName);
       formData.append("bio", formFields.bio);
       formData.append("profession", formFields.profession);
+      formData.append("category", formFields.category);
+      formData.append("professionalType", formFields.professionalType);
+      formData.append("showCategory", formFields.showCategory);
+      formData.append("contactEmail", formFields.contactEmail);
+      formData.append("contactPhone", formFields.contactPhone);
+      formData.append("businessAddress", formFields.businessAddress);
+      formData.append("showContactInfo", formFields.showContactInfo);
       formData.append("gender", formFields.gender);
       formData.append("age", formFields.age);
       formData.append("location", formFields.location);
       formData.append("website", formFields.website);
       formData.append("accountType", formFields.accountType);
-
-      // Append profile image if changed
-      if (backendImage) formData.append("profileImage", backendImage);
-
-      // Append links as JSON string
+      formData.append("sensitiveContentFilter", formFields.sensitiveContentFilter);
+      formData.append("snoozeSuggestedPosts", formFields.snoozeSuggestedPosts);
       formData.append("links", JSON.stringify(links));
 
-      const result = await axios.put(
-        `${SERVER_URL}/api/v1/user/edit-profile`,
-        formData,
-        { withCredentials: true }
-      );
+      if (backendImage) formData.append("profileImage", backendImage);
 
-      dispatch(setProfileData(result.data));
-      dispatch(setUserData(result.data));
-      toast.success(result.data.message);
-      setIsLoading(false);
-      navigate(`/profile/${formFields.userName}`);
+      const result = await api.put("/user/edit-profile", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      if (result.data.success) {
+        dispatch(setUserData(result.data));
+        dispatch(setProfileData(result.data));
+        toast.success(result.data.message || "Profile updated!");
+        navigate(`/profile/${formFields.userName}`);
+      }
     } catch (error) {
-      toast.error(error.response?.data?.message || "Something went wrong");
+      toast.error(error.response?.data?.message || "Failed to update profile.");
+    } finally {
       setIsLoading(false);
-      console.log(error);
+    }
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      toast.error("All password fields are required");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error("New passwords do not match!");
+      return;
+    }
+    if (newPassword.length < 6) {
+      toast.error("New password must be at least 6 characters");
+      return;
+    }
+
+    setIsChangingPass(true);
+    try {
+      const res = await api.post("/auth/change-password", {
+        currentPassword,
+        newPassword,
+      });
+      if (res.data?.success) {
+        toast.success(res.data.message || "Password updated successfully!");
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+      } else {
+        toast.error(res.data?.message || "Failed to update password.");
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to update password.");
+    } finally {
+      setIsChangingPass(false);
+    }
+  };
+
+  // Render Sub-Forms
+  const renderEditProfileForm = () => (
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* Avatar Upload */}
+      <div className="flex flex-col items-center gap-3 border-b border-border pb-6">
+        <div className="w-24 h-24 rounded-full border-2 border-border overflow-hidden relative group cursor-pointer" onClick={() => imageInput.current.click()}>
+          <img src={frontendImage} alt="" className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-surface-overlay opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-[10px] font-bold">
+            Change Photo
+          </div>
+        </div>
+        <input ref={imageInput} type="file" accept="image/*" onChange={handleImage} className="hidden" />
+        <p className="text-[11px] text-text-muted">Click photo to upload new profile image</p>
+      </div>
+
+      <div className="space-y-4 text-xs">
+        <div>
+          <label className="block text-text-secondary font-semibold mb-1">Full Name</label>
+          <input
+            type="text"
+            name="name"
+            value={formFields.name}
+            onChange={handleChange}
+            className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-text-secondary font-semibold mb-1">Username</label>
+          <input
+            type="text"
+            name="userName"
+            value={formFields.userName}
+            onChange={handleChange}
+            className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-text-secondary font-semibold mb-1">Professional Account Type</label>
+          <select
+            name="professionalType"
+            value={formFields.professionalType}
+            onChange={(e) => {
+              const val = e.target.value;
+              setFormFields((prev) => ({
+                ...prev,
+                professionalType: val,
+                category: val === "personal" ? "" : prev.category || "Digital Creator",
+                accountType: val === "business" ? "public" : prev.accountType
+              }));
+            }}
+            className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500 capitalize"
+          >
+            <option value="personal">Personal Account</option>
+            <option value="creator">Creator Account</option>
+            <option value="business">Business Account</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-text-secondary font-semibold mb-1">Account Privacy</label>
+          <select
+            name="accountType"
+            value={formFields.professionalType !== "personal" ? "public" : formFields.accountType}
+            disabled={formFields.professionalType !== "personal"}
+            onChange={handleChange}
+            className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500 capitalize disabled:opacity-50"
+          >
+            <option value="public">Public</option>
+            <option value="private">Private</option>
+          </select>
+          {formFields.professionalType !== "personal" && (
+            <p className="text-[10px] text-text-muted mt-1">Professional accounts (Creator & Business) must be public.</p>
+          )}
+        </div>
+
+        {formFields.professionalType !== "personal" && (
+          <>
+            <div>
+              <label className="block text-text-secondary font-semibold mb-1">Creator Category</label>
+              <select
+                name="category"
+                value={formFields.category}
+                onChange={handleChange}
+                className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500"
+              >
+                {CATEGORIES.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center justify-between p-3.5 bg-surface/40 border border-border rounded-xl">
+              <div>
+                <label className="block font-bold text-text text-[11px] sm:text-xs">Show Category Label</label>
+                <span className="text-[9px] sm:text-[10px] text-text-muted">Display your selected category on your profile</span>
+              </div>
+              <input
+                type="checkbox"
+                name="showCategory"
+                checked={formFields.showCategory}
+                onChange={(e) => setFormFields((prev) => ({ ...prev, showCategory: e.target.checked }))}
+                className="h-4 w-4 rounded border-border text-rose-600 focus:ring-rose-500 accent-rose-600"
+              />
+            </div>
+
+            <div className="border-t border-border/40 pt-4 mt-2">
+              <button
+                type="button"
+                onClick={() => setIsContactSectionOpen(!isContactSectionOpen)}
+                className="w-full flex items-center justify-between py-2 text-left hover:opacity-80 transition"
+              >
+                <span className="font-bold text-text text-xs uppercase tracking-wider">Contact Information</span>
+                {isContactSectionOpen ? (
+                  <ChevronUp className="w-4 h-4 text-text-muted" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-text-muted" />
+                )}
+              </button>
+
+              {isContactSectionOpen && (
+                <div className="space-y-4 mt-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div>
+                    <label className="block text-text-secondary font-semibold mb-1">Public Email</label>
+                    <input
+                      type="email"
+                      name="contactEmail"
+                      value={formFields.contactEmail}
+                      onChange={handleChange}
+                      placeholder="rahul@vybe.in"
+                      className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-text-secondary font-semibold mb-1">Public Phone Number</label>
+                    <input
+                      type="tel"
+                      name="contactPhone"
+                      value={formFields.contactPhone}
+                      onChange={handleChange}
+                      placeholder="+91 98765 43210"
+                      className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500"
+                    />
+                  </div>
+
+                  {formFields.professionalType === "business" && (
+                    <div>
+                      <label className="block text-text-secondary font-semibold mb-1">Business Address</label>
+                      <input
+                        type="text"
+                        name="businessAddress"
+                        value={formFields.businessAddress}
+                        onChange={handleChange}
+                        placeholder="Connaught Place, New Delhi, Delhi"
+                        className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500"
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between p-3.5 bg-surface/40 border border-border rounded-xl">
+                    <div>
+                      <label className="block font-bold text-text text-[11px] sm:text-xs">Show Contact Info</label>
+                      <span className="text-[9px] sm:text-[10px] text-text-muted">Display your contact details on your profile</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      name="showContactInfo"
+                      checked={formFields.showContactInfo}
+                      onChange={(e) => setFormFields((prev) => ({ ...prev, showContactInfo: e.target.checked }))}
+                      className="h-4 w-4 rounded border-border text-rose-600 focus:ring-rose-500 accent-rose-600"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        <div>
+          <label className="block text-text-secondary font-semibold mb-1">Bio</label>
+          <textarea
+            name="bio"
+            rows={3}
+            value={formFields.bio}
+            onChange={handleChange}
+            className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500"
+          />
+        </div>
+
+        {/* Multiple Bio Links */}
+        <div className="space-y-2 pt-2">
+          <div className="flex items-center justify-between">
+            <label className="text-text-secondary font-semibold">Multiple Bio Links</label>
+            <button onClick={() => setShowAddLink(!showAddLink)} className="text-rose-400 font-bold text-xs flex items-center gap-1 hover:underline">
+              <Plus className="w-3.5 h-3.5" />
+              Add Link
+            </button>
+          </div>
+
+          {showAddLink && (
+            <div className="p-3 bg-surface border border-border rounded-2xl space-y-2 animate-in fade-in duration-200">
+              <input
+                type="text"
+                placeholder="Link Title (e.g. Portfolio)"
+                value={newLink.title}
+                onChange={(e) => setNewLink({ ...newLink, title: e.target.value })}
+                className="w-full bg-surface-inset border border-border p-2.5 rounded-xl text-text outline-none"
+              />
+              <input
+                type="url"
+                placeholder="URL (https://...)"
+                value={newLink.url}
+                onChange={(e) => setNewLink({ ...newLink, url: e.target.value })}
+                className="w-full bg-surface-inset border border-border p-2.5 rounded-xl text-text outline-none"
+              />
+              <button onClick={handleAddLink} className="w-full py-2 bg-rose-600 font-bold rounded-xl text-text">
+                Add Bio Link
+              </button>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {links.map((link, idx) => (
+              <div key={idx} className="flex items-center justify-between p-3 bg-surface border border-border rounded-xl">
+                <div className="flex items-center gap-2 truncate">
+                  <Link2 className="w-4 h-4 text-rose-500 shrink-0" />
+                  <span className="font-bold text-text truncate">{link.title || "Link"}</span>
+                  <span className="text-text-muted truncate text-[11px]">{link.url}</span>
+                </div>
+                <button onClick={() => handleRemoveLink(idx)} className="p-1 text-text-muted hover:text-rose-400">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="pt-4 flex justify-end">
+        <button
+          onClick={handleEditProfile}
+          disabled={isLoading}
+          className="px-6 py-2.5 bg-gradient-to-r from-pink-500 to-rose-600 font-bold text-xs rounded-xl hover:opacity-95 shadow transition flex items-center justify-center min-w-[100px]"
+        >
+          {isLoading ? <ClipLoader size={14} color="#fff" /> : "Save Profile"}
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderChangePasswordForm = () => (
+    <div className="space-y-6 animate-in fade-in duration-200">
+      <div className="space-y-1">
+        <h2 className="text-sm font-bold text-text">Change Password</h2>
+        <p className="text-[11px] text-text-muted">Choose a strong, secure password containing letters, numbers, and special characters.</p>
+      </div>
+      <form onSubmit={handleChangePassword} className="space-y-4">
+        <VybeInput
+          id="currentPassword"
+          label="Current Password"
+          type="password"
+          value={currentPassword}
+          onChange={(e) => setCurrentPassword(e.target.value)}
+          isPassword
+          showPassword={showCurrentPass}
+          setShowPassword={setShowCurrentPass}
+          required
+        />
+        <VybeInput
+          id="newPassword"
+          label="New Password"
+          type="password"
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          isPassword
+          showPassword={showNewPass}
+          setShowPassword={setShowNewPass}
+          required
+        />
+        <VybeInput
+          id="confirmPassword"
+          label="Confirm New Password"
+          type="password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          isPassword
+          showPassword={showConfirmPass}
+          setShowPassword={setShowConfirmPass}
+          required
+        />
+
+        <div className="pt-2 flex justify-end">
+          <button
+            type="submit"
+            disabled={isChangingPass || !currentPassword || !newPassword || !confirmPassword}
+            className="px-6 py-2.5 bg-gradient-to-r from-rose-600 to-pink-600 hover:opacity-95 font-bold text-xs rounded-xl shadow transition flex items-center justify-center disabled:opacity-50 cursor-pointer text-text"
+          >
+            {isChangingPass ? <ClipLoader size={14} color="#fff" /> : "Update Password"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+
+  const renderContentSuggestionsForm = () => (
+    <div className="space-y-6 animate-in fade-in duration-200">
+      <div className="space-y-1">
+        <h2 className="text-sm font-bold text-text">Suggested Content Preferences</h2>
+        <p className="text-[11px] text-text-muted">Control explicit recommendations and adjust suggested feeds from loops and posts.</p>
+      </div>
+
+      {/* Sensitive Content Control */}
+      <div className="space-y-2 pt-2">
+        <label className="block text-text font-bold text-[13px]">Sensitive Content Filter</label>
+        <p className="text-[11px] text-text-muted leading-tight mb-3">
+          Choose how much sensitive content (like explicit, scary or violent suggestions) you want to see.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {[
+            { id: "low", label: "Less (Low)", desc: "Show fewer sensitive posts" },
+            { id: "medium", label: "Standard (Medium)", desc: "Show standard posts" },
+            { id: "high", label: "More (High)", desc: "Show more sensitive posts" },
+          ].map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setFormFields(prev => ({ ...prev, sensitiveContentFilter: opt.id }))}
+              className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between transition cursor-pointer select-none ${
+                formFields.sensitiveContentFilter === opt.id
+                  ? "border-rose-500 bg-rose-500/5 shadow-sm font-bold"
+                  : "border-border bg-surface hover:bg-surface-hover"
+              }`}
+            >
+              <span className="font-bold text-text mb-0.5 text-[11px]">{opt.label}</span>
+              <span className="text-[9px] text-text-muted leading-tight">{opt.desc}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Snooze Suggested Posts */}
+      <div className="flex items-center justify-between gap-4 p-4 bg-surface border border-border rounded-2xl">
+        <div className="flex-1 min-w-0">
+          <span className="block font-bold text-text text-[13px]">Snooze Suggested Posts</span>
+          <span className="block text-[10px] text-text-muted mt-0.5 leading-tight">
+            {formFields.snoozeSuggestedPosts 
+              ? "Suggested content is snoozed in feed for 30 days." 
+              : "Snooze suggested posts in your feed for 30 days."}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setFormFields(prev => ({ ...prev, snoozeSuggestedPosts: !prev.snoozeSuggestedPosts }))}
+          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out outline-none ${
+            formFields.snoozeSuggestedPosts ? "bg-rose-600" : "bg-border-strong"
+          }`}
+        >
+          <span
+            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-text shadow ring-0 transition duration-200 ease-in-out ${
+              formFields.snoozeSuggestedPosts ? "translate-x-5" : "translate-x-0"
+            }`}
+          />
+        </button>
+      </div>
+
+      <div className="pt-4 flex justify-end">
+        <button
+          onClick={handleEditProfile}
+          disabled={isLoading}
+          className="px-6 py-2.5 bg-gradient-to-r from-pink-500 to-rose-600 font-bold text-xs rounded-xl hover:opacity-95 shadow transition flex items-center justify-center min-w-[100px]"
+        >
+          {isLoading ? <ClipLoader size={14} color="#fff" /> : "Save Preferences"}
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderAppearanceForm = () => (
+    <div className="space-y-6 animate-in fade-in duration-200">
+      <div className="space-y-1">
+        <h2 className="text-sm font-bold text-text">Theme & Color Palette</h2>
+        <p className="text-[11px] text-text-muted">Choose your preferred style for the interface. Changes apply instantly.</p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {[
+          { id: "light", label: "Light", desc: "Classic light look" },
+          { id: "dark", label: "Dark", desc: "Sleek dark look" },
+          { id: "system", label: "System", desc: "Device match" },
+        ].map((opt) => (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => setTheme(opt.id)}
+            className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between transition cursor-pointer select-none ${
+              theme === opt.id
+                ? "border-rose-500 bg-rose-500/5 shadow-sm font-bold"
+                : "border-border bg-surface hover:bg-surface-hover"
+            }`}
+          >
+            <span className="font-bold text-text mb-0.5 text-[11px]">{opt.label}</span>
+            <span className="text-[9px] text-text-muted leading-tight">{opt.desc}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const getActiveTabContent = (tabId) => {
+    switch (tabId) {
+      case "profile":
+        return renderEditProfileForm();
+      case "password":
+        return renderChangePasswordForm();
+      case "suggestions":
+        return renderContentSuggestionsForm();
+      case "appearance":
+        return renderAppearanceForm();
+      default:
+        return renderEditProfileForm();
     }
   };
 
   return (
-    <div className="w-full min-h-[100vh] bg-black flex flex-col items-center gap-[20px] py-5 px-4">
-      {/* Header */}
-      <div className="w-full flex items-center gap-4 mb-4">
-        <MdOutlineKeyboardBackspace
-          className="w-7 h-7 text-white cursor-pointer"
-          onClick={() => navigate(`/profile/${userData?.user?.userName}`)}
-        />
-        <h1 className="text-white text-xl font-semibold">Edit Profile</h1>
+    <div className="w-full min-h-screen bg-bg text-text p-4 md:p-8 max-w-5xl mx-auto space-y-6 select-none animate-in fade-in duration-300">
+      {/* Top Header */}
+      <div className="flex items-center justify-between border-b border-border pb-4">
+        <button onClick={() => navigate(-1)} className="p-2 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer">
+          <MdOutlineKeyboardBackspace className="w-6 h-6" />
+        </button>
+        <h1 className="text-lg font-black tracking-wider uppercase bg-gradient-to-r from-pink-500 via-rose-500 to-purple-600 bg-clip-text text-transparent">Settings & Preferences</h1>
+        <div className="w-10 h-10" />
       </div>
 
-      {/* Avatar */}
-      <div
-        className="w-[100px] h-[100px] rounded-full overflow-hidden border-2 border-gray-700 cursor-pointer mb-2"
-        onClick={() => imageInput.current.click()}
-      >
-        <input
-          type="file"
-          accept="image/*"
-          ref={imageInput}
-          hidden
-          onChange={handleImage}
-        />
-        <img
-          src={frontendImage}
-          alt="avatar"
-          className="w-full h-full object-cover"
-        />
-      </div>
-      <div
-        className="text-blue-500 text-sm font-semibold mb-4 cursor-pointer"
-        onClick={() => imageInput.current.click()}
-      >
-        Change Profile Picture
-      </div>
-
-      {/* Form Fields */}
-      {[
-        { name: "name", placeholder: "Enter name" },
-        { name: "userName", placeholder: "Enter username" },
-        { name: "bio", placeholder: "Enter bio" },
-        { name: "profession", placeholder: "Enter profession" },
-      ].map((field, i) => (
-        <input
-          key={i}
-          type="text"
-          name={field.name}
-          placeholder={field.placeholder}
-          value={formFields[field.name]}
-          onChange={handleChange}
-          className="w-full max-w-[600px] h-12 bg-[#0a1010] border border-gray-700 rounded-2xl text-white px-4 outline-none focus:border-blue-500 mb-2"
-        />
-      ))}
-
-      <input
-        type="number"
-        min="0"
-        name="age"
-        placeholder="Enter age (in years)"
-        value={formFields.age}
-        onChange={handleChange}
-        className="w-full max-w-[600px] h-12 bg-[#0a1010] border border-gray-700 rounded-2xl text-white px-4 outline-none focus:border-blue-500 mb-2 no-spinner"
-      />
-      <input
-        type="text"
-        name="location"
-        placeholder="Enter location"
-        value={formFields.location}
-        onChange={handleChange}
-        className="w-full max-w-[600px] h-12 bg-[#0a1010] border border-gray-700 rounded-2xl text-white px-4 outline-none focus:border-blue-500 mb-2"
-      />
-      <input
-        type="text"
-        name="website"
-        placeholder="Enter primary website"
-        value={formFields.website}
-        onChange={handleChange}
-        className="w-full max-w-[600px] h-12 bg-[#0a1010] border border-gray-700 rounded-2xl text-white px-4 outline-none focus:border-blue-500 mb-2"
-      />
-
-      {/* Gender */}
-      <select
-        name="gender"
-        value={formFields.gender}
-        onChange={handleChange}
-        className="w-full max-w-[600px] h-12 bg-[#0a1010] border border-gray-700 rounded-2xl text-white px-4 outline-none mb-2"
-      >
-        <option value="male">Male</option>
-        <option value="female">Female</option>
-        <option value="other">Other</option>
-      </select>
-
-      {/* Account Type */}
-      <select
-        name="accountType"
-        value={formFields.accountType}
-        onChange={handleChange}
-        className="w-full max-w-[600px] h-12 bg-[#0a1010] border border-gray-700 rounded-2xl text-white px-4 outline-none mb-4"
-      >
-        <option value="public">Public</option>
-        <option value="private">Private</option>
-      </select>
-
-      {/* Links Section */}
-      <div className="w-full max-w-[600px] mb-4">
-        <h2 className="text-white font-semibold mb-2">Links</h2>
-        {links.map((link, idx) => (
-          <div
-            key={idx}
-            className="flex justify-between items-center bg-[#111] p-2 rounded mb-2"
-          >
-            <div>
-              <p className="text-white font-medium">{link.platform}</p>
-              <p className="text-gray-400 text-sm truncate">{link.url}</p>
-            </div>
+      {/* Settings Grid Panel */}
+      <div className="flex flex-col md:flex-row min-h-[500px] border border-border bg-surface rounded-3xl overflow-hidden shadow-2xl">
+        
+        {/* Desktop Sidebar & Mobile Menu List */}
+        <div className={`w-full md:w-64 border-r-0 md:border-r border-b md:border-b-0 border-border p-4 space-y-1 bg-surface-hover/10 shrink-0 ${
+          activeMobileTab !== null ? "hidden md:block" : "block"
+        }`}>
+          <p className="px-3.5 py-2 text-[10px] font-black text-text-muted uppercase tracking-widest">Account Settings</p>
+          {SETTINGS_TABS.map((tab) => (
             <button
-              className="text-red-500 font-medium"
-              onClick={() => handleRemoveLink(idx)}
+              key={tab.id}
+              onClick={() => {
+                setActiveTab(tab.id);
+                setActiveMobileTab(tab.id);
+              }}
+              className={`w-full flex items-center justify-between px-3.5 py-3 rounded-2xl text-xs font-bold transition cursor-pointer ${
+                activeTab === tab.id
+                  ? "bg-gradient-to-r from-pink-500/10 to-rose-600/10 text-rose-500 border border-rose-500/20"
+                  : "text-text-secondary hover:bg-surface hover:text-text border border-transparent"
+              }`}
             >
-              Remove
+              <div className="flex items-center gap-3">
+                <span className={activeTab === tab.id ? "text-rose-500" : "text-text-secondary"}>
+                  {tab.icon}
+                </span>
+                <span>{tab.label}</span>
+              </div>
+              <ChevronRight className="w-4 h-4 text-text-muted/60 md:hidden" />
             </button>
-          </div>
-        ))}
+          ))}
+        </div>
 
-        {/* Add Link Button */}
-        {!showAddLink && (
-          <button
-            className="w-full bg-gray-700 text-white py-2 rounded mt-1 font-medium"
-            onClick={() => setShowAddLink(true)}
-          >
-            + Add Link
-          </button>
-        )}
-
-        {/* Add Link Form */}
-        {showAddLink && (
-          <div className="bg-[#111] p-3 rounded mt-2 flex flex-col gap-2">
-            {/* Platform Dropdown */}
-            <select
-              className="w-full bg-[#0a1010] text-white p-2 rounded border border-gray-700 outline-none"
-              value={newLink.platform}
-              onChange={(e) =>
-                setNewLink((prev) => ({ ...prev, platform: e.target.value }))
-              }
+        {/* Content Pane */}
+        <div className={`flex-1 p-6 md:p-8 space-y-6 bg-surface/40 backdrop-blur-xl ${
+          activeMobileTab === null ? "hidden md:block" : "block"
+        }`}>
+          {/* Mobile Back to Settings Menu link */}
+          {activeMobileTab !== null && (
+            <button
+              onClick={() => setActiveMobileTab(null)}
+              className="flex items-center gap-2 text-rose-500 font-bold text-xs hover:underline mb-4 md:hidden"
             >
-              {platformOptions.map((option, i) => (
-                <option key={i} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
+              <MdOutlineKeyboardBackspace className="w-4 h-4" />
+              <span>Back to Settings</span>
+            </button>
+          )}
 
-            {/* Custom Platform Name (Only for Custom) */}
-            {newLink.platform === "Custom" && (
-              <input
-                type="text"
-                placeholder="Enter platform name (e.g. GitHub, LinkedIn)"
-                className="w-full bg-[#0a1010] text-white p-2 rounded border border-gray-700 outline-none"
-                value={newLink.customPlatform}
-                onChange={(e) =>
-                  setNewLink((prev) => ({
-                    ...prev,
-                    customPlatform: e.target.value,
-                  }))
-                }
-              />
-            )}
+          {getActiveTabContent(activeTab)}
+        </div>
 
-            {/* URL */}
-            <input
-              type="url"
-              placeholder="Enter URL"
-              className="w-full bg-[#0a1010] text-white p-2 rounded border border-gray-700 outline-none"
-              value={newLink.url}
-              onChange={(e) =>
-                setNewLink((prev) => ({ ...prev, url: e.target.value }))
-              }
-            />
-
-            <div className="flex gap-2">
-              <button
-                className="flex-1 bg-blue-600 py-2 rounded text-white font-medium"
-                onClick={handleAddLink}
-              >
-                Add
-              </button>
-              <button
-                className="flex-1 bg-gray-600 py-2 rounded text-white font-medium"
-                onClick={() => {
-                  setShowAddLink(false);
-                  setNewLink({
-                    platform: "Custom",
-                    customPlatform: "",
-                    url: "",
-                  });
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
       </div>
-
-      {/* Save Button */}
-      <button
-        onClick={handleEditProfile}
-        disabled={isLoading}
-        className="w-full max-w-[600px] bg-white py-3 rounded-2xl font-semibold hover:bg-gray-200 flex justify-center items-center"
-      >
-        {isLoading ? (
-          <ClipLoader size={28} color="#36d7b7" />
-        ) : (
-          "Update Profile"
-        )}
-      </button>
     </div>
   );
 };

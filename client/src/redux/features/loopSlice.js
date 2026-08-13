@@ -1,17 +1,23 @@
 import { createSlice } from "@reduxjs/toolkit";
 
-const loopSlice = createSlice({
-  name: "loop",
+const reelSlice = createSlice({
+  name: "reel",
   initialState: {
+    reelData: [],
     loopData: [],
     isLoading: false,
   },
   reducers: {
+    setReelData: (state, action) => {
+      state.reelData = action.payload;
+      state.loopData = action.payload;
+    },
     setLoopData: (state, action) => {
+      state.reelData = action.payload;
       state.loopData = action.payload;
     },
   },
 });
 
-export const { setLoopData } = loopSlice.actions;
-export default loopSlice.reducer;
+export const { setReelData, setLoopData } = reelSlice.actions;
+export default reelSlice.reducer;

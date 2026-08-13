@@ -1,54 +1,60 @@
 export const passwordResetSuccessTemplate = (name) => `
-  <div style="font-family: 'Segoe UI', Arial, sans-serif; background: #f2f1ff; padding: 30px;">
-    <div style="max-width: 520px; margin: auto; background: #ffffff; border-radius: 14px; padding: 30px; border: 1px solid #e5e5e5;">
-
-      <!-- Brand Header -->
-      <h2 style="text-align:center; font-size: 28px; font-weight: 700; color:#6a11cb; margin-bottom: 6px;">
-        VYBE
-      </h2>
-      <p style="text-align:center; color:#4a4a4a; margin-top:0; font-size:14px;">
-        Not Just A Platform, It's A VYBE
-      </p>
-
-      <hr style="border:none; border-top: 1px solid #eee; margin: 20px 0;" />
-
-      <!-- Greeting -->
-      <p style="font-size:16px; font-weight:500; color:#222;">Hi ${name},</p>
-
-      <p style="font-size:15px; color:#444; line-height:1.5;">
-        This is a confirmation that your VYBE account password has been <b>successfully reset</b>.
-      </p>
-
-      <div style="margin: 20px 0; text-align:center;">
-        <span style="
-          display:inline-block;
-          padding:12px 26px;
-          background:#6a11cb;
-          color:#fff;
-          font-weight:600;
-          border-radius:8px;
-          font-size:15px;
-        ">
-          Password Reset Successful
-        </span>
+  <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #fafafa; padding: 40px 20px; text-align: center;">
+    <div style="max-width: 500px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e6e6e6; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+      
+      <!-- Premium Brand Header -->
+      <div style="background: linear-gradient(135deg, #c13584, #833ab4, #fd1d1d); padding: 30px 20px; text-align: center;">
+        <h1 style="color: #ffffff; margin: 0; font-size: 32px; font-weight: 800; letter-spacing: 2px; font-family: 'Outfit', 'Inter', sans-serif;">
+          VYBE
+        </h1>
+        <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0 0; font-size: 14px; font-weight: 500; letter-spacing: 1px;">
+          Not Just A Platform, It's A VYBE
+        </p>
       </div>
 
-      <p style="font-size:14px; color:#555; line-height:1.4;">
-        If you did not perform this action, please contact our support immediately to secure your account.
-      </p>
+      <!-- Content Section -->
+      <div style="padding: 40px 30px; text-align: left;">
+        <p style="font-size: 16px; font-weight: 600; color: #262626; margin-top: 0;">Hi ${name},</p>
+        
+        <p style="font-size: 14px; color: #737373; line-height: 1.6; margin-bottom: 25px;">
+          Your VYBE account password has been <strong>successfully reset</strong>. You can now log back into your account using your new credentials.
+        </p>
 
-      <br/>
+        <!-- Success Badge -->
+        <div style="text-align: center; margin: 30px 0;">
+          <div style="
+            display: inline-block;
+            font-size: 14px;
+            font-weight: 700;
+            color: #ffffff;
+            background: #12d06c;
+            padding: 12px 24px;
+            border-radius: 30px;
+            box-shadow: 0 4px 10px rgba(18, 208, 108, 0.2);
+          ">
+            ✓ Password Updated Successfully
+          </div>
+        </div>
 
-      <!-- Footer -->
-      <p style="font-size:14px; color:#7b7b7b; margin-top:30px;">
-        Cheers,<br/><b>Team VYBE 🇮🇳</b>
-      </p>
+        <p style="font-size: 14px; color: #737373; line-height: 1.6;">
+          If you did not perform this request, please contact our support team immediately or secure your account under settings.
+        </p>
 
-      <hr style="border:none; border-top: 1px solid #eee; margin: 25px 0;" />
+        <hr style="border: none; border-top: 1px solid #efefef; margin: 30px 0;" />
 
-      <p style="font-size:12px; color:#999; text-align:center;">
-        Proudly Made in India ❤️
-      </p>
+        <!-- Signature -->
+        <p style="font-size: 14px; color: #737373; margin: 0; line-height: 1.4;">
+          Cheers,<br/>
+          <strong>Team VYBE 🇮🇳</strong>
+        </p>
+      </div>
+
+      <!-- Footer Section -->
+      <div style="background-color: #fafafa; border-top: 1px solid #efefef; padding: 20px 30px; text-align: center;">
+        <p style="font-size: 11px; color: #a8a8a8; margin: 0;">
+          Made with ❤️ in India
+        </p>
+      </div>
 
     </div>
   </div>

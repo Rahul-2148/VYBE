@@ -1,0 +1,494 @@
+import React, { useState, useEffect } from "react";
+import {
+  X, Bell, BellOff, Archive, Search, Pin, Shield, UserMinus, Users,
+  Image, Film, FileText, Link2, ChevronRight, VolumeX, Volume2,
+  Clock, Trash2, Flag, Lock, Palette
+} from "lucide-react";
+import { useSelector, useDispatch } from "react-redux";
+import { toggleMuteInRedux, toggleArchiveInRedux, removeConversationInRedux, clearMessagesInRedux, updateConversationThemeInRedux, updateConversationDisappearingInRedux, toggleVanish } from "../redux/features/messageSlice";
+import dp from "../assets/dp3.png";
+import api from "../lib/axios";
+import { toast } from "sonner";
+import moment from "moment";
+import ChatThemePickerModal from "./ChatThemePickerModal";
+
+const MEDIA_TABS = [
+  { id: "image", label: "Photos", icon: <Image className="w-4 h-4" /> },
+  { id: "video", label: "Videos", icon: <Film className="w-4 h-4" /> },
+  { id: "file", label: "Files", icon: <FileText className="w-4 h-4" /> },
+  { id: "link", label: "Links", icon: <Link2 className="w-4 h-4" /> },
+];
+
+const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
+  const dispatch = useDispatch();
+  const { userData } = useSelector((s) => s.user);
+  const { conversations } = useSelector((s) => s.message);
+  const currentUserId = userData?.user?._id || userData?._id;
+
+  const conversation = conversations.find((c) => (c._id || c.conversationId)?.toString() === conversationId?.toString());
+
+  const [activeMediaTab, setActiveMediaTab] = useState("image");
+  const [sharedMedia, setSharedMedia] = useState([]);
+  const [loadingMedia, setLoadingMedia] = useState(false);
+  const [details, setDetails] = useState(null);
+  const [showThemePicker, setShowThemePicker] = useState(false);
+  const [activeTheme, setActiveTheme] = useState(conversation?.theme || "default");
+
+  // Fetch conversation details
+  useEffect(() => {
+    const fetchDetails = async () => {
+      try {
+        const res = await api.get(`/conversation/details/${conversationId}`);
+        if (res.data?.success) {
+          setDetails(res.data.conversation);
+        }
+      } catch (err) {
+        console.error("Failed to fetch conversation details", err);
+      }
+    };
+    if (conversationId) fetchDetails();
+  }, [conversationId]);
+
+  // Fetch shared media
+  useEffect(() => {
+    const fetchMedia = async () => {
+      setLoadingMedia(true);
+      try {
+        const res = await api.get(`/message/shared-media/${conversationId}?mediaType=${activeMediaTab}`);
+        setSharedMedia(res.data?.messages || []);
+      } catch {
+        setSharedMedia([]);
+      } finally {
+        setLoadingMedia(false);
+      }
+    };
+    if (conversationId) fetchMedia();
+  }, [conversationId, activeMediaTab]);
+
+  const handleMute = async () => {
+    try {
+      const res = await api.patch(`/conversation/mute/${conversationId}`);
+      if (res.data?.success) {
+        dispatch(toggleMuteInRedux({ conversationId, muted: res.data.muted }));
+        toast.success(res.data.muted ? "Notifications muted" : "Notifications unmuted");
+      }
+    } catch {
+      toast.error("Failed");
+    }
+  };
+
+  const handleArchive = async () => {
+    try {
+      const res = await api.patch(`/conversation/archive/${conversationId}`);
+      if (res.data?.success) {
+        dispatch(toggleArchiveInRedux({ conversationId, archived: res.data.archived }));
+        toast.success(res.data.archived ? "Chat archived" : "Chat unarchived");
+      }
+    } catch {
+      toast.error("Failed");
+    }
+  };
+
+  const handleDisappearing = async (duration) => {
+    try {
+      const res = await api.patch(`/conversation/disappearing/${conversationId}`, { duration });
+      if (res.data?.success) {
+        dispatch(updateConversationDisappearingInRedux({ conversationId, disappearingMessages: res.data.disappearingMessages }));
+        toast.success(res.data.disappearingMessages?.enabled ? "Disappearing messages on" : "Disappearing messages off");
+      }
+    } catch {
+      toast.error("Failed to update");
+    }
+  };
+
+  const handleToggleVanishMode = async () => {
+    try {
+      const res = await api.patch(`/conversation/vanish/${conversationId}`);
+      if (res.data?.success) {
+        dispatch(toggleVanish(conversationId));
+        toast.success(res.data.vanishMode ? "Vanish Mode turned ON 👻" : "Vanish Mode turned OFF");
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to toggle Vanish Mode");
+    }
+  };
+
+  const handleDeleteChat = async () => {
+    if (!window.confirm("Are you sure you want to delete this conversation? This cannot be undone.")) return;
+    try {
+      const res = await api.delete(`/conversation/delete/${conversationId}`);
+      if (res.data?.success) {
+        dispatch(removeConversationInRedux(conversationId));
+        toast.success("Chat deleted");
+        onClose();
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to delete chat");
+    }
+  };
+
+  const handleClearChat = async () => {
+    if (!window.confirm("Are you sure you want to clear all messages in this chat?")) return;
+    try {
+      const res = await api.delete(`/conversation/clear/${conversationId}`);
+      if (res.data?.success) {
+        dispatch(clearMessagesInRedux(conversationId));
+        toast.success("Chat history cleared");
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to clear chat");
+    }
+  };
+
+  const handleBlockUser = async () => {
+    if (!otherUser?._id) return;
+    const isBlocked = conversation?.blockedBy?.some((id) => id.toString() === currentUserId);
+    const confirmMsg = isBlocked 
+      ? `Unblock @${otherUser?.userName}?`
+      : `Block @${otherUser?.userName}? They won't be able to message you.`;
+    if (!window.confirm(confirmMsg)) return;
+    
+    try {
+      const res = await api.patch(`/conversation/block/${conversationId}`);
+      if (res.data?.success) {
+        toast.success(res.data.blocked ? `Blocked @${otherUser?.userName}` : `Unblocked @${otherUser?.userName}`);
+        onClose();
+        window.location.href = "/messages";
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to toggle block status");
+    }
+  };
+
+  const isMuted = Boolean(conversation?.isMuted);
+  const isArchived = Boolean(conversation?.isArchived);
+  const rawMembers = details?.participants || conversation?.participants || [];
+  const members = Array.isArray(rawMembers) ? rawMembers : [];
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-surface-overlay backdrop-blur-sm" onClick={onClose} />
+
+      {/* Drawer */}
+      <div className="relative w-full max-w-md h-full bg-surface-inset border-l border-border flex flex-col overflow-y-auto animate-in slide-in-from-right duration-200">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <h2 className="text-base font-bold text-text">Details</h2>
+          <button onClick={onClose} className="p-1.5 rounded-full hover:bg-surface-hover transition cursor-pointer">
+            <X className="w-5 h-5 text-text-secondary" />
+          </button>
+        </div>
+
+        {/* Profile Section */}
+        <div className="flex flex-col items-center py-6 px-5 border-b border-border">
+          {isGroup ? (
+            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 p-[2px] mb-3">
+              <div className="w-full h-full rounded-full bg-surface flex items-center justify-center">
+                <Users className="w-8 h-8 text-purple-300" />
+              </div>
+            </div>
+          ) : (
+            <img
+              src={otherUser?.profileImage?.url || dp}
+              alt=""
+              className="w-20 h-20 rounded-full object-cover mb-3"
+            />
+          )}
+
+          <h3 className="text-lg font-bold text-text">
+            {isGroup ? details?.groupName || "Group Chat" : otherUser?.userName || "User"}
+          </h3>
+
+          {isGroup && details?.description && (
+            <p className="text-xs text-text-muted mt-1 text-center max-w-[280px]">{details.description}</p>
+          )}
+
+          {!isGroup && otherUser && (
+            <p className="text-xs text-text-muted mt-0.5">
+              {otherUser.isOnline ? "Active now" : otherUser.lastSeen ? `Active ${moment(otherUser.lastSeen).fromNow()}` : "Offline"}
+            </p>
+          )}
+        </div>
+
+        {/* Quick Actions */}
+        <div className="grid grid-cols-3 gap-1 px-5 py-4 border-b border-border">
+          <button
+            onClick={handleMute}
+            className="flex flex-col items-center gap-1.5 py-3 rounded-xl hover:bg-surface transition cursor-pointer"
+          >
+            {isMuted ? <Volume2 className="w-5 h-5 text-text-secondary" /> : <VolumeX className="w-5 h-5 text-text-secondary" />}
+            <span className="text-[11px] text-text-muted">{isMuted ? "Unmute" : "Mute"}</span>
+          </button>
+          <button
+            onClick={handleArchive}
+            className="flex flex-col items-center gap-1.5 py-3 rounded-xl hover:bg-surface transition cursor-pointer"
+          >
+            <Archive className="w-5 h-5 text-text-secondary" />
+            <span className="text-[11px] text-text-muted">{isArchived ? "Unarchive" : "Archive"}</span>
+          </button>
+          <button
+            onClick={() => toast.success("Reported chat to safety team.")}
+            className="flex flex-col items-center gap-1.5 py-3 rounded-xl hover:bg-surface transition cursor-pointer"
+          >
+            <Flag className="w-5 h-5 text-text-secondary" />
+            <span className="text-[11px] text-text-muted">Report</span>
+          </button>
+        </div>
+
+        {/* Disappearing Messages */}
+        <div className="px-5 py-4 border-b border-border">
+          {/* Disappearing Messages with duration picker */}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-3 py-2">
+              <Clock className="w-5 h-5 text-text-secondary" />
+              <div>
+                <p className="text-sm text-text font-medium">Disappearing messages</p>
+                <p className="text-[11px] text-text-muted">
+                  {conversation?.disappearingMessages?.enabled
+                    ? `On (${conversation.disappearingMessages.duration <= 86400 ? "24 hours" : conversation.disappearingMessages.duration <= 604800 ? "7 days" : "90 days"})`
+                    : "Off"}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 pl-8">
+              {[
+                { label: "24h", value: 86400 },
+                { label: "7d", value: 604800 },
+                { label: "90d", value: 7776000 },
+              ].map((opt) => {
+                const isActive = conversation?.disappearingMessages?.enabled && conversation.disappearingMessages.duration === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => handleDisappearing(opt.value)}
+                    className={`px-3.5 py-1.5 text-[11px] font-bold rounded-lg transition cursor-pointer ${
+                      isActive
+                        ? "bg-purple-500/20 text-purple-400 border border-purple-500/40"
+                        : "bg-surface text-text-secondary border border-border hover:bg-surface-hover hover:text-text"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+              {conversation?.disappearingMessages?.enabled && (
+                <button
+                  onClick={() => handleDisappearing(null)}
+                  className="px-3.5 py-1.5 text-[11px] font-bold rounded-lg bg-surface text-red-400 border border-border hover:bg-red-500/10 hover:border-red-500/30 transition cursor-pointer"
+                >
+                  Off
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Vanish Mode Option */}
+          <div className="flex items-center justify-between py-2 border-t border-border mt-3 pt-3">
+            <div className="flex items-center gap-3">
+              <Clock className="w-5 h-5 text-rose-400" />
+              <div>
+                <p className="text-sm text-text font-medium">Vanish mode</p>
+                <p className="text-[11px] text-text-muted">Messages disappear when you close the chat.</p>
+              </div>
+            </div>
+            <button
+              onClick={handleToggleVanishMode}
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out outline-none ${
+                conversation?.vanishMode ? "bg-rose-500" : "bg-border-strong"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-text shadow ring-0 transition duration-200 ease-in-out ${
+                  conversation?.vanishMode ? "translate-x-4" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+
+          <button
+            onClick={() => setShowThemePicker(true)}
+            className="w-full flex items-center justify-between py-2 mt-2 cursor-pointer group"
+          >
+            <div className="flex items-center gap-3">
+              <Palette className="w-5 h-5 text-purple-400" />
+              <div>
+                <p className="text-sm text-text font-medium">Theme & Customization</p>
+                <p className="text-[11px] text-text-muted capitalize">{activeTheme || "Default Gradient"}</p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-text-muted group-hover:text-text-secondary transition" />
+          </button>
+
+          <button className="w-full flex items-center justify-between py-2 cursor-pointer group">
+            <div className="flex items-center gap-3">
+              <Lock className="w-5 h-5 text-text-secondary" />
+              <div>
+                <p className="text-sm text-text font-medium">Encryption</p>
+                <p className="text-[11px] text-text-muted">Messages are end-to-end encrypted</p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-text-muted group-hover:text-text-secondary transition" />
+          </button>
+        </div>
+
+        {/* Group Members */}
+        {isGroup && members.length > 0 && (
+          <div className="px-5 py-4 border-b border-border">
+            <h4 className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-3">
+              Members · {members.length}
+            </h4>
+            <div className="space-y-2 max-h-[200px] overflow-y-auto hide-scrollbar">
+              {members.map((m, idx) => {
+                const memberObj = typeof m === "object" && m !== null ? m : { _id: m };
+                const memberId = memberObj._id || memberObj.id || m;
+                const isAdmin = details?.admins?.some((a) => a && (a.user?._id || a.user)?.toString() === memberId?.toString());
+                const isOwnerRole = details?.admins?.some((a) => a && (a.user?._id || a.user)?.toString() === memberId?.toString() && a.role === "owner");
+
+                return (
+                  <div key={memberId || idx} className="flex items-center gap-3 py-1.5">
+                    <img
+                      src={memberObj.profileImage?.url || dp}
+                      alt=""
+                      className="w-10 h-10 rounded-full object-cover"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-text font-medium truncate">
+                        {memberObj.userName || memberObj.name || "User"}
+                        {memberId?.toString() === currentUserId?.toString() && <span className="text-text-muted text-xs ml-1">(You)</span>}
+                      </p>
+                      {isOwnerRole && <span className="text-[10px] text-amber-400 font-semibold">Owner</span>}
+                      {isAdmin && !isOwnerRole && <span className="text-[10px] text-blue-400 font-semibold">Admin</span>}
+                    </div>
+                    {memberObj.isOnline && (
+                      <div className="w-2 h-2 bg-green-500 rounded-full shrink-0" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Shared Media */}
+        <div className="px-5 py-4">
+          <h4 className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-3">
+            Shared Media
+          </h4>
+
+          <div className="flex gap-1 mb-3">
+            {MEDIA_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveMediaTab(tab.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+                  activeMediaTab === tab.id
+                    ? "bg-surface-hover text-text"
+                    : "text-text-muted hover:text-text hover:bg-surface"
+                }`}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {loadingMedia ? (
+            <div className="grid grid-cols-3 gap-1">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="aspect-square bg-surface-hover rounded-lg animate-pulse" />
+              ))}
+            </div>
+          ) : sharedMedia.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-xs text-text-muted">No shared {activeMediaTab}s yet</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-1">
+              {sharedMedia.map((msg) => {
+                const mediaList = Array.isArray(msg?.content?.media)
+                  ? msg.content.media
+                  : msg?.content?.media
+                  ? [msg.content.media]
+                  : [];
+                const media = mediaList[0];
+                if (!media || !media.url) return null;
+
+                return (
+                  <div key={msg._id} className="aspect-square rounded-lg overflow-hidden cursor-pointer hover:opacity-80 transition">
+                    {media.type === "image" || activeMediaTab === "image" ? (
+                      <img src={media.url} alt="" className="w-full h-full object-cover" />
+                    ) : media.type === "video" || activeMediaTab === "video" ? (
+                      <div className="w-full h-full bg-surface-hover flex items-center justify-center relative">
+                        <Film className="w-8 h-8 text-text-muted" />
+                      </div>
+                    ) : (
+                      <div className="w-full h-full bg-surface-hover flex flex-col items-center justify-center p-2">
+                        <FileText className="w-6 h-6 text-text-muted mb-1" />
+                        <p className="text-[9px] text-text-muted truncate w-full text-center">{media.name || "File"}</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Danger Zone */}
+        <div className="px-5 py-4 mt-auto border-t border-border space-y-1">
+          {!isGroup && (
+            <>
+              <button
+                onClick={handleClearChat}
+                className="w-full flex items-center gap-3 py-2 text-text hover:bg-surface/50 rounded-lg transition cursor-pointer px-2"
+              >
+                <Clock className="w-4.5 h-4.5 text-amber-500" />
+                <span className="text-xs font-medium">Clear Chat History</span>
+              </button>
+              <button
+                onClick={handleBlockUser}
+                className="w-full flex items-center gap-3 py-2 text-red-400 hover:bg-surface/50 rounded-lg transition cursor-pointer px-2"
+              >
+                <Shield className="w-4.5 h-4.5" />
+                <span className="text-xs font-medium">
+                  {conversation?.blockedBy?.some((id) => id.toString() === currentUserId) ? "Unblock" : "Block"} @{otherUser?.userName || "User"}
+                </span>
+              </button>
+              <button
+                onClick={handleDeleteChat}
+                className="w-full flex items-center gap-3 py-2 text-red-500 hover:bg-red-500/10 rounded-lg transition cursor-pointer px-2 font-bold"
+              >
+                <Trash2 className="w-4.5 h-4.5" />
+                <span className="text-xs">Delete Chat</span>
+              </button>
+            </>
+          )}
+          {isGroup && (
+            <button
+              onClick={handleDeleteChat}
+              className="w-full flex items-center gap-3 py-3 text-red-400 hover:bg-surface/50 rounded-lg transition cursor-pointer px-2"
+            >
+              <UserMinus className="w-5 h-5" />
+              <span className="text-sm font-medium">Leave & Delete Group</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Theme Picker Modal */}
+      <ChatThemePickerModal
+        isOpen={showThemePicker}
+        onClose={() => setShowThemePicker(false)}
+        conversationId={conversationId}
+        currentTheme={activeTheme}
+        onThemeChanged={(newTheme) => {
+          setActiveTheme(newTheme);
+          dispatch(updateConversationThemeInRedux({ conversationId, theme: newTheme }));
+        }}
+      />
+    </div>
+  );
+};
+
+export default ChatInfoDrawer;

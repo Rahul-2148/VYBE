@@ -25,6 +25,12 @@ const conversationSchema = new mongoose.Schema(
       public_id: String,
     },
 
+    description: {
+      type: String,
+      default: "",
+      maxlength: 500,
+    },
+
     admins: [
       {
         user: {
@@ -33,7 +39,7 @@ const conversationSchema = new mongoose.Schema(
         },
         role: {
           type: String,
-          enum: ["owner", "co-admin"],
+          enum: ["owner", "co-admin", "moderator"],
           default: "co-admin",
         },
       },
@@ -64,6 +70,75 @@ const conversationSchema = new mongoose.Schema(
       },
     ],
 
+    archivedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    blockedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    restrictedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    pinnedMessages: [
+      {
+        message: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Message",
+        },
+        pinnedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+        pinnedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+
+    // Disappearing messages — per-conversation setting
+    disappearingMessages: {
+      enabled: {
+        type: Boolean,
+        default: false,
+      },
+      duration: {
+        type: Number, // seconds: 86400 (24h), 604800 (7d), 2592000 (30d)
+        default: null,
+      },
+      setBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+      setAt: {
+        type: Date,
+      },
+    },
+
+    // Chat theme/wallpaper customization
+    theme: {
+      type: String,
+      enum: ["default", "midnight", "ocean", "forest", "sunset", "lavender", "custom"],
+      default: "default",
+    },
+
+    customThemeColor: {
+      type: String, // hex color for custom theme
+      default: null,
+    },
+
     invite: {
       token: String,
       expiresAt: Date,
@@ -79,12 +154,21 @@ const conversationSchema = new mongoose.Schema(
       type: Number, // seconds (eg: 10, 60, 3600)
       default: null,
     },
+
+    // Message request status for non-followers
+    requestStatus: {
+      type: String,
+      enum: ["none", "pending", "accepted", "declined"],
+      default: "none",
+    },
   },
   { timestamps: true }
 );
 
-// 🔥 PERFORMANCE INDEXES (VERY IMPORTANT)
+// PERFORMANCE INDEXES
 conversationSchema.index({ participants: 1 });
 conversationSchema.index({ updatedAt: -1 });
+conversationSchema.index({ "invite.token": 1 });
+conversationSchema.index({ requestStatus: 1, participants: 1 });
 
 export const Conversation = mongoose.model("Conversation", conversationSchema);

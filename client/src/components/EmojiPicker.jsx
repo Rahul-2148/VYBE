@@ -21,7 +21,7 @@ const EmojiPicker = ({
   onClose,
 }) => {
   return (
-    <div className="absolute bottom-16 right-4 bg-black/95 p-3 rounded-xl shadow-lg w-64 z-50 flex flex-wrap gap-2">
+    <div className="absolute bottom-16 right-4 bg-bg/95 p-3 rounded-xl shadow-lg w-64 z-50 flex flex-wrap gap-2">
       {emojis.map((e) => (
         <button
           key={e}
@@ -41,7 +41,7 @@ const EmojiPicker = ({
 
       {/* Remove reaction button */}
       <button
-        className="text-xl text-white/70 px-2 ml-auto hover:text-white transition"
+        className="text-xl text-white/70 px-2 ml-auto hover:text-text transition"
         onClick={(ev) => {
           ev.stopPropagation();
           onSelect("");
@@ -53,7 +53,7 @@ const EmojiPicker = ({
       {/* Close button */}
       {onClose && (
         <button
-          className="absolute top-1 right-2 text-white/50 hover:text-white transition text-sm"
+          className="absolute top-1 right-2 text-white/50 hover:text-text transition text-sm"
           onClick={(ev) => {
             ev.stopPropagation();
             onClose();

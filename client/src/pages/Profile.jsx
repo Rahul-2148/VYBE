@@ -1,348 +1,913 @@
-import axios from "axios";
-import { useState, useEffect } from "react";
-import { toast } from "react-hot-toast";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { MdOutlineKeyboardBackspace } from "react-icons/md";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate, useParams } from "react-router-dom";
-import { SERVER_URL } from "../App";
-import dp from "../assets/dp3.png";
+import {
+  Archive,
+  BarChart2,
+  Bookmark,
+  Camera,
+  ChevronRight,
+  Film,
+  Grid,
+  Heart,
+  Link2,
+  MessageCircle,
+  Play,
+  Plus,
+  QrCode,
+  ShieldAlert,
+  ShieldCheck,
+  Star,
+  CheckCircle2,
+  Lock,
+  X,
+} from "lucide-react";
 import Navbar from "../components/Navbar";
-import { setProfileData, setUserData } from "../redux/features/userSlice";
-import ProfileQrModal from "../components/ProfileQRModal";
+import ProfileQRModal from "../components/ProfileQRModal";
 import FollowButton from "../components/FollowButton";
-import InfoSheet from "../components/InfoSheet";
-import Post from "../components/Post";
-import { Info } from "lucide-react";
+import ProfileInsightsModal from "../components/ProfileInsightsModal";
+import CloseFriendsModal from "../components/CloseFriendsModal";
+import StoryHighlighterModal from "../components/StoryHighlighterModal";
+import VerifiedBadge from "../components/VerifiedBadge";
+import dp from "../assets/dp3.png";
+import { setProfileData, setUserData } from "../redux/features/userSlice";
 import { setSelectedChatUser } from "../redux/features/messageSlice";
+import api from "../lib/axios";
+
+const PROFILE_TABS = [
+  { id: "posts", label: "Posts", icon: Grid },
+  { id: "loops", label: "Reels", icon: Film },
+  { id: "saved", label: "Saved", icon: Bookmark },
+];
+
+const resolveMediaUrl = (item) => {
+  return (
+    item?.media?.url ||
+    item?.mediaUrl ||
+    item?.thumbnailUrl ||
+    item?.coverUrl ||
+    item?.carouselMedia?.[0]?.url ||
+    item?.carousel?.[0]?.url ||
+    item?.video?.url ||
+    item?.audioTrack?.coverUrl ||
+    null
+  );
+};
+
+const getPreviewKind = (item, kind) => {
+  if (kind === "loop") return "loop";
+  if (item?.mediaType === "video") return "video";
+  if ((item?.carouselMedia?.length || item?.carousel?.length || 0) > 1) return "carousel";
+  return "post";
+};
+
+const getUserAvatarUrl = (user) => user?.profileImage?.url || user?.avatarUrl || dp;
+
+const ProfileTile = ({ item, kind, onClick }) => {
+  const mediaUrl = resolveMediaUrl(item);
+  const previewKind = getPreviewKind(item, kind);
+  const commentCount = item?.comments?.length || 0;
+  const likeCount = item?.likes?.length || 0;
+  const viewCount = item?.views || item?.viewCount || 0;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group relative aspect-square overflow-hidden rounded-2xl bg-zinc-900 border border-zinc-800/80 text-left shadow-sm transition duration-300 hover:-translate-y-1 hover:border-zinc-700"
+    >
+      {mediaUrl ? (
+        previewKind === "loop" ? (
+          <video src={mediaUrl} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+        ) : (
+          <img src={mediaUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+        )
+      ) : (
+        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-900 via-zinc-950 to-black">
+          <div className="rounded-2xl border border-zinc-800 bg-black/40 p-4">
+            <Camera className="h-6 w-6 text-zinc-500" />
+          </div>
+        </div>
+      )}
+
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent opacity-100 transition group-hover:from-black/60" />
+
+      <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 p-3">
+        <div className="min-w-0">
+          <p className="truncate text-[11px] font-semibold text-white">{item?.caption || item?.title || item?.name || "Untitled"}</p>
+          <p className="mt-0.5 text-[10px] text-zinc-300">
+            {kind === "loop" ? `${viewCount} views` : `${likeCount} likes · ${commentCount} comments`}
+          </p>
+        </div>
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/45 backdrop-blur border border-white/10 text-white">
+          {previewKind === "loop" ? <Play className="h-4 w-4 fill-white" /> : <ChevronRight className="h-4 w-4" />}
+        </div>
+      </div>
+
+      <div className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-[10px] font-bold text-white backdrop-blur border border-white/10">
+        {previewKind === "loop" ? (
+          <>
+            <Play className="h-3 w-3 fill-white" />
+            <span>Reel</span>
+          </>
+        ) : previewKind === "carousel" ? (
+          <>
+            <Grid className="h-3 w-3" />
+            <span>Multi</span>
+          </>
+        ) : (
+          <>
+            <Heart className="h-3 w-3" />
+            <span>Post</span>
+          </>
+        )}
+      </div>
+    </button>
+  );
+};
+
+const SectionSkeleton = () => (
+  <div className="animate-pulse space-y-6 w-full">
+    {/* 1. Header Card Skeleton */}
+    <div className="rounded-[2rem] border border-zinc-900 bg-zinc-950/90 p-4 sm:p-6 shadow-2xl space-y-6">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
+        {/* Avatar + Info Block */}
+        <div className="flex items-start gap-5 flex-1">
+          {/* Avatar Skeleton */}
+          <div className="h-24 w-24 sm:h-32 sm:w-32 rounded-full bg-zinc-800/80 shrink-0 border border-zinc-800" />
+
+          {/* Info Lines Skeleton */}
+          <div className="flex-1 space-y-3 pt-1">
+            <div className="h-7 w-48 rounded-lg bg-zinc-800/80" />
+            <div className="h-4 w-32 rounded-md bg-zinc-850" />
+            <div className="h-4 w-full max-w-md rounded-md bg-zinc-900" />
+            <div className="flex gap-2 pt-1">
+              <div className="h-7 w-24 rounded-full bg-zinc-850" />
+              <div className="h-7 w-20 rounded-full bg-zinc-850" />
+            </div>
+          </div>
+        </div>
+
+        {/* Stats Grid Box Skeleton */}
+        <div className="rounded-3xl border border-zinc-900 bg-black/40 p-4 lg:min-w-[310px] space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="h-16 rounded-2xl bg-zinc-900/80" />
+            <div className="h-16 rounded-2xl bg-zinc-900/80" />
+            <div className="h-16 rounded-2xl bg-zinc-900/80" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="h-12 rounded-2xl bg-zinc-900/50" />
+            <div className="h-12 rounded-2xl bg-zinc-900/50" />
+          </div>
+        </div>
+      </div>
+
+      {/* Action Buttons Row Skeleton */}
+      <div className="flex flex-wrap items-center gap-3 pt-2">
+        <div className="h-9 w-28 rounded-full bg-zinc-800/90" />
+        <div className="h-9 w-32 rounded-full bg-zinc-900" />
+        <div className="h-9 w-24 rounded-full bg-zinc-900" />
+        <div className="h-9 w-28 rounded-full bg-zinc-900" />
+      </div>
+    </div>
+
+    {/* 2. Highlights Section Skeleton */}
+    <div className="rounded-[2rem] border border-zinc-900 bg-zinc-950/70 p-4 sm:p-5 space-y-4">
+      <div className="space-y-1.5">
+        <div className="h-3 w-20 rounded-md bg-zinc-800/70" />
+        <div className="h-4 w-36 rounded-md bg-zinc-850" />
+      </div>
+      <div className="flex gap-4 overflow-hidden">
+        {Array.from({ length: 5 }).map((_, idx) => (
+          <div key={idx} className="flex flex-col items-center gap-2 shrink-0">
+            <div className="h-20 w-20 rounded-full bg-zinc-850 border border-zinc-800" />
+            <div className="h-3 w-12 rounded-md bg-zinc-900" />
+          </div>
+        ))}
+      </div>
+    </div>
+
+    {/* 3. Tab Bar Skeleton */}
+    <div className="rounded-3xl border border-zinc-900 bg-black/80 p-2">
+      <div className="grid grid-cols-3 gap-2">
+        <div className="h-12 rounded-2xl bg-zinc-900/80" />
+        <div className="h-12 rounded-2xl bg-zinc-950/60" />
+        <div className="h-12 rounded-2xl bg-zinc-950/60" />
+      </div>
+    </div>
+
+    {/* 4. Posts Grid Skeleton */}
+    <div className="rounded-[2rem] border border-zinc-900 bg-zinc-950/70 p-4 sm:p-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        {Array.from({ length: 8 }).map((_, idx) => (
+          <div key={idx} className="aspect-square rounded-2xl bg-zinc-900/80 border border-zinc-850" />
+        ))}
+      </div>
+    </div>
+  </div>
+);
 
 const Profile = () => {
   const { profileData, userData } = useSelector((state) => state.user);
-  const { postData } = useSelector((state) => state.post);
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const [showQRModal, setShowQRModal] = useState(false);
-  const [postType, setPostType] = useState("posts");
-  const [showDpView, setShowDpView] = useState(false);
-  const [showInfoSheet, setShowInfoSheet] = useState(false);
-
   const { userName } = useParams();
-  const handleProfile = async () => {
+
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [showInsightsModal, setShowInsightsModal] = useState(false);
+  const [showCloseFriendsModal, setShowCloseFriendsModal] = useState(false);
+  const [showHighlighterModal, setShowHighlighterModal] = useState(false);
+  const [postType, setPostType] = useState("posts");
+  const [highlights, setHighlights] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showDpView, setShowDpView] = useState(false);
+  const [showDPOptions, setShowDPOptions] = useState(false);
+
+  const handleProfile = useCallback(async () => {
     try {
-      const result = await axios.get(
-        `${SERVER_URL}/api/v1/user/getProfile/${userName}`,
-        {
-          withCredentials: true,
-        }
-      );
+      setLoading(true);
+      const result = await api.get(`/user/getProfile/${userName}`);
       dispatch(setProfileData(result.data));
+
+      const hlRes = await api.get(`/story/highlight/user/${userName}`).catch(() => null);
+      setHighlights(hlRes?.data?.highlights || []);
     } catch (error) {
-      console.log(error);
+      toast.error(error?.response?.data?.message || "Failed to load profile.");
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [dispatch, userName]);
 
   useEffect(() => {
     window.scrollTo(0, 0);
     handleProfile();
-  }, [userName, dispatch]);
+  }, [handleProfile]);
 
   const handleLogOut = async () => {
     try {
-      const result = await axios.post(
-        `${SERVER_URL}/api/v1/auth/signout`,
-        {},
-        { withCredentials: true }
-      );
-
+      const result = await api.post("/auth/signout");
       dispatch(setUserData(null));
-      toast.success(result.data.message);
+      toast.success(result.data.message || "Logged out");
       navigate("/signin");
-    } catch (error) {
-      toast.error(error.response?.data?.message);
+    } catch {
+      toast.error("Logout failed");
     }
   };
 
   const isOwnProfile = profileData?.user?._id === userData?.user?._id;
+  const isFollowing = useMemo(() => {
+    return (profileData?.user?.followers || []).some(
+      (f) => (f._id || f || "").toString() === userData?.user?._id?.toString()
+    );
+  }, [profileData?.user?.followers, userData?.user?._id]);
 
   const handleMessage = async () => {
-    const res = await axios.post(
-      `${SERVER_URL}/api/v1/conversation/one-to-one`,
-      { userId: profileData.user._id },
-      { withCredentials: true }
-    );
-
-    dispatch(
-      setSelectedChatUser({
-        conversationId: res.data.conversation._id,
-        user: profileData.user,
-      })
-    );
-
-    navigate("/messageArea");
+    try {
+      const res = await api.post("/conversation/one-to-one", { userId: profileData.user._id });
+      dispatch(
+        setSelectedChatUser({
+          conversationId: res.data.conversation._id,
+          user: profileData.user,
+        })
+      );
+      navigate(`/messages/${res.data.conversation._id}`);
+    } catch {
+      toast.error("Failed to start message.");
+    }
   };
 
+  const tabCounts = useMemo(
+    () => ({
+      posts: profileData?.user?.posts?.length || 0,
+      loops: profileData?.user?.loops?.length || 0,
+      saved: (userData?.user?.savedPosts?.length || 0) + (userData?.user?.savedLoops?.length || 0),
+    }),
+    [profileData, userData]
+  );
+
+  const savedFeed = useMemo(() => {
+    const savedPosts = (profileData?.user?.posts || []).filter((post) => userData?.user?.savedPosts?.includes(post?._id));
+    const savedLoops = (profileData?.user?.loops || []).filter((loop) => userData?.user?.savedLoops?.includes(loop?._id));
+    return [
+      ...savedPosts.map((item) => ({ ...item, __kind: "post" })),
+      ...savedLoops.map((item) => ({ ...item, __kind: "loop" })),
+    ];
+  }, [profileData, userData]);
+
+  const followerList = useMemo(() => profileData?.user?.followers || [], [profileData]);
+  const followingList = useMemo(() => profileData?.user?.following || [], [profileData]);
+  const followerPreview = followerList.slice(0, 6);
+  const followingPreview = followingList.slice(0, 6);
+
+  const activeFeed = useMemo(() => {
+    if (postType === "loops") return (profileData?.user?.loops || []).map((item) => ({ ...item, __kind: "loop" }));
+    if (postType === "saved") return savedFeed;
+    return (profileData?.user?.posts || []).map((item) => ({ ...item, __kind: "post" }));
+  }, [postType, profileData, savedFeed]);
+
+  const feedEmptyState =
+    postType === "loops"
+      ? { title: "No reels yet", copy: isOwnProfile ? "Upload a reel to start building your short-form presence." : "This creator has not shared reels yet." }
+      : postType === "saved"
+      ? { title: "Nothing saved yet", copy: "Saved posts and reels will appear here for quick access." }
+      : { title: "No posts yet", copy: isOwnProfile ? "Share your first post to fill this grid." : "This creator has not posted yet." };
+  const isVerified = Boolean(profileData?.user?.isVerified);
+
   return (
-    <div className="w-full min-h-screen bg-black">
-      <div className="w-full h-[80px] flex justify-between items-center px-[30px] text-white">
-        <div onClick={() => navigate("/")}>
-          <MdOutlineKeyboardBackspace className="w-[25px] h-[25px] text-white cursor-pointer" />
-        </div>
-        <div className="font-semibold text-[20px]">
-          <span className="text-rose-500">@</span>
-          {profileData?.user?.userName}
-        </div>
-        <div
-          className="font-semibold text-[20px] cursor-pointer text-blue-500"
-          onClick={handleLogOut}
-        >
-          Log Out
+    <div className="min-h-screen bg-black text-white">
+      <div className="relative overflow-hidden border-b border-zinc-900/80 bg-gradient-to-b from-zinc-950 via-black to-black">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(225,48,108,0.16),_transparent_40%),radial-gradient(circle_at_80%_10%,_rgba(64,93,230,0.12),_transparent_25%)]" />
+        <div className="relative mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+          <button
+            onClick={() => {
+              if (window.history.length > 1) {
+                navigate(-1);
+              } else {
+                navigate("/");
+              }
+            }}
+            className="rounded-full border border-zinc-800 bg-zinc-950/80 p-2 text-zinc-300 transition hover:border-zinc-700 hover:text-white cursor-pointer"
+            title="Go Back"
+          >
+            <MdOutlineKeyboardBackspace className="h-6 w-6" />
+          </button>
+
+          <div className="text-center">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Profile</p>
+            <div className="mt-1 flex items-center justify-center gap-1.5 text-sm font-bold text-white">
+              <span className="text-rose-400">@</span>
+              <span className="truncate">{profileData?.user?.userName || userName}</span>
+              {isVerified && <VerifiedBadge size="xs" />}
+              {profileData?.user?.accountType === "private" && (
+                <Lock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+              )}
+            </div>
+          </div>
+
+          {isOwnProfile ? (
+            <button
+              className="rounded-full border border-zinc-800 bg-zinc-950/80 px-4 py-2 text-xs font-semibold text-rose-400 transition hover:border-rose-500/40 hover:text-white"
+              onClick={handleLogOut}
+            >
+              Log Out
+            </button>
+          ) : (
+            <div className="w-[88px]" />
+          )}
         </div>
       </div>
 
-      <div className="w-full h-[150px] flex items-start gap-[20px] lg:gap-[50px] pt-[20px] px-[10px] justify-center">
-        <div
-          className="w-[80px] h-[80px] md:w-[140px] md:h-[140px] border-2 border-black rounded-full cursor-pointer overflow-hidden"
-          onClick={() => {
-            setShowDpView(true);
-            document.body.classList.add("overflow-hidden", "hide-scrollbar");
-          }}
-        >
-          <img
-            src={profileData?.user?.profileImage?.url || dp}
-            alt=""
-            className="w-full object-cover"
-          />
-        </div>
-
-        <div className="">
-          <div className="font-semibold text-[22px] text-white">
-            {profileData?.user?.name}
-          </div>
-          <div className="text-[17px] text-[#ffffffe8]">
-            {profileData?.user?.profession || "Profession"}
-          </div>
-          <div className="text-[15px] text-[#ffffffe8]">
-            {profileData?.user?.bio}
-          </div>
-          <div className="text-[14px] text-[#ffffffe8]">
-            {profileData?.user?.email}
-          </div>
-        </div>
-      </div>
-
-      <div className="w-full h-[100px] flex items-center justify-center gap-[40px] md:gap-[60px] px-[20%] pt-[30px] text-white">
-        {/* posts */}
-        <div>
-          <div className="text-white text-[22px] md:text-[30px] font-semibold">
-            {profileData?.user?.posts?.length || 0}
-          </div>
-          <div className="text-[18px] md:text-[22px] text-[#ffffffc7]">
-            Posts
-          </div>
-        </div>
-
-        {/* followers */}
-        <div>
-          <div className="flex items-center justify-center gap-[20px]">
-            <div className="flex relative">
-              {profileData?.user?.followers?.slice(0, 3).map((user, index) => {
-                return (
-                  <div
-                    key={user._id}
-                    className={`w-[40px] h-[40px] border-2 border-black rounded-full cursor-pointer overflow-hidden ${
-                      index > 0 ? `absolute left-[${index * 9}px]` : ""
-                    }`}
-                  >
-                    <img
-                      src={profileData?.user?.profileImage?.url || dp}
-                      alt=""
-                      className="w-full object-cover"
-                    />
-                  </div>
-                );
-              })}
-            </div>
-            <div className="text-white text-[22px] md:text-[30px] font-semibold">
-              {profileData?.user?.followers?.length || 0}
-            </div>
-          </div>
-          <div className="text-[18px] md:text-[22px] text-[#ffffffc7]">
-            Followers
-          </div>
-        </div>
-
-        {/* following */}
-        <div>
-          <div className="flex items-center justify-center gap-[20px]">
-            <div className="flex relative">
-              {profileData?.user?.following?.slice(0, 3).map((user, index) => (
-                <div
-                  className={`w-[40px] h-[40px] border-2 border-black rounded-full cursor-pointer overflow-hidden ${
-                    index > 0 ? `absolute left-[${index * 9}px]` : ""
-                  }`}
+      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-5 pb-24 sm:px-6 lg:px-8">
+        {loading ? (
+          <SectionSkeleton />
+        ) : (
+          <section className="rounded-[2rem] border border-zinc-900 bg-zinc-950/90 p-4 shadow-2xl shadow-black/30 backdrop-blur-sm sm:p-6">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
+              <div className="flex items-start gap-5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isOwnProfile) {
+                      setShowDPOptions(true);
+                    } else {
+                      const isPrivate = profileData?.user?.accountType === "private";
+                      if (!isPrivate || isFollowing) {
+                        setShowDpView(true);
+                      } else {
+                        toast.error("This account is private. Follow this account to view their profile picture.");
+                      }
+                    }
+                  }}
+                  className="group relative h-24 w-24 overflow-hidden rounded-full border border-zinc-800 bg-zinc-900 p-1 transition hover:border-rose-500 sm:h-32 sm:w-32 cursor-pointer"
                 >
                   <img
-                    src={user?.profileImage?.url || dp}
+                    src={profileData?.user?.profileImage?.url || dp}
                     alt=""
-                    className="w-full h-full object-cover"
+                    className="h-full w-full rounded-full object-cover"
                   />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition group-hover:opacity-100 backdrop-blur-sm">
+                    <span className="rounded-full bg-white/20 backdrop-blur px-2.5 py-1 text-[10px] font-bold text-white border border-white/10">View</span>
+                  </div>
+                </button>
+
+                <div className="flex-1 space-y-3">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h1 className="text-2xl font-black tracking-tight text-white sm:text-3xl">{profileData?.user?.name}</h1>
+                      {isVerified && <VerifiedBadge size="md" />}
+                      {profileData?.user?.category && (
+                        <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-rose-300">
+                          {profileData.user.category}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-sm font-medium text-zinc-400">{profileData?.user?.profession || "VYBE Creator"}</div>
+                    <div className="max-w-2xl text-sm leading-6 text-zinc-200">{profileData?.user?.bio || "No bio yet."}</div>
+                  </div>
+
+                  {profileData?.user?.links?.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {profileData.user.links.map((link, idx) => (
+                        <a
+                          key={idx}
+                          href={link.url.startsWith("http") ? link.url : `https://${link.url}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-xs font-semibold text-rose-300 transition hover:border-zinc-700 hover:text-white"
+                        >
+                          <Link2 className="h-3.5 w-3.5" />
+                          <span>{link.title || "Website"}</span>
+                        </a>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
-
-            <div className="text-white text-[22px] md:text-[30px] font-semibold">
-              {profileData?.user?.following?.length || 0}
-            </div>
-          </div>
-          <div className="text-[18px] md:text-[22px] text-[#ffffffc7]">
-            Following
-          </div>
-        </div>
-      </div>
-
-      <div className="w-full h-[80px] flex justify-center items-center gap-[20px] mt-[10px]">
-        {profileData?.user?._id === userData?.user?._id ? (
-          <div className="flex items-center justify-center gap-4">
-            <button
-              className="px-4 py-2 min-w-[150px] h-[40px] bg-white rounded-2xl"
-              onClick={() => navigate("/edit-profile")}
-            >
-              Edit Profile
-            </button>
-
-            <button
-              className="px-4 py-2 min-w-[150px] h-[40px] bg-purple-600 text-white rounded-2xl"
-              onClick={() => setShowQRModal(true)}
-            >
-              Share Profile
-            </button>
-
-            {/* Info */}
-            <button
-              onClick={() => setShowInfoSheet(true)}
-              className="w-10 h-10 flex items-center justify-center rounded-full bg-white/90 backdrop-blur-mdshadow-md hover:shadow-lg hover:scale-105 active:scale-95 transition-all duration-200"
-            >
-              <Info className="w-5 h-5 text-black/80" />
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-center gap-4">
-            <FollowButton
-              targetUserId={profileData?.user?._id}
-              tailwind="px-4 py-2 min-w-[130px] h-[40px] bg-white rounded-2xl"
-              onFollowChange={handleProfile}
-            />
-
-            <button
-              className="px-4 py-2 min-w-[130px] h-[40px] bg-white rounded-2xl"
-              onClick={handleMessage}
-            >
-              Message
-            </button>
-
-            {/* Info button */}
-            <button
-              onClick={() => setShowInfoSheet(true)}
-              className="w-10 h-10 flex items-center justify-center rounded-full bg-white/90 backdrop-blur-mdshadow-md hover:shadow-lg hover:scale-105 active:scale-95 transition-all duration-200"
-            >
-              <Info className="w-5 h-5 text-black/80" />
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="w-full min-h-[100vh] flex justify-center">
-        <div className="w-full max-w-[900px] flex flex-col items-center rounded-t-[30px] bg-white relative gap-[20px] pt-[30px] pb-[100px]">
-          {isOwnProfile && (
-            <>
-              <div className="w-[90%] mx-auto h-[70px] flex justify-center gap-3">
-                <button
-                  // role="button"
-                  // tabIndex={0}
-                  className={`w-[45%] flex justify-center items-center rounded-full cursor-pointer font-semibold text-[18px transition-all duration-300 hover:bg-black hover:text-white hover:shadow-2xl hover:shadow-black ${
-                    postType === "posts"
-                      ? "bg-black text-white shadow-2xl shadow-black"
-                      : "bg-white text-black"
-                  }`}
-                  onClick={() => setPostType("posts")}
-                >
-                  Posts
-                </button>
-
-                <button
-                  // role="button"
-                  // tabIndex={0}
-                  className={`w-[45%] flex justify-center items-center rounded-full cursor-pointer font-semibold text-[18px transition-all duration-300 hover:bg-black hover:text-white hover:shadow-2xl hover:shadow-black ${
-                    postType === "savedPosts"
-                      ? "bg-black text-white shadow-2xl shadow-black"
-                      : "bg-white text-black"
-                  }`}
-                  onClick={() => setPostType("savedPosts")}
-                >
-                  Saved Posts
-                </button>
               </div>
 
-              <Navbar />
-            </>
-          )}
+              <div className="rounded-3xl border border-zinc-900 bg-black/40 p-3 sm:p-4 lg:min-w-[310px]">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-2xl bg-zinc-950/80 p-3 text-center">
+                    <div className="text-2xl font-black text-white">{tabCounts.posts}</div>
+                    <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Posts</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => followerList.length > 0 && setPostType("posts")}
+                    className="rounded-2xl bg-zinc-950/80 p-3 text-left transition hover:border hover:border-zinc-700"
+                  >
+                    <div className="flex -space-x-2">
+                      {followerPreview.length > 0 ? (
+                        followerPreview.map((follower, idx) => (
+                          <img
+                            key={follower?._id || idx}
+                            src={getUserAvatarUrl(follower)}
+                            alt=""
+                            className="h-8 w-8 rounded-full border-2 border-black object-cover"
+                          />
+                        ))
+                      ) : (
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-black bg-zinc-800 text-[10px] font-bold text-zinc-400">
+                          0
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-3 text-2xl font-black text-white">{followerList.length}</div>
+                    <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Followers</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => followingList.length > 0 && setPostType("posts")}
+                    className="rounded-2xl bg-zinc-950/80 p-3 text-left transition hover:border hover:border-zinc-700"
+                  >
+                    <div className="flex -space-x-2">
+                      {followingPreview.length > 0 ? (
+                        followingPreview.map((followingUser, idx) => (
+                          <img
+                            key={followingUser?._id || idx}
+                            src={getUserAvatarUrl(followingUser)}
+                            alt=""
+                            className="h-8 w-8 rounded-full border-2 border-black object-cover"
+                          />
+                        ))
+                      ) : (
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-black bg-zinc-800 text-[10px] font-bold text-zinc-400">
+                          0
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-3 text-2xl font-black text-white">{followingList.length}</div>
+                    <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Following</div>
+                  </button>
+                </div>
 
-          {/* OWN PROFILE */}
-          {isOwnProfile &&
-            postType === "posts" &&
-            postData?.map((post) => {
-              if (post?.author?._id === profileData?.user?._id) {
-                return <Post key={post._id} post={post} />;
-              }
-            })}
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div className="rounded-2xl border border-zinc-900 bg-zinc-950/60 px-3 py-2">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Mutual vibes</div>
+                    <div className="mt-1 text-sm font-semibold text-white">{Math.min(followerList.length, followingList.length)} connections</div>
+                  </div>
+                  <div className="rounded-2xl border border-zinc-900 bg-zinc-950/60 px-3 py-2">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Network</div>
+                    <div className="mt-1 text-sm font-semibold text-white">{followerList.length + followingList.length} total</div>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-          {isOwnProfile &&
-            postType === "savedPosts" &&
-            postData
-              ?.filter((post) =>
-                userData?.user?.savedPosts?.includes(post?._id)
-              )
-              ?.map((post) => <Post key={post._id} post={post} />)}
+            <div className="mt-5 flex flex-wrap items-center gap-3">
+              {isOwnProfile ? (
+                <>
+                  <button
+                    className="rounded-full bg-white px-4 py-2 text-xs font-bold text-black transition hover:bg-zinc-200"
+                    onClick={() => navigate("/edit-profile")}
+                  >
+                    Edit Profile
+                  </button>
+                  <button
+                    className="rounded-full border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs font-bold text-rose-300 transition hover:border-rose-500 hover:text-white cursor-pointer"
+                    onClick={() => setShowQRModal(true)}
+                  >
+                    Share Profile
+                  </button>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-500/10 px-4 py-2 text-xs font-bold text-purple-300 transition hover:border-purple-400 hover:text-white"
+                    onClick={() => setShowInsightsModal(true)}
+                  >
+                    <BarChart2 className="h-3.5 w-3.5" />
+                    Insights
+                  </button>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-300 transition hover:border-emerald-400 hover:text-white"
+                    onClick={() => setShowCloseFriendsModal(true)}
+                  >
+                    <Star className="h-3.5 w-3.5 fill-current" />
+                    Close Friends
+                  </button>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-bold text-zinc-300 transition hover:border-zinc-700 hover:text-white"
+                    onClick={() => navigate("/story/archive")}
+                  >
+                    <Archive className="h-3.5 w-3.5" />
+                    Archive
+                  </button>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-full border border-rose-500/30 bg-gradient-to-r from-purple-500/10 to-rose-500/10 px-4 py-2 text-xs font-bold text-rose-300 transition hover:border-rose-500 hover:text-white"
+                    onClick={() => navigate("/monetization")}
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    Monetization
+                  </button>
+                </>
+              ) : (
+                <>
+                  <FollowButton
+                    targetUserId={profileData?.user?._id}
+                    tailwind="rounded-full bg-white px-5 py-2 text-xs font-bold text-black transition hover:bg-zinc-200"
+                    onFollowChange={handleProfile}
+                  />
+                  <button
+                    className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-5 py-2 text-xs font-bold text-white transition hover:border-zinc-700 hover:bg-zinc-800 cursor-pointer"
+                    onClick={handleMessage}
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" />
+                    Message
+                  </button>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-full border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs font-bold text-rose-300 transition hover:border-rose-500 hover:text-white cursor-pointer"
+                    onClick={() => setShowQRModal(true)}
+                  >
+                    <QrCode className="h-3.5 w-3.5" />
+                    View QR Code
+                  </button>
+                </>
+              )}
+            </div>
+          </section>
+        )}
 
-          {!isOwnProfile &&
-            postData?.map((post) => {
-              if (post?.author?._id === profileData?.user?._id) {
-                return <Post key={post._id} post={post} />;
-              }
-            })}
-        </div>
-      </div>
+        {(isOwnProfile || profileData?.user?.accountType !== "private" || isFollowing) && (
+        <section className="rounded-[2rem] border border-zinc-900 bg-zinc-950/70 p-4 backdrop-blur-sm sm:p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-zinc-500">Highlights</p>
+              <h2 className="mt-1 text-sm font-bold text-white">Stories worth keeping</h2>
+            </div>
+            {isOwnProfile && (
+              <button
+                onClick={() => setShowHighlighterModal(true)}
+                className="rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-[11px] font-bold text-zinc-300 transition hover:border-rose-500/40 hover:text-white"
+              >
+                Add Highlight
+              </button>
+            )}
+          </div>
 
-      {showQRModal && (
-        <ProfileQrModal
-          isOpen={showQRModal}
-          onClose={() => setShowQRModal(false)}
+          <div className="flex gap-4 overflow-x-auto pb-1 scrollbar-none">
+            {isOwnProfile && (
+              <button onClick={() => navigate("/upload?type=story")} className="flex w-[84px] shrink-0 flex-col items-center gap-2">
+                <div className="flex h-20 w-20 items-center justify-center rounded-full border border-dashed border-zinc-700 bg-zinc-950 text-zinc-400 transition hover:border-rose-500 hover:text-rose-500">
+                  <Plus className="h-6 w-6" />
+                </div>
+                <span className="text-[11px] font-medium text-zinc-400">New</span>
+              </button>
+            )}
+
+            {highlights.map((hl) => (
+              <button
+                key={hl._id}
+                onClick={() => hl.stories?.length > 0 && navigate("/story", { state: { stories: hl.stories } })}
+                className="flex w-[84px] shrink-0 flex-col items-center gap-2"
+              >
+                <div className="rounded-full bg-gradient-to-tr from-pink-500 via-rose-500 to-purple-600 p-[2px] shadow-lg shadow-rose-500/20">
+                  <img src={hl.coverImage?.url || dp} alt="" className="h-20 w-20 rounded-full border-2 border-black object-cover" />
+                </div>
+                <span className="w-full truncate text-center text-[11px] font-medium text-zinc-300">{hl.title}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+        )}
+
+        {(!isOwnProfile && profileData?.user?.accountType === "private" && !isFollowing) ? (
+          <section className="rounded-[2rem] border border-zinc-900 bg-zinc-950/70 p-8 text-center flex flex-col items-center justify-center min-h-[40vh] backdrop-blur-sm animate-fadeIn">
+            <div className="rounded-full border-2 border-zinc-800 bg-zinc-900/50 p-6 mb-4 shadow-xl">
+              <Lock className="h-10 w-10 text-rose-500 animate-pulse" />
+            </div>
+            <h3 className="text-xl font-black text-white">This Account is Private</h3>
+            <p className="mt-2 max-w-sm text-sm text-zinc-400 leading-relaxed">
+              Follow this user to see their posts, reels, and other activity.
+            </p>
+          </section>
+        ) : (
+          <>
+            <section className="sticky top-0 z-20 rounded-3xl border border-zinc-900 bg-black/80 px-2 py-2 backdrop-blur-xl">
+              <div className="grid grid-cols-3 gap-2">
+                {PROFILE_TABS.map((tab) => {
+                  const Icon = tab.icon;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setPostType(tab.id)}
+                      className={`inline-flex flex-col items-center justify-center gap-1 rounded-2xl border px-3 py-3 text-xs font-bold transition ${
+                        postType === tab.id
+                          ? "border-rose-500/40 bg-rose-500/10 text-white"
+                          : "border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:border-zinc-700 hover:text-white"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      <span>{tab.label}</span>
+                      <span className="text-[10px] text-zinc-500">{tabCounts[tab.id] || 0}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="rounded-[2rem] border border-zinc-900 bg-zinc-950/70 p-4 sm:p-5">
+              {loading ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                    {Array.from({ length: 8 }).map((_, idx) => (
+                      <div key={idx} className="aspect-square animate-pulse rounded-2xl bg-zinc-800/80" />
+                    ))}
+                  </div>
+                </div>
+              ) : activeFeed.length === 0 ? (
+                <div className="flex min-h-[40vh] flex-col items-center justify-center text-center">
+                  <div className="rounded-full border border-zinc-800 bg-zinc-900 p-4">
+                    {postType === "loops" ? <Play className="h-7 w-7 text-rose-400" /> : <Grid className="h-7 w-7 text-rose-400" />}
+                  </div>
+                  <h3 className="mt-4 text-lg font-bold text-white">{feedEmptyState.title}</h3>
+                  <p className="mt-2 max-w-sm text-sm leading-6 text-zinc-400">{feedEmptyState.copy}</p>
+                  {isOwnProfile && postType === "posts" && (
+                    <button
+                      onClick={() => navigate("/upload")}
+                      className="mt-5 rounded-full bg-white px-4 py-2 text-xs font-bold text-black transition hover:bg-zinc-200"
+                    >
+                      Create post
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                  {activeFeed.map((item) => {
+                    const itemKind = item.__kind || (postType === "loops" ? "loop" : "post");
+
+                    return (
+                      <ProfileTile
+                        key={item._id}
+                        item={item}
+                        kind={itemKind}
+                        onClick={() => {
+                          if (itemKind === "loop") {
+                            navigate(`/reels?reelId=${item._id}`);
+                          } else {
+                            navigate(`/?postId=${item._id}`);
+                          }
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </>
+        )}
+      </main>
+
+      <Navbar />
+
+      {showQRModal && <ProfileQRModal isOpen={showQRModal} onClose={() => setShowQRModal(false)} user={profileData?.user} />}
+
+      {showInsightsModal && (
+        <ProfileInsightsModal
+          isOpen={showInsightsModal}
+          onClose={() => setShowInsightsModal(false)}
           user={profileData?.user}
+          onAccountSwitched={handleProfile}
         />
       )}
 
-      <InfoSheet
-        isOpen={showInfoSheet}
-        onClose={() => setShowInfoSheet(false)}
-        user={profileData?.user}
-        onOpenQR={() => setShowQRModal(true)}
-        hideQR={isOwnProfile}
-      />
+      {showCloseFriendsModal && <CloseFriendsModal isOpen={showCloseFriendsModal} onClose={() => setShowCloseFriendsModal(false)} />}
 
-      {showDpView && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-90 flex justify-center items-center z-[9999] animate-fadeIn"
-          onClick={() => {
-            setShowDpView(false);
-            document.body.classList.remove("overflow-hidden");
+      {showHighlighterModal && (
+        <StoryHighlighterModal
+          isOpen={showHighlighterModal}
+          onClose={() => setShowHighlighterModal(false)}
+          onSuccess={() => handleProfile()}
+        />
+      )}
+
+      {/* Own Profile DP Options Bottom Sheet / Drawer */}
+      {showDPOptions && (
+        <DPOptionsModal
+          onClose={() => setShowDPOptions(false)}
+          onView={() => {
+            setShowDPOptions(false);
+            setShowDpView(true);
           }}
+          onShareQR={() => {
+            setShowDPOptions(false);
+            setShowQRModal(true);
+          }}
+        />
+      )}
+
+      {/* Secure Fullscreen DP Viewer */}
+      {showDpView && (
+        <FullScreenDPViewer
+          imageUrl={profileData?.user?.profileImage?.url || dp}
+          userName={profileData?.user?.userName || userName}
+          onClose={() => setShowDpView(false)}
+        />
+      )}
+    </div>
+  );
+};
+
+// --- Custom DP Options Drawer ---
+const DPOptionsModal = ({ onClose, onView, onShareQR }) => {
+  return (
+    <div className="fixed inset-0 z-[999] flex items-end justify-center bg-black/70 backdrop-blur-sm animate-fadeIn">
+      {/* Tap backdrop to close */}
+      <div className="absolute inset-0" onClick={onClose} />
+      
+      <div className="relative w-full max-w-md rounded-t-[2.5rem] border-t border-zinc-800 bg-zinc-950 p-6 pb-8 shadow-2xl animate-slideUp">
+        <div className="mx-auto mb-5 h-1.5 w-12 rounded-full bg-zinc-800" />
+        
+        <h3 className="mb-4 text-center text-sm font-bold uppercase tracking-wider text-zinc-400">Profile Photo</h3>
+        
+        <div className="space-y-3">
+          <button
+            onClick={onView}
+            className="w-full rounded-2xl bg-zinc-900 py-4 text-center text-sm font-bold text-white transition hover:bg-zinc-800/80 cursor-pointer"
+          >
+            View Profile Picture
+          </button>
+          
+          <button
+            onClick={onShareQR}
+            className="w-full rounded-2xl bg-gradient-to-r from-purple-500/20 to-rose-500/20 border border-rose-500/30 py-4 text-center text-sm font-bold text-rose-300 transition hover:from-purple-500/30 hover:to-rose-500/30 cursor-pointer"
+          >
+            Share QR Code
+          </button>
+          
+          <button
+            onClick={onClose}
+            className="w-full rounded-2xl bg-zinc-950 border border-zinc-800 py-4 text-center text-sm font-bold text-zinc-400 transition hover:bg-zinc-900 cursor-pointer"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Ultra-Secure DRM Fullscreen DP Viewer (100% Native HD Quality + Instant Screenshot Blackout) ---
+const FullScreenDPViewer = ({ imageUrl, userName, onClose }) => {
+  const [screenshotAlert, setScreenshotAlert] = useState(false);
+  const [isBlackout, setIsBlackout] = useState(false);
+
+  useEffect(() => {
+    // 1. Disable Context Menu & Dragging
+    const handleContextMenu = (e) => e.preventDefault();
+    const handleDragStart = (e) => e.preventDefault();
+    document.addEventListener("contextmenu", handleContextMenu);
+    document.addEventListener("dragstart", handleDragStart);
+
+    // 2. Immediate Blackout on Key Combinations (Win, Shift, Alt, Ctrl, PrintScreen, F12)
+    const handleKeyDown = (e) => {
+      const isModifierKey =
+        e.key === "PrintScreen" ||
+        e.keyCode === 44 ||
+        e.key === "Meta" ||
+        e.key === "Win" ||
+        e.key === "OS" ||
+        (e.shiftKey && e.metaKey) ||
+        (e.ctrlKey && (e.key === "p" || e.key === "s" || e.key === "Shift" || e.key === "i" || e.key === "c")) ||
+        (e.metaKey && (e.key === "p" || e.key === "s" || e.key === "3" || e.key === "4"));
+
+      if (isModifierKey) {
+        setIsBlackout(true);
+        try {
+          navigator.clipboard.writeText("");
+        } catch {}
+        setScreenshotAlert(true);
+        setTimeout(() => setScreenshotAlert(false), 3000);
+      }
+    };
+
+    const handleKeyUp = (e) => {
+      if (e.key === "PrintScreen" || e.keyCode === 44 || e.key === "Meta" || e.key === "Win") {
+        setTimeout(() => setIsBlackout(false), 1500);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    // 3. Instant Blackout on Viewport Mouse Leave, Blur, & Visibility Loss
+    const handleMouseLeave = () => setIsBlackout(true);
+    const handleMouseEnter = () => setIsBlackout(false);
+    const handleBlur = () => setIsBlackout(true);
+    const handleFocus = () => setIsBlackout(false);
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setIsBlackout(true);
+      } else {
+        setIsBlackout(false);
+      }
+    };
+
+    document.addEventListener("mouseleave", handleMouseLeave);
+    document.addEventListener("mouseenter", handleMouseEnter);
+    window.addEventListener("blur", handleBlur);
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("contextmenu", handleContextMenu);
+      document.removeEventListener("dragstart", handleDragStart);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      document.removeEventListener("mouseleave", handleMouseLeave);
+      document.removeEventListener("mouseenter", handleMouseEnter);
+      window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black backdrop-blur-2xl animate-fadeIn select-none">
+      <style>{`
+        @media print {
+          body { display: none !important; }
+        }
+      `}</style>
+
+      {/* Top Bar Header */}
+      <div className="absolute top-0 inset-x-0 h-16 flex items-center justify-between px-6 z-20 bg-gradient-to-b from-black/90 to-transparent">
+        <div className="flex items-center gap-2 rounded-full bg-rose-500/10 border border-rose-500/30 px-3.5 py-1 text-[11px] font-bold text-rose-300 shadow-sm">
+          <Lock className="w-3.5 h-3.5 text-rose-400" />
+          <span>DRM Encrypted Media</span>
+        </div>
+        <button
+          onClick={onClose}
+          className="rounded-full bg-zinc-900/80 border border-zinc-800 p-2.5 text-white hover:bg-zinc-800 transition cursor-pointer"
         >
-          <img
-            src={profileData?.user?.profileImage?.url || dp}
-            className="max-w-[90%] max-h-[90%] rounded-full animate-zoomIn object-contain"
-            alt="Profile"
-          />
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* Security Toast Warning Banner */}
+      {screenshotAlert && (
+        <div className="absolute top-20 z-30 flex items-center gap-2 bg-rose-600 text-white text-xs font-black px-6 py-2.5 rounded-full shadow-2xl animate-bounce border border-rose-400">
+          <ShieldAlert className="w-4 h-4" />
+          <span>Screenshots & Capture are blocked for protected media</span>
         </div>
       )}
+
+      {/* Protected GPU Native HD Image Frame */}
+      <div className="relative max-w-lg w-full aspect-square p-4 flex items-center justify-center select-none">
+        <div className="relative w-full h-full rounded-3xl overflow-hidden border border-zinc-800/80 bg-black shadow-2xl">
+          <img
+            src={imageUrl}
+            alt="Protected Profile Avatar"
+            className={`w-full h-full object-cover pointer-events-none select-none transition-all duration-150 ${
+              isBlackout ? "opacity-0 blur-3xl scale-95 brightness-0" : "opacity-100 blur-0 scale-100 brightness-100"
+            }`}
+            draggable="false"
+            onDragStart={(e) => e.preventDefault()}
+            onContextMenu={(e) => e.preventDefault()}
+          />
+          {/* Transparent Overlay Shield */}
+          <div className="absolute inset-0 pointer-events-auto bg-transparent" onContextMenu={(e) => e.preventDefault()} />
+        </div>
+      </div>
     </div>
   );
 };

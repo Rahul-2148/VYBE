@@ -49,7 +49,7 @@ const VideoPlayer = ({ media }) => {
       <video
         ref={videoTag}
         src={media}
-        autoPlay
+        preload="metadata"
         loop
         muted={mute}
         className="h-[100%] cursor-pointer w-full rounded-2xl object-cover"
@@ -60,9 +60,9 @@ const VideoPlayer = ({ media }) => {
         onClick={() => setMute((prev) => !prev)}
       >
         {!mute ? (
-          <FiVolume2 className="w-[20px] h-[20px] text-white font-semibold" />
+          <FiVolume2 className="w-[20px] h-[20px] text-text font-semibold" />
         ) : (
-          <FiVolumeX className="w-[20px] h-[20px] text-white font-semibold" />
+          <FiVolumeX className="w-[20px] h-[20px] text-text font-semibold" />
         )}
       </div>
     </div>

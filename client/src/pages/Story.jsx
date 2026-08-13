@@ -7,7 +7,9 @@ const Story = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!state || !state.stories || state.stories.length === 0) {
+    const hasStories = state?.stories && state.stories.length > 0;
+    const hasUserIndex = state?.initialUserIndex !== undefined;
+    if (!state || (!hasStories && !hasUserIndex)) {
       navigate("/");
     }
   }, [state, navigate]);
@@ -15,8 +17,8 @@ const Story = () => {
   if (!state) return null;
 
   return (
-    <div className="w-full h-[100vh] bg-black flex justify-center items-center">
-      <StoryCard stories={state.stories} />
+    <div className="w-full h-[100vh] bg-bg flex justify-center items-center">
+      <StoryCard />
     </div>
   );
 };

@@ -1,40 +1,46 @@
 import { useSelector } from "react-redux";
-import dp from "../assets/dp.jpg";
+import dp from "../assets/dp3.png";
 import { useNavigate } from "react-router-dom";
+import { BadgeCheck } from "lucide-react";
 import FollowButton from "./FollowButton";
 
 const OtherUsers = ({ user }) => {
-  const { userData } = useSelector((state) => state.user);
   const navigate = useNavigate();
 
   return (
-    <div className="w-full h-[80px] flex items-center justify-between border-b-2 border-gray-800">
-      <div className="flex items-center gap-[10px]">
-        <div
-          className="w-[50px] h-[50px] border-2 border-black rounded-full cursor-pointer overflow-hidden"
-          onClick={() => navigate(`/profile/${user?.userName}`)}
-        >
+    <div className="w-full flex items-center justify-between py-1.5 transition">
+      <div 
+        className="flex items-center gap-3 cursor-pointer group"
+        onClick={() => {
+          if (user?.userName) {
+            navigate(`/profile/${user.userName}`);
+          }
+        }}
+      >
+        <div className="w-9 h-9 rounded-full overflow-hidden border border-border group-hover:border-rose-500 transition">
           <img
             src={user?.profileImage?.url || dp}
             alt=""
-            className="w-full object-cover"
+            className="w-full h-full object-cover"
           />
         </div>
-        <div className="">
-          <div className="text-[18px] text-white font-semibold">
+        <div className="flex flex-col text-left">
+          <span className="text-xs font-bold text-text group-hover:underline truncate max-w-[120px] flex items-center gap-0.5">
             {user?.userName}
-          </div>
-          <div className="text-[15px] text-gray-400 font-semibold">
-            {user?.name}
-          </div>
+            {user?.isVerified && (
+              <BadgeCheck className="h-4 w-4 fill-[#0095f6] text-white shrink-0" />
+            )}
+          </span>
+          <span className="text-[11px] text-text-muted truncate max-w-[120px]">
+            {user?.name || "Suggested for you"}
+          </span>
         </div>
       </div>
 
       <FollowButton
         targetUserId={user?._id}
-        tailwind={
-          "px-[10px] py-[5px] w-[100px] h-[40px] bg-white rounded-2xl cursor-pointer hover:bg-gray-200"
-        }
+        targetUser={user}
+        tailwind="px-3.5 py-1 bg-text text-bg text-xs font-bold rounded-full hover:opacity-90 transition cursor-pointer shadow-sm"
       />
     </div>
   );
