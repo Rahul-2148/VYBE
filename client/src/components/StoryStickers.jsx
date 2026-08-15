@@ -440,14 +440,16 @@ export const StoryStickers = ({ stickers = [], storyId, currentUserId, pollVotes
                 onClick={() => navigate(`/explore/location/${encodeURIComponent(sticker.location.name)}`)}
                 className={`inline-flex items-center gap-1.5 px-4 py-2 font-black text-xs rounded-full shadow-2xl transition border cursor-pointer hover:scale-105 active:scale-95 transform ${
                   styleIdx === 1
-                    ? "bg-white text-rose-500 border-rose-200"
+                    ? "bg-black/85 text-white border-white/20 backdrop-blur-xl"
                     : styleIdx === 2
-                    ? "bg-black/45 border-white/30 text-text backdrop-blur-md"
-                    : "bg-gradient-to-r from-red-500 to-rose-600 text-text border-white/10"
+                    ? "bg-gradient-to-r from-red-500 to-rose-600 text-white border-white/10"
+                    : styleIdx === 3
+                    ? "bg-transparent text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)] border-none text-sm font-black"
+                    : "bg-white text-zinc-950 border-white/60"
                 }`}
               >
-                <MapPin className="w-3.5 h-3.5" />
-                <span>{sticker.location.name || "Location"}</span>
+                <MapPin className={`w-4 h-4 ${styleIdx === 1 ? "text-cyan-400 fill-cyan-400" : styleIdx === 3 ? "text-red-500 fill-red-500 filter drop-shadow" : "text-rose-500 fill-rose-500"}`} />
+                <span className="truncate max-w-[200px]">{sticker.location.name || "Location"}</span>
               </button>
             )}
 
@@ -536,6 +538,18 @@ export const StoryStickers = ({ stickers = [], storyId, currentUserId, pollVotes
                 )}
 
                 {styleIdx === 3 && (
+                  <div className="bg-transparent px-2 py-1 flex items-center gap-2 text-left drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)] text-white">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-pink-500 via-rose-500 to-cyan-400 flex items-center justify-center shrink-0 animate-spin-slow border border-white/50 shadow-lg">
+                      <Music className="w-4 h-4 text-white" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-black text-white truncate drop-shadow">{sticker.music_sticker.title}</p>
+                      <p className="text-[9px] text-zinc-200 font-bold truncate drop-shadow">{sticker.music_sticker.artist || "Artist"}</p>
+                    </div>
+                  </div>
+                )}
+
+                {styleIdx === 4 && (
                   <div className="bg-black/55 backdrop-blur-md rounded-2xl border border-white/10 p-2 shadow-2xl w-60 text-center text-white">
                     <LyricPlayer title={sticker.music_sticker.title} />
                   </div>

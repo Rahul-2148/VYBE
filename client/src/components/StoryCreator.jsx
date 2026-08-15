@@ -7,6 +7,7 @@ import {
   Pencil,
   Send,
   RotateCw,
+  RotateCcw,
   Camera,
   Trash2,
   Palette,
@@ -22,12 +23,18 @@ import {
   AlignRight,
   Layers,
   Plus,
+  Minus,
   Quote,
   Flame,
   Zap,
   BookOpen,
   Eye,
   Settings,
+  Link2,
+  MapPin,
+  AtSign,
+  Hash,
+  PlusCircle
 } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
@@ -37,6 +44,7 @@ import { setStoryFeed } from "../redux/features/storySlice";
 import StoryMusicPickerModal from "./StoryMusicPickerModal";
 import StoryStickersDrawer from "./StoryStickersDrawer";
 import dp from "../assets/dp3.png";
+import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
 
 // Text Story Fonts
 const FONTS = [
@@ -228,9 +236,12 @@ export const StoryCreator = ({ onClose, initialState }) => {
   // Music Data
   const [selectedMusic, setSelectedMusic] = useState(null);
 
-  // Dragging state
+  // Dragging state & Guideline Snap
   const [activeDragIdx, setActiveDragIdx] = useState(null);
   const [selectedStickerIdx, setSelectedStickerIdx] = useState(null);
+  const [isOverTrash, setIsOverTrash] = useState(false);
+  const [snapGuideX, setSnapGuideX] = useState(false);
+  const [snapGuideY, setSnapGuideY] = useState(false);
   const startDragPosition = useRef(null);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -350,8 +361,27 @@ export const StoryCreator = ({ onClose, initialState }) => {
       let x = ((clientX - rect.left) / rect.width) * 100;
       let y = ((clientY - rect.top) / rect.height) * 100;
 
-      x = Math.max(8, Math.min(92, x));
-      y = Math.max(8, Math.min(92, y));
+      x = Math.max(5, Math.min(95, x));
+      y = Math.max(5, Math.min(95, y));
+
+      // Magnetic Center Guidelines & Snapping
+      if (Math.abs(x - 50) < 2.5) {
+        x = 50;
+        setSnapGuideX(true);
+      } else {
+        setSnapGuideX(false);
+      }
+
+      if (Math.abs(y - 50) < 2.5) {
+        y = 50;
+        setSnapGuideY(true);
+      } else {
+        setSnapGuideY(false);
+      }
+
+      // Check if hovering directly over trash target
+      const overTrash = y > 84 && Math.abs(x - 50) < 18;
+      setIsOverTrash(overTrash);
 
       setItems((prev) => {
         if (!prev[activeIndex]) return prev;
@@ -371,12 +401,17 @@ export const StoryCreator = ({ onClose, initialState }) => {
 
     const handleEnd = () => {
       if (activeDragIdx !== null) {
+        setSnapGuideX(false);
+        setSnapGuideY(false);
+
         setItems((prev) => {
           if (!prev[activeIndex]) return prev;
           const sticker = prev[activeIndex].stickers?.[activeDragIdx];
           if (sticker) {
-            // Delete if dropped in bottom trash bin
-            if (sticker.position?.y > 82) {
+            const isTrashDrop = isOverTrash || (sticker.position?.y > 86 && Math.abs((sticker.position?.x || 50) - 50) < 18);
+            if (isTrashDrop) {
+              triggerHaptic("medium");
+              microAudio.playPop();
               toast.success("Sticker removed");
               const next = [...prev];
               next[activeIndex] = {
@@ -384,6 +419,7 @@ export const StoryCreator = ({ onClose, initialState }) => {
                 stickers: next[activeIndex].stickers.filter((_, i) => i !== activeDragIdx),
               };
               setSelectedStickerIdx(null);
+              setIsOverTrash(false);
               return next;
             }
 
@@ -392,17 +428,19 @@ export const StoryCreator = ({ onClose, initialState }) => {
             const dragY = Math.abs((sticker.position?.y || 50) - (startDragPosition.current?.y || 50));
 
             if (dragX < 1.5 && dragY < 1.5) {
+              triggerHaptic("light");
+              microAudio.playPop();
               const next = [...prev];
               const updatedSticker = { ...next[activeIndex].stickers[activeDragIdx] };
-              updatedSticker.styleIndex =
-                ((updatedSticker.styleIndex || 0) + 1) %
-                (updatedSticker.type === "music_sticker" ? 4 : 3);
+              const maxStyles = updatedSticker.type === "music_sticker" ? 4 : 3;
+              updatedSticker.styleIndex = ((updatedSticker.styleIndex || 0) + 1) % maxStyles;
               next[activeIndex].stickers[activeDragIdx] = updatedSticker;
               return next;
             }
           }
           return prev;
         });
+        setIsOverTrash(false);
         setActiveDragIdx(null);
       }
     };
@@ -420,7 +458,7 @@ export const StoryCreator = ({ onClose, initialState }) => {
       window.removeEventListener("touchmove", handleMove);
       window.removeEventListener("touchend", handleEnd);
     };
-  }, [activeDragIdx, activeIndex]);
+  }, [activeDragIdx, activeIndex, isOverTrash]);
 
   const handleSetFilter = (newFilterId) => {
     setItems((prev) => {
@@ -653,6 +691,35 @@ export const StoryCreator = ({ onClose, initialState }) => {
     }
   };
 
+  // Cycle single sticker style
+  const toggleStickerStyle = (index) => {
+    triggerHaptic("light");
+    microAudio.playPop();
+    setItems((prev) => {
+      if (!prev[activeIndex]) return prev;
+      const next = [...prev];
+      const s = { ...next[activeIndex].stickers[index] };
+      const max = s.type === "music_sticker" ? 4 : 3;
+      s.styleIndex = ((s.styleIndex || 0) + 1) % max;
+      next[activeIndex].stickers[index] = s;
+      return next;
+    });
+  };
+
+  // Delete single sticker
+  const deleteSticker = (index) => {
+    triggerHaptic("medium");
+    microAudio.playPop();
+    setItems((prev) => {
+      if (!prev[activeIndex]) return prev;
+      const next = [...prev];
+      next[activeIndex].stickers = next[activeIndex].stickers.filter((_, i) => i !== index);
+      return next;
+    });
+    setSelectedStickerIdx(null);
+    toast.success("Sticker removed");
+  };
+
   // Render stickers overlay inside editor
   const renderStickersInEditor = () => {
     const targetStickers = mode === "text" ? items[0]?.stickers || [] : stickers;
@@ -660,6 +727,9 @@ export const StoryCreator = ({ onClose, initialState }) => {
     return (
       <div className="absolute inset-0 pointer-events-none z-20 overflow-hidden">
         {targetStickers.map((s, index) => {
+          const styleIdx = s.styleIndex || 0;
+          const isSelected = selectedStickerIdx === index;
+
           return (
             <div
               key={index}
@@ -669,98 +739,313 @@ export const StoryCreator = ({ onClose, initialState }) => {
                 position: "absolute",
                 left: `${s.position?.x || 50}%`,
                 top: `${s.position?.y || 50}%`,
-                transform: `translate(-50%, -50%) scale(${s.scale || 1})`,
+                transform: `translate(-50%, -50%) scale(${s.scale || 1}) rotate(${s.rotation || 0}deg)`,
                 pointerEvents: "auto",
                 cursor: "grab",
               }}
-              className={`transition-shadow duration-150 select-none ${
-                selectedStickerIdx === index ? "ring-2 ring-rose-500 rounded-2xl p-1" : ""
+              className={`transition-all duration-150 select-none relative ${
+                isSelected
+                  ? "ring-2 ring-rose-500/90 shadow-2xl rounded-3xl p-1 scale-[1.02]"
+                  : "hover:opacity-95"
               }`}
             >
-              {/* 1. Poll */}
+              {/* On-Sticker Corner Quick Actions when selected */}
+              {isSelected && (
+                <>
+                  {/* Delete Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteSticker(index);
+                    }}
+                    className="absolute -top-3 -left-3 w-6 h-6 rounded-full bg-red-600 text-white flex items-center justify-center shadow-xl cursor-pointer hover:bg-red-500 transition active:scale-90 z-30 border border-white/30"
+                    title="Delete Sticker"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Style Cycle Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleStickerStyle(index);
+                    }}
+                    className="absolute -top-3 -right-3 w-6 h-6 rounded-full bg-white text-zinc-950 flex items-center justify-center shadow-xl cursor-pointer hover:bg-zinc-100 transition active:scale-90 z-30 border border-zinc-300"
+                    title="Change Style"
+                  >
+                    <Palette className="w-3.5 h-3.5 text-rose-600" />
+                  </button>
+                </>
+              )}
+
+              {/* 1. Location */}
+              {s.type === "location" && s.location && (
+                <div
+                  className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full font-extrabold text-xs shadow-2xl transition-all ${
+                    styleIdx === 1
+                      ? "bg-black/85 text-white border border-white/20 backdrop-blur-xl"
+                      : styleIdx === 2
+                      ? "bg-gradient-to-r from-red-500 via-rose-500 to-amber-500 text-white border border-white/30"
+                      : styleIdx === 3
+                      ? "bg-transparent text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)] border-none text-sm font-black"
+                      : "bg-white/95 text-zinc-950 border border-white/60 backdrop-blur-md"
+                  }`}
+                >
+                  <MapPin className={`w-4 h-4 shrink-0 ${styleIdx === 1 ? "text-cyan-400 fill-cyan-400" : styleIdx === 3 ? "text-red-500 fill-red-500 filter drop-shadow" : "text-rose-500 fill-rose-500"}`} />
+                  <span className="truncate max-w-[200px]">{s.location.name}</span>
+                </div>
+              )}
+
+              {/* 2. Mention */}
+              {s.type === "mention" && s.mention && (
+                <div
+                  className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-2xl font-black text-xs shadow-2xl transition-all ${
+                    styleIdx === 1
+                      ? "bg-gradient-to-r from-purple-600 via-pink-600 to-amber-500 text-white border border-white/30"
+                      : styleIdx === 2
+                      ? "bg-white/95 text-zinc-950 border border-white/50"
+                      : styleIdx === 3
+                      ? "bg-transparent text-emerald-300 drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)] border-none text-base font-black tracking-wide"
+                      : "bg-gradient-to-r from-emerald-500 to-teal-600 text-white border border-white/20"
+                  }`}
+                >
+                  <AtSign className="w-4 h-4" />
+                  <span>{s.mention.username}</span>
+                </div>
+              )}
+
+              {/* 3. Hashtag */}
+              {s.type === "hashtag" && s.hashtag && (
+                <div
+                  className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-2xl font-black text-xs shadow-2xl transition-all ${
+                    styleIdx === 1
+                      ? "bg-gradient-to-r from-purple-600 to-pink-500 text-white border border-white/30"
+                      : styleIdx === 2
+                      ? "bg-white/95 text-zinc-950 border border-white/50"
+                      : styleIdx === 3
+                      ? "bg-transparent text-amber-300 drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)] border-none text-base font-black tracking-wide"
+                      : "bg-gradient-to-r from-amber-500 to-orange-600 text-white border border-white/20"
+                  }`}
+                >
+                  <Hash className="w-4 h-4" />
+                  <span>{s.hashtag.tag}</span>
+                </div>
+              )}
+
+              {/* 4. Poll */}
               {s.type === "poll" && (
-                <div className="bg-white/95 text-black rounded-2xl p-3 shadow-2xl text-center w-52 border border-white/40">
-                  <p className="font-bold text-xs mb-2">{s.poll?.question || "Ask a question..."}</p>
+                <div
+                  className={`rounded-2xl p-4 shadow-2xl text-center w-56 space-y-2 border transition-all ${
+                    styleIdx === 1
+                      ? "bg-zinc-950/90 text-white border-white/20 backdrop-blur-xl"
+                      : styleIdx === 2
+                      ? "bg-gradient-to-tr from-pink-600 via-rose-600 to-amber-600 text-white border-white/30"
+                      : "bg-white/95 text-zinc-950 border-white/50"
+                  }`}
+                >
+                  <p className="font-extrabold text-xs">{s.poll?.question || "Ask a question..."}</p>
                   <div className="flex gap-2">
-                    <div className="flex-1 py-1.5 bg-black/10 rounded-xl font-bold text-xs">Yes</div>
-                    <div className="flex-1 py-1.5 bg-black/10 rounded-xl font-bold text-xs">No</div>
+                    <div className={`flex-1 py-2 rounded-xl font-bold text-xs shadow-sm border ${
+                      styleIdx === 0 ? "bg-zinc-100 border-zinc-200" : "bg-white/20 border-white/30"
+                    }`}>
+                      {s.poll?.options?.[0] || "Yes"}
+                    </div>
+                    <div className={`flex-1 py-2 rounded-xl font-bold text-xs shadow-sm border ${
+                      styleIdx === 0 ? "bg-zinc-100 border-zinc-200" : "bg-white/20 border-white/30"
+                    }`}>
+                      {s.poll?.options?.[1] || "No"}
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* 2. Quiz */}
+              {/* 5. Quiz */}
               {s.type === "quiz" && (
-                <div className="bg-white/95 text-black rounded-2xl p-3 shadow-2xl text-center w-52 border border-white/40">
-                  <p className="font-bold text-xs mb-2">{s.quiz?.question || "Quiz question..."}</p>
-                  <div className="space-y-1">
+                <div className="bg-white/95 text-zinc-950 rounded-2xl p-3.5 shadow-2xl text-center w-56 border border-white/50 space-y-1.5">
+                  <p className="font-extrabold text-xs text-zinc-900 mb-1">{s.quiz?.question || "Quiz question..."}</p>
+                  <div className="space-y-1.5">
                     {(s.quiz?.options || ["Option A", "Option B"]).map((opt, i) => (
-                      <div key={i} className="py-1 bg-black/10 rounded-lg text-[10px] font-bold">
-                        {opt}
+                      <div key={i} className="py-1.5 px-3 bg-zinc-100 rounded-xl text-[11px] font-bold flex items-center justify-between border border-zinc-200">
+                        <span className="font-mono text-zinc-400 font-black">{String.fromCharCode(65 + i)}</span>
+                        <span>{opt}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* 3. Question */}
+              {/* 6. Question */}
               {s.type === "question" && (
-                <div className="bg-white/95 text-black rounded-2xl p-3 shadow-2xl text-center w-52 border border-white/40">
-                  <p className="font-bold text-[11px] mb-2">{s.question?.prompt || "Ask me a question"}</p>
-                  <div className="w-full h-7 rounded-lg bg-black/10" />
+                <div className="bg-white/95 text-zinc-950 rounded-2xl p-4 shadow-2xl text-center w-56 border border-white/50 space-y-2">
+                  <div className={`-mx-4 -mt-4 p-2.5 rounded-t-2xl text-white font-extrabold text-[10px] uppercase tracking-wider ${
+                    styleIdx === 1 ? "bg-gradient-to-r from-amber-500 to-rose-600" : styleIdx === 2 ? "bg-gradient-to-r from-cyan-500 to-blue-600" : "bg-gradient-to-r from-purple-500 to-pink-500"
+                  }`}>
+                    Ask me a question
+                  </div>
+                  <p className="font-extrabold text-xs text-zinc-900">{s.question?.prompt || "Type something..."}</p>
+                  <div className="w-full h-8 rounded-xl bg-zinc-100 border border-zinc-200 flex items-center justify-center text-[10px] text-zinc-400 font-medium">
+                    Type an answer...
+                  </div>
                 </div>
               )}
 
-              {/* 4. Slider */}
+              {/* 7. Slider */}
               {s.type === "slider" && (
-                <div className="bg-white/95 text-black rounded-2xl p-2.5 shadow-2xl flex items-center gap-2 w-52 border border-white/40">
-                  <span className="text-xl">{s.slider?.emoji || "🔥"}</span>
-                  <div className="flex-1 h-1.5 bg-black/20 rounded-full relative">
-                    <div className="w-4 h-4 bg-orange-500 rounded-full absolute -top-1.5 left-1/2 -translate-x-1/2 shadow" />
+                <div className="bg-white/95 text-zinc-950 rounded-2xl p-3.5 shadow-2xl flex flex-col gap-2 w-56 border border-white/50 text-center">
+                  <p className="font-extrabold text-xs text-zinc-900">{s.slider?.question || "Rate this!"}</p>
+                  <div className="flex items-center gap-2 px-1">
+                    <span className="text-2xl drop-shadow">{s.slider?.emoji || "🔥"}</span>
+                    <div className="flex-1 h-2 bg-zinc-200 rounded-full relative">
+                      <div className="w-5 h-5 bg-gradient-to-r from-orange-400 to-red-500 rounded-full absolute -top-1.5 left-1/2 -translate-x-1/2 shadow-md border-2 border-white" />
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* 5. Countdown */}
+              {/* 8. Countdown */}
               {s.type === "countdown" && (
-                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl p-3 shadow-2xl text-center space-y-1 w-48">
-                  <span className="font-bold text-[10px] uppercase tracking-wider">{s.countdown?.title || "Countdown"}</span>
-                  <div className="flex justify-center gap-2 text-sm font-black font-mono py-1">
-                    <div>23h</div>
-                    <div>59m</div>
+                <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white rounded-2xl p-4 shadow-2xl text-center space-y-1.5 w-52 border border-white/30">
+                  <span className="font-black text-[10px] uppercase tracking-widest text-cyan-200">{s.countdown?.title || "Countdown"}</span>
+                  <div className="flex justify-center gap-3 text-base font-black font-mono py-1">
+                    <div>23<span className="text-[9px] font-sans font-normal opacity-80 block">HRS</span></div>
+                    <div>59<span className="text-[9px] font-sans font-normal opacity-80 block">MIN</span></div>
+                    <div>00<span className="text-[9px] font-sans font-normal opacity-80 block">SEC</span></div>
                   </div>
                 </div>
               )}
 
-              {/* 6. Link */}
+              {/* 9. Link */}
               {s.type === "link" && (
-                <span className="inline-flex items-center gap-1 px-4 py-2 font-extrabold text-[11px] rounded-full shadow-2xl bg-white text-black border border-white/40">
-                  🔗 {s.link?.title || s.link?.url}
-                </span>
-              )}
-
-              {/* 7. Music Sticker */}
-              {s.type === "music_sticker" && s.music_sticker && (
-                <div className="bg-black/70 border border-white/20 backdrop-blur-md rounded-full p-2 flex items-center gap-2.5 text-left w-52 shadow-2xl text-white">
-                  <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-rose-500 to-purple-600 flex items-center justify-center shrink-0 animate-spin-slow">
-                    <Music className="w-3.5 h-3.5 text-white" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[10px] font-black truncate">{s.music_sticker.title}</p>
-                    <p className="text-[8px] text-white/70 font-semibold truncate">{s.music_sticker.artist}</p>
-                  </div>
+                <div className={`inline-flex items-center gap-1.5 px-4 py-2 font-extrabold text-xs rounded-full shadow-2xl border ${
+                  styleIdx === 1
+                    ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-white/30"
+                    : styleIdx === 2
+                    ? "bg-black/85 text-white border-white/20"
+                    : "bg-white text-zinc-950 border-white/50"
+                }`}>
+                  <Link2 className={`w-3.5 h-3.5 ${styleIdx === 0 ? "text-blue-600" : "text-white"}`} />
+                  <span className="truncate max-w-[160px]">{s.link?.title || s.link?.url}</span>
                 </div>
               )}
 
-              {/* 8. Text Overlay */}
+              {/* 10. Music Sticker */}
+              {s.type === "music_sticker" && s.music_sticker && (
+                <>
+                  {styleIdx === 0 && (
+                    <div className="bg-black/85 border border-white/20 backdrop-blur-xl rounded-full px-3.5 py-2 flex items-center gap-2.5 text-left w-60 shadow-2xl text-white">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-rose-500 to-purple-600 flex items-center justify-center shrink-0 animate-spin-slow shadow-lg">
+                        <Music className="w-4 h-4 text-white" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] font-extrabold truncate text-white">{s.music_sticker.title}</p>
+                        <p className="text-[9px] text-zinc-300 font-semibold truncate">{s.music_sticker.artist}</p>
+                      </div>
+                      <div className="flex items-end gap-0.5 h-3 pr-1">
+                        <span className="w-0.5 bg-rose-400 animate-sound-wave-1 rounded-full" />
+                        <span className="w-0.5 bg-rose-300 animate-sound-wave-2 rounded-full" />
+                        <span className="w-0.5 bg-rose-400 animate-sound-wave-3 rounded-full" />
+                      </div>
+                    </div>
+                  )}
+
+                  {styleIdx === 1 && (
+                    <div className="bg-white text-zinc-950 border border-white/30 rounded-full py-1.5 px-3.5 flex items-center gap-2 shadow-2xl text-left w-auto max-w-[210px]">
+                      <div className="flex items-end gap-0.5 h-2.5">
+                        <span className="w-0.5 bg-black rounded-full h-2 animate-bounce" />
+                        <span className="w-0.5 bg-black rounded-full h-3 animate-bounce [animation-delay:0.15s]" />
+                        <span className="w-0.5 bg-black rounded-full h-1.5 animate-bounce [animation-delay:0.3s]" />
+                      </div>
+                      <span className="text-[10px] font-black truncate">{s.music_sticker.title}</span>
+                    </div>
+                  )}
+
+                  {styleIdx === 2 && (
+                    <div className="bg-gradient-to-br from-zinc-900/95 to-black border border-white/10 rounded-2xl p-2.5 flex items-center gap-3 shadow-2xl text-left w-56 text-white">
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-pink-500 via-rose-600 to-purple-600 flex items-center justify-center shrink-0 shadow-lg">
+                        <Music className="w-5 h-5 text-white" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] font-black text-white truncate">{s.music_sticker.title}</p>
+                        <p className="text-[9px] text-zinc-400 font-semibold truncate">{s.music_sticker.artist || "Artist"}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Style 3: Without Background Transparent Vinyl Badge */}
+                  {styleIdx === 3 && (
+                    <div className="bg-transparent px-2 py-1 flex items-center gap-2 text-left drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)] text-white">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-pink-500 via-rose-500 to-cyan-400 flex items-center justify-center shrink-0 animate-spin-slow border border-white/50 shadow-lg">
+                        <Music className="w-4 h-4 text-white" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-black text-white truncate drop-shadow">{s.music_sticker.title}</p>
+                        <p className="text-[9px] text-zinc-200 font-bold truncate drop-shadow">{s.music_sticker.artist || "Artist"}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Style 4: Karaoke Floating Lyrics Line */}
+                  {styleIdx === 4 && (
+                    <div className="bg-black/80 backdrop-blur-xl rounded-2xl border border-white/20 p-2.5 shadow-2xl w-56 text-center text-white space-y-1">
+                      <p className="text-xs font-black text-rose-400 animate-pulse tracking-wide truncate">🎵 {s.music_sticker.title}</p>
+                      <p className="text-[9px] text-zinc-400 font-medium truncate">{s.music_sticker.artist || "Soundtrack"}</p>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* 11. GIF */}
+              {s.type === "gif" && s.gif && (
+                <img src={s.gif.url} alt="" className="w-28 h-28 object-contain drop-shadow-2xl pointer-events-none" />
+              )}
+
+              {/* 12. Add Yours */}
+              {s.type === "addYours" && (
+                <div className="bg-gradient-to-tr from-pink-500 via-rose-600 to-purple-600 text-white p-3.5 rounded-2xl shadow-2xl text-center w-52 border border-white/30 space-y-1.5">
+                  <div className="flex items-center justify-center gap-1.5">
+                    <PlusCircle className="w-4 h-4 text-white" />
+                    <span className="text-[10px] font-black tracking-wider uppercase">Add Yours</span>
+                  </div>
+                  <p className="text-xs font-extrabold text-white drop-shadow">{s.addYours?.prompt || "Your turn"}</p>
+                </div>
+              )}
+
+              {/* 13. Time */}
+              {s.type === "time" && (
+                <div className={`shadow-2xl transition-all ${
+                  styleIdx === 1
+                    ? "bg-white text-zinc-950 font-sans font-extrabold text-xl tracking-widest border border-white/40 px-4 py-2 rounded-2xl"
+                    : styleIdx === 2
+                    ? "bg-transparent text-cyan-300 font-mono font-black text-3xl drop-shadow-[0_0_15px_rgba(34,211,238,0.9)] border-none px-2"
+                    : "bg-black/85 backdrop-blur-md text-white font-mono font-black text-2xl border border-white/30 tracking-tight px-4 py-2 rounded-2xl"
+                }`}>
+                  {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              )}
+
+              {/* 14. Day */}
+              {s.type === "day" && (
+                <div className={`shadow-2xl uppercase tracking-widest text-center font-black transition-all ${
+                  styleIdx === 1
+                    ? "bg-white text-zinc-950 border border-white/50 px-4 py-2 rounded-2xl text-sm"
+                    : styleIdx === 2
+                    ? "bg-transparent text-yellow-300 text-2xl drop-shadow-[0_3px_12px_rgba(0,0,0,0.95)] border-none px-2 font-black"
+                    : "bg-gradient-to-tr from-amber-400 via-rose-500 to-purple-600 text-white border border-white/30 px-4 py-2 rounded-2xl text-sm"
+                }`}>
+                  {new Date().toLocaleDateString([], { weekday: 'long' })}
+                </div>
+              )}
+
+              {/* 15. Text Overlay */}
               {s.type === "overlay" && (
-                <div className="bg-white/95 text-black px-4 py-2 rounded-2xl shadow-2xl font-black text-sm border border-white/40">
+                <div className="bg-gradient-to-r from-amber-400 via-rose-500 to-purple-600 text-white px-4 py-2.5 rounded-2xl shadow-2xl font-black text-sm border border-white/30 tracking-wide">
                   {s.overlay?.text}
                 </div>
               )}
 
-              {/* 9. Emoji */}
+              {/* 16. Emoji */}
               {s.type === "emoji" && (
-                <div className="text-5xl text-center select-none drop-shadow-2xl">
+                <div className="text-6xl text-center select-none drop-shadow-2xl">
                   {s.emoji?.val}
                 </div>
               )}
@@ -1117,10 +1402,24 @@ export const StoryCreator = ({ onClose, initialState }) => {
             {/* Stickers Overlay */}
             {mediaPreview && renderStickersInEditor()}
 
-            {/* Trash Bin for Drag Deletion */}
+            {/* Magnetic Center Guidelines */}
+            {snapGuideX && (
+              <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[1.5px] bg-cyan-400 z-30 pointer-events-none shadow-[0_0_10px_#22d3ee]" />
+            )}
+            {snapGuideY && (
+              <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[1.5px] bg-cyan-400 z-30 pointer-events-none shadow-[0_0_10px_#22d3ee]" />
+            )}
+
+            {/* Reactive Instagram Trash Bin for Drag Deletion */}
             {activeDragIdx !== null && (
-              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 bg-red-600/90 border border-red-500 text-white rounded-full p-3.5 shadow-2xl flex items-center justify-center animate-pulse scale-110">
-                <Trash2 className="w-5 h-5" />
+              <div
+                className={`absolute bottom-6 left-1/2 -translate-x-1/2 z-40 rounded-full flex items-center justify-center transition-all duration-200 pointer-events-none ${
+                  isOverTrash
+                    ? "bg-red-600 border-2 border-red-300 text-white scale-125 shadow-[0_0_30px_rgba(239,68,68,0.9)] p-4"
+                    : "bg-black/80 border border-white/20 text-zinc-300 scale-100 p-3.5 backdrop-blur-xl"
+                }`}
+              >
+                <Trash2 className={`w-6 h-6 ${isOverTrash ? "text-white animate-bounce" : "text-zinc-300"}`} />
               </div>
             )}
 
@@ -1143,13 +1442,31 @@ export const StoryCreator = ({ onClose, initialState }) => {
           </div>
         )}
 
-        {/* Sticker Scale Slider */}
+        {/* Instagram-Grade On-Canvas Sticker Transform & Style HUD */}
         {selectedStickerIdx !== null && stickers[selectedStickerIdx] && (
           <div
             onClick={(e) => e.stopPropagation()}
-            className="absolute right-4 top-1/2 -translate-y-1/2 z-50 bg-black/85 backdrop-blur-md p-3.5 py-4 rounded-2xl border border-white/10 flex flex-col items-center gap-3 shadow-2xl"
+            className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 bg-black/90 backdrop-blur-2xl px-4 py-2.5 rounded-full border border-white/20 flex items-center gap-3 shadow-2xl animate-fade-in"
           >
-            <span className="text-[8px] uppercase font-bold text-zinc-400">Scale</span>
+            {/* Scale Down */}
+            <button
+              onClick={() => {
+                triggerHaptic("light");
+                setItems((prev) => {
+                  if (!prev[activeIndex]) return prev;
+                  const next = [...prev];
+                  const cur = next[activeIndex].stickers[selectedStickerIdx].scale || 1;
+                  next[activeIndex].stickers[selectedStickerIdx].scale = Math.max(0.4, cur - 0.15);
+                  return next;
+                });
+              }}
+              className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition active:scale-90"
+              title="Scale Down"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Scale Slider */}
             <input
               type="range"
               min="0.4"
@@ -1165,13 +1482,97 @@ export const StoryCreator = ({ onClose, initialState }) => {
                   return next;
                 });
               }}
-              className="w-24 cursor-pointer accent-rose-500 appearance-none bg-zinc-700 rounded-full h-1"
+              className="w-20 cursor-pointer accent-rose-500 appearance-none bg-zinc-700 rounded-full h-1"
             />
+
+            {/* Scale Up */}
             <button
-              onClick={() => setSelectedStickerIdx(null)}
-              className="p-1 bg-zinc-800 rounded-full text-white"
+              onClick={() => {
+                triggerHaptic("light");
+                setItems((prev) => {
+                  if (!prev[activeIndex]) return prev;
+                  const next = [...prev];
+                  const cur = next[activeIndex].stickers[selectedStickerIdx].scale || 1;
+                  next[activeIndex].stickers[selectedStickerIdx].scale = Math.min(2.5, cur + 0.15);
+                  return next;
+                });
+              }}
+              className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition active:scale-90"
+              title="Scale Up"
             >
-              <X className="w-3 h-3" />
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+
+            <div className="w-[1px] h-4 bg-white/20 mx-0.5" />
+
+            {/* Rotate Left */}
+            <button
+              onClick={() => {
+                triggerHaptic("light");
+                setItems((prev) => {
+                  if (!prev[activeIndex]) return prev;
+                  const next = [...prev];
+                  const cur = next[activeIndex].stickers[selectedStickerIdx].rotation || 0;
+                  next[activeIndex].stickers[selectedStickerIdx].rotation = (cur - 15) % 360;
+                  return next;
+                });
+              }}
+              className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition active:scale-90"
+              title="Rotate Left (-15°)"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Rotate Right */}
+            <button
+              onClick={() => {
+                triggerHaptic("light");
+                setItems((prev) => {
+                  if (!prev[activeIndex]) return prev;
+                  const next = [...prev];
+                  const cur = next[activeIndex].stickers[selectedStickerIdx].rotation || 0;
+                  next[activeIndex].stickers[selectedStickerIdx].rotation = (cur + 15) % 360;
+                  return next;
+                });
+              }}
+              className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition active:scale-90"
+              title="Rotate Right (+15°)"
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+            </button>
+
+            <div className="w-[1px] h-4 bg-white/20 mx-0.5" />
+
+            {/* Delete Sticker */}
+            <button
+              onClick={() => {
+                triggerHaptic("medium");
+                microAudio.playPop();
+                setItems((prev) => {
+                  if (!prev[activeIndex]) return prev;
+                  const next = [...prev];
+                  next[activeIndex].stickers = next[activeIndex].stickers.filter((_, i) => i !== selectedStickerIdx);
+                  return next;
+                });
+                setSelectedStickerIdx(null);
+                toast.success("Sticker removed");
+              }}
+              className="p-1.5 rounded-full bg-red-500/20 hover:bg-red-500/40 text-red-400 transition active:scale-90"
+              title="Delete Sticker"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Done */}
+            <button
+              onClick={() => {
+                triggerHaptic("light");
+                setSelectedStickerIdx(null);
+              }}
+              className="p-1.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white transition active:scale-90"
+              title="Done"
+            >
+              <Check className="w-3.5 h-3.5" />
             </button>
           </div>
         )}

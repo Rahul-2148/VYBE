@@ -153,3 +153,16 @@ export const updateNotificationSettings = async (req, res) => {
     return res.status(500).json({ success: false, message: `updateSettings error: ${error.message}` });
   }
 };
+
+// Get Unread Notification Count
+export const getUnreadNotificationCount = async (req, res) => {
+  try {
+    const unreadCount = await Notification.countDocuments({ recipient: req.userId, read: false });
+    return res.status(200).json({
+      success: true,
+      unreadCount,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: `getUnreadNotificationCount error: ${error.message}` });
+  }
+};

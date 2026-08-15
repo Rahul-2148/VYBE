@@ -9,6 +9,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import MediaLightboxModal from "./MediaLightboxModal";
+import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
 
 const EMOJIS = ["❤️", "😂", "👍", "🔥", "😢", "🙏", "👏", "💯", "✨", "🎉"];
 
@@ -19,6 +20,8 @@ const ReceiverMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onForw
   const [lightboxData, setLightboxData] = useState({ open: false, url: null, type: "image" });
 
   const handleDoubleClick = async () => {
+    triggerHaptic("like");
+    microAudio.playPop();
     setShowHeart(true);
     setTimeout(() => setShowHeart(false), 1000);
     try {

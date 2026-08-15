@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Home as HomeIcon, 
   Search, 
@@ -22,14 +22,17 @@ import { toast } from "sonner";
 import logo from "../assets/logo.png";
 import dp from "../assets/dp3.png";
 import { setUserData } from "../redux/features/userSlice";
+import { clearUnreadNotifications, clearUnreadMessages } from "../redux/features/notificationSlice";
 import SearchModal from "./SearchModal";
 import api from "../lib/axios";
 import { useTheme } from "../lib/themeContext";
 import { removeLinkedAccount, getNextAccount, setActiveAccountId } from "../lib/accountManager";
 import { disconnectSocket, initializeSocket } from "../lib/socket";
+import { triggerHaptic } from "../lib/interactiveEffects";
 
 const LeftHome = () => {
   const { userData } = useSelector((state) => state.user);
+  const { unreadNotificationsCount, unreadMessagesCount } = useSelector((state) => state.notification || {});
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const location = useLocation();
@@ -85,14 +88,40 @@ const LeftHome = () => {
     }
   };
 
+  const isNotificationsActive = location.pathname === "/notifications";
+  const isMessagesActive = location.pathname.startsWith("/messages");
+
+  // Auto clear unread state when navigating to those pages
+  useEffect(() => {
+    if (isNotificationsActive && unreadNotificationsCount > 0) {
+      dispatch(clearUnreadNotifications());
+    }
+  }, [isNotificationsActive, unreadNotificationsCount, dispatch]);
+
+  useEffect(() => {
+    if (isMessagesActive && unreadMessagesCount > 0) {
+      dispatch(clearUnreadMessages());
+    }
+  }, [isMessagesActive, unreadMessagesCount, dispatch]);
+
   const navItems = [
     { label: "Home", icon: HomeIcon, path: "/" },
     { label: "Search", icon: Search, action: () => setShowSearchModal(true) },
     { label: "Explore", icon: Compass, path: "/explore" },
     { label: "Reels", icon: Film, path: "/reels" },
-    { label: "Messages", icon: MessageCircle, path: "/messages" },
+    { 
+      label: "Messages", 
+      icon: MessageCircle, 
+      path: "/messages", 
+      hasDot: unreadMessagesCount > 0 && !isMessagesActive 
+    },
     { label: "Communities", icon: Users, path: "/communities" },
-    { label: "Notifications", icon: Heart, path: "/notifications" },
+    { 
+      label: "Notifications", 
+      icon: Heart, 
+      path: "/notifications", 
+      hasDot: unreadNotificationsCount > 0 && !isNotificationsActive 
+    },
     { label: "Create", icon: PlusSquare, path: "/upload" },
     { label: "Monetization", icon: ShieldCheck, path: "/monetization" },
     { label: "Security Center", icon: ShieldAlert, path: "/security" },
@@ -110,7 +139,10 @@ const LeftHome = () => {
       <div className="flex-1 flex flex-col min-h-0 overflow-y-auto hide-scrollbar space-y-4 xl:space-y-5 pr-0.5 pb-4">
         {/* Logo Header */}
         <div 
-          onClick={() => navigate("/")} 
+          onClick={() => {
+            triggerHaptic("light");
+            navigate("/");
+          }} 
           className="px-3 pt-2 cursor-pointer flex items-center gap-3 transition transform active:scale-95"
         >
           <img src={logo} alt="VYBE" className="h-7 w-auto object-contain hidden xl:block" style={{ filter: themeCtx.resolvedTheme === "dark" ? "none" : "invert(1)" }} />
@@ -123,39 +155,55 @@ const LeftHome = () => {
         <nav className="space-y-1">
           {navItems.map((item, idx) => {
             const Icon = item.icon;
-            const isActive = item.path && location.pathname === item.path;
+            const isActive = item.path && (location.pathname === item.path || (item.path === "/messages" && location.pathname.startsWith("/messages")));
 
             return (
               <div key={idx} className="relative group">
                 <button
                   onClick={() => {
+                    triggerHaptic("light");
                     if (item.action) item.action();
                     else if (item.path) navigate(item.path);
                   }}
-                  className={`w-full flex items-center gap-4 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 cursor-pointer ${
+                  className={`w-full flex items-center gap-4 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 cursor-pointer interactive-tap ${
                     isActive
-                      ? "bg-surface text-text font-bold"
+                      ? "bg-surface text-text font-bold shadow-sm"
                       : "text-text-secondary hover:text-text hover:bg-surface/80"
                   }`}
                 >
-                  {item.avatar ? (
-                    <div className={`w-6 h-6 rounded-full overflow-hidden border-2 transition ${
-                      isActive ? "border-text scale-110" : "border-border-strong group-hover:border-border-strong"
-                    }`}>
-                      <img src={item.avatar || dp} alt="" className="w-full h-full object-cover" />
-                    </div>
-                  ) : (
-                    <Icon className={`w-6 h-6 transition-transform duration-200 group-hover:scale-110 ${
-                      isActive ? "text-text scale-105" : "text-text-secondary group-hover:text-text"
-                    }`} />
-                  )}
+                  <div className="relative shrink-0 flex items-center justify-center">
+                    {item.avatar ? (
+                      <div className={`w-6 h-6 rounded-full overflow-hidden border-2 transition ${
+                        isActive ? "border-text scale-110" : "border-border-strong group-hover:border-border-strong"
+                      }`}>
+                        <img src={item.avatar || dp} alt="" className="w-full h-full object-cover" />
+                      </div>
+                    ) : (
+                      <Icon className={`w-6 h-6 transition-transform duration-200 group-hover:scale-110 ${
+                        isActive ? "text-text scale-105" : "text-text-secondary group-hover:text-text"
+                      }`} />
+                    )}
 
-                  <span className="hidden xl:inline truncate">{item.label}</span>
+                    {/* Clean Instagram-Style Pink Blinking Dot */}
+                    {item.hasDot && (
+                      <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#ff3040] shadow-[0_0_8px_rgba(255,48,64,0.9)] animate-pulse ring-2 ring-bg" />
+                    )}
+                  </div>
+
+                  <span className="hidden xl:inline truncate flex-1 text-left">{item.label}</span>
+
+                  {/* Desktop Right Side Pink Dot */}
+                  {item.hasDot && (
+                    <span className="hidden xl:block w-2 h-2 rounded-full bg-[#ff3040] shadow-[0_0_6px_rgba(255,48,64,0.8)] animate-pulse ml-auto shrink-0" />
+                  )}
                 </button>
 
                 {/* Right-side Instagram Hover Tooltip (Shown on Icon-Only Collapsed View) */}
-                <div className="xl:hidden opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-4 transition-all duration-200 absolute left-full top-1/2 -translate-y-1/2 ml-2 px-3 py-1.5 bg-surface border border-border text-text text-xs font-semibold rounded-lg shadow-2xl pointer-events-none whitespace-nowrap z-50 flex items-center gap-1">
+                <div className="xl:hidden opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-4 transition-all duration-200 absolute left-full top-1/2 -translate-y-1/2 ml-2 px-3 py-1.5 bg-surface border border-border text-text text-xs font-semibold rounded-lg shadow-2xl pointer-events-none whitespace-nowrap z-50 flex items-center gap-1.5">
                   <span>{item.label}</span>
+                  {item.hasDot && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#ff3040] animate-ping" />
+                  )}
                 </div>
               </div>
             );

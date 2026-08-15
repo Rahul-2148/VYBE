@@ -21,6 +21,8 @@ import CollectionsModal from "./CollectionsModal";
 import AITranslateButton from "./AITranslateButton";
 import ShareSheet from "./ShareSheet";
 import EditPostModal from "./EditPostModal";
+import HeartExplosion from "./HeartExplosion";
+import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
 import api from "../lib/axios";
 
 // Render interactive caption with clickable @mentions and #hashtags
@@ -143,6 +145,12 @@ const Post = ({ post }) => {
   const handleLike = async () => {
     try {
       const isLiked = post?.likes?.includes(userData?.user?._id);
+      if (!isLiked) {
+        triggerHaptic("like");
+        microAudio.playPop();
+      } else {
+        triggerHaptic("light");
+      }
       const result = await api.post(`/post/like/${post?._id}`, { action: isLiked ? "unlike" : "like" });
       const updatedPost = result.data.post;
       const updatedPosts = postData?.map((p) => (p._id === post._id ? updatedPost : p));
@@ -156,6 +164,8 @@ const Post = ({ post }) => {
     if (!message.trim()) return;
     try {
       setCommentLoading(true);
+      triggerHaptic("light");
+      microAudio.playBubble();
       const result = await api.post(`/post/comment/${post?._id}`, { message });
       const updatedPost = result.data.post;
       const updatedPosts = postData.map((p) => (p._id === post._id ? updatedPost : p));
@@ -171,6 +181,7 @@ const Post = ({ post }) => {
 
   const handleSaved = async () => {
     try {
+      triggerHaptic("medium");
       const result = await api.post(`/post/saved/${post?._id}`);
       dispatch(setUserData(result.data.user));
       toast.success(result.data.message);
@@ -372,25 +383,19 @@ const Post = ({ post }) => {
         {/* Tagged Users Interactive Overlay */}
         <TaggedUsersOverlay taggedUsers={post?.taggedUsers || []} showTags={showTags} setShowTags={setShowTags} />
 
-        {/* Bouncing heart on double tap */}
-        {showHeartAnim && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/10 z-50 pointer-events-none animate-fade-in">
-            <GoHeartFill 
-              className="text-text text-8xl drop-shadow-2xl scale-125 animate-bounce transition-all duration-300"
-              style={{ filter: "drop-shadow(0 10px 20px rgba(244, 63, 94, 0.6))" }}
-            />
-          </div>
-        )}
+        {/* Instagram Particle Heart Burst on double tap */}
+        <HeartExplosion show={showHeartAnim} onComplete={() => setShowHeartAnim(false)} />
 
         {/* Instagram-Style Floating Soundtrack Pill */}
         {post?.music && (
           <div
-            className="absolute bottom-3 left-3 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/75 hover:bg-black/90 backdrop-blur-md text-white border border-white/20 shadow-xl transition cursor-pointer group select-none"
+            className="absolute bottom-3 left-3 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/75 hover:bg-black/90 backdrop-blur-md text-white border border-white/20 shadow-xl transition cursor-pointer group select-none interactive-tap"
           >
             {/* Click to Navigate to Audio Detail Page */}
             <div
               onClick={(e) => {
                 e.stopPropagation();
+                triggerHaptic("light");
                 const trackId = typeof post.music === "object" ? post.music.id || post.music.title : post.music;
                 navigate(`/audio/${encodeURIComponent(trackId)}`, {
                   state: { music: parsedMusic },
@@ -412,6 +417,7 @@ const Post = ({ post }) => {
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
+                  triggerHaptic("light");
                   setMusicMuted(!musicMuted);
                 }}
                 className="flex items-center gap-1 ml-1 border-l border-white/20 pl-1.5 cursor-pointer hover:scale-105 transition"
@@ -419,9 +425,10 @@ const Post = ({ post }) => {
               >
                 {!musicMuted ? (
                   <div className="flex items-end gap-0.5 h-3">
-                    <span className="w-0.5 bg-rose-400 h-full animate-pulse" />
-                    <span className="w-0.5 bg-rose-300 h-2/3 animate-bounce" />
-                    <span className="w-0.5 bg-rose-400 h-4/5 animate-pulse" />
+                    <span className="w-0.5 bg-rose-400 animate-sound-wave-1 rounded-full" />
+                    <span className="w-0.5 bg-rose-300 animate-sound-wave-2 rounded-full" />
+                    <span className="w-0.5 bg-rose-400 animate-sound-wave-3 rounded-full" />
+                    <span className="w-0.5 bg-pink-400 animate-sound-wave-4 rounded-full" />
                   </div>
                 ) : (
                   <VolumeX className="w-3 h-3 text-zinc-400 group-hover:text-white" />
@@ -435,9 +442,12 @@ const Post = ({ post }) => {
       {/* ACTION BAR */}
       <div className="w-full h-12 flex justify-between items-center px-4 border-t border-border/80 bg-bg/40">
         <div className="flex items-center gap-5">
-          <button onClick={handleLike} className="flex items-center gap-1.5 text-text hover:text-rose-500 transition cursor-pointer">
+          <button 
+            onClick={handleLike} 
+            className="flex items-center gap-1.5 text-text hover:text-rose-500 transition cursor-pointer interactive-tap"
+          >
             {post?.likes?.includes(userData?.user?._id) ? (
-              <GoHeartFill className="w-5 h-5 text-rose-500 scale-110" />
+              <GoHeartFill className="w-5 h-5 text-rose-500 scale-110 animate-heart-burst" />
             ) : (
               <GoHeart className="w-5 h-5" />
             )}
@@ -451,7 +461,13 @@ const Post = ({ post }) => {
           </button>
 
           {post?.allowComments !== false ? (
-            <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-1.5 text-text hover:text-rose-500 transition cursor-pointer">
+            <button 
+              onClick={() => {
+                triggerHaptic("light");
+                setShowComments(!showComments);
+              }} 
+              className="flex items-center gap-1.5 text-text hover:text-rose-500 transition cursor-pointer interactive-tap"
+            >
               <MdOutlineComment className="w-5 h-5" />
               <span className="text-xs font-semibold text-text">{post?.comments?.length || 0}</span>
             </button>
@@ -462,23 +478,37 @@ const Post = ({ post }) => {
             </div>
           )}
 
-          <button onClick={() => setShowShareSheet(true)} className="p-1 text-text hover:text-rose-500 transition cursor-pointer" title="Share Post">
+          <button 
+            onClick={() => {
+              triggerHaptic("light");
+              setShowShareSheet(true);
+            }} 
+            className="p-1 text-text hover:text-rose-500 transition cursor-pointer interactive-tap" 
+            title="Share Post"
+          >
             <IoSendSharp className="w-4 h-4 -rotate-45" />
           </button>
         </div>
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowCollectionsModal(true)}
-            className="p-1.5 text-text-secondary hover:text-rose-400 rounded-full hover:bg-surface transition cursor-pointer"
+            onClick={() => {
+              triggerHaptic("light");
+              setShowCollectionsModal(true);
+            }}
+            className="p-1.5 text-text-secondary hover:text-rose-400 rounded-full hover:bg-surface transition cursor-pointer interactive-tap"
             title="Save to folder"
           >
             <FolderPlus className="w-4 h-4" />
           </button>
 
-          <button onClick={handleSaved} className="p-1.5 text-text hover:text-amber-400 transition cursor-pointer">
-            {userData?.user?.savedPosts?.includes(post?._id) ? (
-              <GoBookmarkFill className="w-5 h-5 text-amber-400" />
+          <button
+            onClick={handleSaved}
+            className="p-1.5 text-text hover:text-rose-500 rounded-full hover:bg-surface transition cursor-pointer interactive-tap"
+            title={post?.savedBy?.includes(userData?.user?._id) ? "Unsave Post" : "Save Post"}
+          >
+            {userData?.user?.savedPosts?.includes(post?._id) || post?.savedBy?.includes(userData?.user?._id) ? (
+              <GoBookmarkFill className="w-5 h-5 text-rose-500 scale-110" />
             ) : (
               <GoBookmark className="w-5 h-5" />
             )}

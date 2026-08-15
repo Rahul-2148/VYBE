@@ -2,6 +2,7 @@ import { FiPlus } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
 import dp from "../assets/dp3.png";
 import { useSelector } from "react-redux";
+import { triggerHaptic } from "../lib/interactiveEffects";
 
 const StoryDp = ({ userName, profileImage, storyGroup, userIndex }) => {
   const navigate = useNavigate();
@@ -20,6 +21,7 @@ const StoryDp = ({ userName, profileImage, storyGroup, userIndex }) => {
     );
 
   const handleClick = () => {
+    triggerHaptic("light");
     if (
       (userName === "Your Story" || userName === "Add Story") &&
       (!storyGroup || !storyGroup.stories || storyGroup.stories.length === 0)
@@ -37,12 +39,9 @@ const StoryDp = ({ userName, profileImage, storyGroup, userIndex }) => {
       (f) => (f.author?.userName || f.userName) === groupUserName
     );
 
-    const next = feed[currentIndex + 1] || null;
-    const prev = feed[currentIndex - 1] || null;
-
     navigate("/story", {
       state: {
-        initialUserIndex: currentIndex,
+        initialUserIndex: currentIndex >= 0 ? currentIndex : 0,
       },
     });
   };
@@ -58,8 +57,8 @@ const StoryDp = ({ userName, profileImage, storyGroup, userIndex }) => {
             ? isViewed
               ? "bg-surface-hover border border-border opacity-70"
               : isCloseFriendsStory
-              ? "bg-gradient-to-tr from-emerald-400 via-teal-500 to-green-600 shadow-emerald-500/20 shadow-lg"
-              : "bg-gradient-to-tr from-amber-400 via-rose-500 to-purple-600 shadow-purple-500/20 shadow-lg"
+              ? "bg-gradient-to-tr from-emerald-400 via-teal-500 to-green-600 shadow-emerald-500/20 shadow-lg animate-badge-glow"
+              : "bg-gradient-to-tr from-amber-400 via-rose-500 to-purple-600 shadow-purple-500/20 shadow-lg animate-badge-glow"
             : "bg-surface-hover"
         }`}
       >

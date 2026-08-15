@@ -15,6 +15,8 @@ import { setLoopData } from "../redux/features/loopSlice";
 import FollowButton from "./FollowButton";
 import ShareSheet from "./ShareSheet";
 import RemixReelModal from "./RemixReelModal";
+import HeartExplosion from "./HeartExplosion";
+import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
 import api from "../lib/axios";
 import { getSocket } from "../lib/socket";
 
@@ -151,6 +153,13 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
     const nextLiked = !isLiked;
     const nextCount = nextLiked ? likesCount + 1 : Math.max(0, likesCount - 1);
 
+    if (nextLiked) {
+      triggerHaptic("like");
+      microAudio.playPop();
+    } else {
+      triggerHaptic("light");
+    }
+
     // Instant Zero-Jitter UI Update
     setIsLiked(nextLiked);
     setLikesCount(nextCount);
@@ -189,7 +198,6 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
   // Dedicated Instagram-Style Double Tap Like (Always forces like state + Heart Burst)
   const forceDoubleTapLike = async () => {
     setShowHeart(true);
-    setTimeout(() => setShowHeart(false), 650);
 
     if (!isLiked) {
       const nextCount = likesCount + 1;
@@ -429,12 +437,8 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
         </div>
       )}
 
-      {/* 60 FPS HEART BURST DOUBLE-TAP ANIMATION */}
-      {showHeart && (
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 heart-animation z-50 pointer-events-none">
-          <GoHeartFill className="w-28 h-28 text-rose-500 drop-shadow-2xl animate-ping" />
-        </div>
-      )}
+      {/* Instagram Particle Heart Burst on double-tap */}
+      <HeartExplosion show={showHeart} onComplete={() => setShowHeart(false)} />
 
       {/* OVERLAY BACKDROP FOR DRAWERS */}
       {(showComments || showViewers) && (

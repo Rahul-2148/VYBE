@@ -33,6 +33,7 @@ const LocationPage = lazy(() => import("./pages/LocationPage"));
 const Communities = lazy(() => import("./pages/Communities"));
 import FloatingMessagesDock from "./components/FloatingMessagesDock";
 import CallManager from "./components/CallManager";
+import NotificationLightBar from "./components/NotificationLightBar";
 
 import { initializeSocket, disconnectSocket } from "./lib/socket";
 import { setUserData } from "./redux/features/userSlice";
@@ -150,6 +151,8 @@ function App() {
       <FloatingMessagesDock />
 
       <CallManager />
+
+      <NotificationLightBar />
 
       <Toaster />
     </>

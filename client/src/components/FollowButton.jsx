@@ -1,7 +1,9 @@
 import React from "react";
+import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { useDispatch, useSelector } from "react-redux";
 import { setUserData } from "../redux/features/userSlice";
+import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
 import api from "../lib/axios";
 
 export const FollowButton = ({ targetUserId, targetUser = null, tailwind, onFollowChange }) => {
@@ -35,6 +37,13 @@ export const FollowButton = ({ targetUserId, targetUser = null, tailwind, onFoll
   );
 
   const handleFollow = async () => {
+    triggerHaptic("medium");
+    if (!isFollowing) {
+      microAudio.playShimmer();
+    } else {
+      microAudio.playBubble();
+    }
+
     try {
       const result = await api.get(`/user/follow/${targetUserId}`);
       dispatch(
@@ -52,9 +61,14 @@ export const FollowButton = ({ targetUserId, targetUser = null, tailwind, onFoll
   };
 
   return (
-    <button className={tailwind} onClick={handleFollow}>
+    <motion.button 
+      whileTap={{ scale: 0.92 }}
+      whileHover={{ scale: 1.02 }}
+      className={`cursor-pointer select-none transition-all ${tailwind || "px-4 py-1.5 rounded-full text-xs font-bold shadow"}`} 
+      onClick={handleFollow}
+    >
       {isFollowing ? "Following" : isRequested ? "Requested" : isFollower ? "Follow Back" : "Follow"}
-    </button>
+    </motion.button>
   );
 };
 
