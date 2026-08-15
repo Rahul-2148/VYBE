@@ -20,22 +20,26 @@ const getUserRoom = (userId) => `user_${userId}`;
 const getUserSocketCount = (userId) => activeUsers.get(userId)?.size || 0;
 
 const addUserSocket = (userId, socketId) => {
-  if (!activeUsers.has(userId)) {
-    activeUsers.set(userId, new Set());
+  if (!userId) return;
+  const uid = userId.toString();
+  if (!activeUsers.has(uid)) {
+    activeUsers.set(uid, new Set());
   }
-  activeUsers.get(userId).add(socketId);
-  socketToUserMap.set(socketId, userId);
+  activeUsers.get(uid).add(socketId);
+  socketToUserMap.set(socketId, uid);
 };
 
 const removeUserSocket = (userId, socketId) => {
-  const sockets = activeUsers.get(userId);
+  if (!userId) return 0;
+  const uid = userId.toString();
+  const sockets = activeUsers.get(uid);
   if (!sockets) return 0;
 
   sockets.delete(socketId);
   socketToUserMap.delete(socketId);
 
   if (sockets.size === 0) {
-    activeUsers.delete(userId);
+    activeUsers.delete(uid);
     return 0;
   }
   return sockets.size;
@@ -516,14 +520,6 @@ export const initializeSocket = (httpServer) => {
       });
     });
 
-    socket.on("call:chat-message", (data) => {
-      const { room, message } = data;
-      socket.to(room).emit("call:chat-message-received", {
-        senderId: socket.userId,
-        message,
-        timestamp: new Date(),
-      });
-    });
 
     socket.on("call:moderate", (data) => {
       const { room, targetUserId, action } = data; // action: 'mute-user', 'kick-user', 'mute-all'
@@ -706,6 +702,238 @@ export const initializeSocket = (httpServer) => {
     socket.on("loop-comment-send", (data) => {
       const { loopId, comment } = data;
       io.emit("loop-comment-updated", { loopId, comment });
+    });
+
+    // =====================================================
+    // WEBRTC CALLING & SIGNALING REALTIME SYSTEM
+    // =====================================================
+    socket.on("call:invite", async (data) => {
+      const { userToCall, targetUserId, room, type, conversationId, callerName, callerAvatar } = data;
+      const recipientId = (userToCall || targetUserId)?.toString();
+      if (!recipientId) return;
+
+      console.log(`📞 Call invite from ${socket.userId} to ${recipientId} in room ${room} (${type})`);
+
+      const targetSockets = activeUsers.get(recipientId);
+      const isOnline = Boolean(targetSockets && targetSockets.size > 0);
+
+      socket.emit("call:status", { status: isOnline ? "ringing" : "calling", room });
+
+      const payload = {
+        room,
+        from: socket.userId,
+        callerName: callerName || "User",
+        callerAvatar,
+        type: type || "video",
+        conversationId,
+      };
+
+      io.to(`user_${recipientId}`).emit("call:invite-received", payload);
+      io.to(`user_${recipientId}`).emit("call:incoming", payload);
+    });
+
+    socket.on("call:respond", (data) => {
+      const { room, response, to } = data;
+      console.log(`📡 Call response [${response}] from ${socket.userId} to ${to} for room ${room}`);
+
+      if (to) {
+        io.to(`user_${to.toString()}`).emit("call:response-received", {
+          room,
+          response,
+          from: socket.userId,
+        });
+      }
+
+      if (response === "accepted" || response === "joined") {
+        socket.to(room).emit("call:accepted", { room, acceptedBy: socket.userId });
+      } else if (response === "declined" || response === "rejected") {
+        socket.to(room).emit("call:rejected", { room, reason: "Call declined" });
+      } else if (response === "cancelled") {
+        socket.to(room).emit("call:ended", { room, reason: "Call cancelled by caller" });
+      }
+    });
+
+    socket.on("call:initiate", async (data) => {
+      const { targetUserId, userToCall, room, type, conversationId, callerName, callerAvatar } = data;
+      const recipientId = (targetUserId || userToCall)?.toString();
+      if (!recipientId) return;
+
+      console.log(`📞 Call initiated by ${socket.userId} to ${recipientId} in room ${room} (${type})`);
+
+      const targetSockets = activeUsers.get(recipientId);
+      const isOnline = Boolean(targetSockets && targetSockets.size > 0);
+
+      socket.emit("call:status", { status: isOnline ? "ringing" : "calling", room });
+
+      const payload = {
+        room,
+        from: socket.userId,
+        callerName: callerName || "User",
+        callerAvatar,
+        type: type || "video",
+        conversationId,
+      };
+
+      io.to(`user_${recipientId}`).emit("call:invite-received", payload);
+      io.to(`user_${recipientId}`).emit("call:incoming", payload);
+    });
+
+    socket.on("call:accept", (data) => {
+      const { room, callerId } = data;
+      console.log(`✅ Call accepted by ${socket.userId} in room ${room}`);
+      if (callerId) {
+        io.to(`user_${callerId.toString()}`).emit("call:accepted", { room, acceptedBy: socket.userId });
+        io.to(`user_${callerId.toString()}`).emit("call:response-received", { room, response: "accepted", from: socket.userId });
+      }
+      socket.to(room).emit("call:accepted", { room, acceptedBy: socket.userId });
+    });
+
+    socket.on("call:reject", (data) => {
+      const { room, callerId, reason } = data;
+      console.log(`❌ Call rejected by ${socket.userId} for room ${room}`);
+      if (callerId) {
+        io.to(`user_${callerId.toString()}`).emit("call:rejected", {
+          room,
+          reason: reason || "Call declined",
+        });
+        io.to(`user_${callerId.toString()}`).emit("call:response-received", {
+          room,
+          response: "declined",
+          from: socket.userId,
+        });
+      }
+      socket.to(room).emit("call:rejected", {
+        room,
+        reason: reason || "Call declined",
+      });
+    });
+
+    socket.on("call:end", async (data) => {
+      const { room } = data;
+      console.log(`🛑 Call ended in room ${room} by ${socket.userId}`);
+      socket.to(room).emit("call:ended", { room, endedBy: socket.userId });
+      io.to(room).emit("call:ended", { room, endedBy: socket.userId });
+
+      try {
+        await CallSession.findOneAndUpdate(
+          { room, status: { $ne: "ended" } },
+          { status: "ended", endTime: new Date() }
+        );
+      } catch (e) {
+        console.warn("Could not mark call session ended in db:", e);
+      }
+    });
+
+    socket.on("call:join-room", async (data) => {
+      const { room, userId } = data;
+      const uid = (userId || socket.userId)?.toString();
+      console.log(`🤝 User ${uid} (socket ${socket.id}) joining call room: ${room}`);
+
+      socket.join(room);
+
+      if (!socketCallRooms.has(socket.id)) {
+        socketCallRooms.set(socket.id, new Set());
+      }
+      socketCallRooms.get(socket.id).add(room);
+
+      const roomSockets = await io.in(room).fetchSockets();
+      const existingMembers = roomSockets
+        .filter((s) => s.id !== socket.id)
+        .map((s) => ({
+          socketId: s.id,
+          userId: (s.userId || socketToUserMap.get(s.id))?.toString(),
+        }));
+
+      socket.emit("call:room-members", { members: existingMembers });
+
+      socket.to(room).emit("call:peer-joined", {
+        socketId: socket.id,
+        userId: uid,
+      });
+    });
+
+    socket.on("call:leave-room", (data) => {
+      const { room } = data;
+      console.log(`👋 User ${socket.userId} leaving call room: ${room}`);
+      socket.leave(room);
+
+      const sRooms = socketCallRooms.get(socket.id);
+      if (sRooms) {
+        sRooms.delete(room);
+      }
+
+      socket.to(room).emit("call:peer-left", {
+        socketId: socket.id,
+        userId: socket.userId?.toString(),
+      });
+
+      leaveCallSessionInDb(room, socket.userId).catch(() => null);
+    });
+
+    socket.on("call:signal", (data) => {
+      const { toSocketId, signal } = data;
+      io.to(toSocketId).emit("call:signal-received", {
+        fromSocketId: socket.id,
+        fromUserId: socket.userId?.toString(),
+        signal,
+      });
+    });
+
+    socket.on("call:action", (data) => {
+      const { room, action, value } = data;
+      const payload = {
+        action,
+        value,
+        userId: socket.userId?.toString(),
+        socketId: socket.id,
+      };
+      socket.to(room).emit("call:action", payload);
+      socket.to(room).emit("call:action-broadcast", payload);
+    });
+
+    // In-Call Live Chat / Chatroom
+    socket.on("call:chat-message", (data) => {
+      const { room, text } = data;
+      io.to(room).emit("call:chat-message-received", {
+        from: socket.userId,
+        text,
+        time: Date.now(),
+      });
+    });
+
+    // In-Call Watch Party / Co-Watching Sync
+    socket.on("call:watch-party-start", (data) => {
+      const { room, videoUrl } = data;
+      socket.to(room).emit("call:watch-party-started", {
+        videoUrl,
+        startedBy: socket.userId,
+      });
+    });
+
+    socket.on("call:watch-party-stop", (data) => {
+      const { room } = data;
+      socket.to(room).emit("call:watch-party-stopped", {
+        stoppedBy: socket.userId,
+      });
+    });
+
+    socket.on("call:watch-party-sync", (data) => {
+      const { room, action, currentTime, playing } = data;
+      socket.to(room).emit("call:watch-party-synced", {
+        action,
+        currentTime,
+        playing,
+        senderId: socket.userId,
+      });
+    });
+
+    // Floating Reaction Emojis
+    socket.on("call:reaction", (data) => {
+      const { room, emoji } = data;
+      io.to(room).emit("call:reaction-received", {
+        emoji,
+        senderId: socket.userId,
+      });
     });
 
     // =====================================================

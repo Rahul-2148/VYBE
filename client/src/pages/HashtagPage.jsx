@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Hash, ArrowLeft, Heart, MessageCircle, UserPlus, UserCheck } from "lucide-react";
-// framer-motion not used directly in this file
+import { motion } from "framer-motion";
 import { toast } from "sonner";
 import api from "../lib/axios";
 

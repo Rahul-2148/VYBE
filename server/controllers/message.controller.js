@@ -572,33 +572,75 @@ export const getSharedMedia = async (req, res) => {
   try {
     const userId = req.userId;
     const { conversationId } = req.params;
-    const { mediaType } = req.query; // "image", "video", "audio", "document", "link"
+    const { mediaType } = req.query; // "image", "video", "file", "document", "link", "audio", "voice"
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = parseInt(req.query.limit) || 50;
+
+    let convFilter = conversationId;
+    if (mongoose.Types.ObjectId.isValid(conversationId)) {
+      convFilter = { $in: [conversationId, new mongoose.Types.ObjectId(conversationId)] };
+    }
+
+    const excludedUsers = [userId];
+    if (mongoose.Types.ObjectId.isValid(userId)) {
+      excludedUsers.push(new mongoose.Types.ObjectId(userId));
+    }
 
     let filter = {
-      conversation: conversationId,
-      deletedFor: { $ne: userId },
+      conversation: convFilter,
+      deletedFor: { $nin: excludedUsers },
       deletedForEveryone: { $ne: true },
     };
 
     if (mediaType === "link") {
-      filter["content.linkPreview.url"] = { $exists: true, $ne: null };
-    } else if (mediaType) {
-      filter["content.media"] = { $elemMatch: { type: mediaType } };
+      filter.$or = [
+        { "content.linkPreview.url": { $exists: true, $ne: null, $ne: "" } },
+        { "content.text": { $regex: /https?:\/\//i } },
+        { type: "link" },
+      ];
+    } else if (mediaType === "image") {
+      filter.$or = [
+        { type: { $in: ["image", "sticker", "shared_post", "shared_reel", "shared_story", "share"] } },
+        { "content.media.type": { $in: ["image", "sticker"] } },
+        { "content.media.url": { $exists: true, $ne: null, $ne: "" } },
+        { "content.sharedData.mediaUrl": { $exists: true, $ne: null, $ne: "" } },
+        { "sharedData.mediaUrl": { $exists: true, $ne: null, $ne: "" } },
+      ];
+    } else if (mediaType === "video") {
+      filter.$or = [
+        { type: { $in: ["video", "shared_reel"] } },
+        { "content.media.type": "video" },
+        { "content.media.mimeType": { $regex: /^video/i } },
+      ];
+    } else if (mediaType === "file" || mediaType === "document") {
+      filter.$or = [
+        { type: { $in: ["file", "document"] } },
+        { "content.media.type": { $in: ["file", "document"] } },
+      ];
+    } else if (mediaType === "audio" || mediaType === "voice") {
+      filter.$or = [
+        { type: { $in: ["audio", "voice"] } },
+        { "content.media.type": { $in: ["audio", "voice"] } },
+      ];
     } else {
-      filter["content.media"] = { $exists: true, $not: { $size: 0 } };
+      filter.$or = [
+        { type: { $in: ["image", "video", "audio", "file", "document", "voice", "shared_post", "shared_reel", "shared_story", "share", "sticker"] } },
+        { "content.media": { $exists: true, $not: { $size: 0 } } },
+        { "content.sharedData.mediaUrl": { $exists: true, $ne: null, $ne: "" } },
+        { "content.linkPreview.url": { $exists: true, $ne: null, $ne: "" } },
+      ];
     }
 
     const messages = await Message.find(filter)
       .populate("sender", "userName profileImage isVerified")
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
-      .limit(limit);
+      .limit(limit)
+      .lean();
 
-    res.json({ success: true, messages, hasMore: messages.length === limit });
+    res.json({ success: true, messages: messages || [], hasMore: (messages?.length || 0) === limit });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 

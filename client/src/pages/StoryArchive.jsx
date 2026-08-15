@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { Archive, Plus, Trash2, ArrowLeft, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
 import api from "../lib/axios";
 import StoryHighlighterModal from "../components/StoryHighlighterModal";
 
@@ -81,6 +82,22 @@ export const StoryArchive = () => {
         </button>
       </div>
 
+      {/* Archive Selector Tabs */}
+      <div className="flex gap-2 bg-surface p-1 rounded-xl border border-border w-fit">
+        <button
+          onClick={() => navigate("/story/archive")}
+          className="px-4 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow-md cursor-pointer"
+        >
+          Stories
+        </button>
+        <button
+          onClick={() => navigate("/post/archive")}
+          className="px-4 py-1.5 rounded-lg text-xs font-bold text-text-secondary hover:text-text cursor-pointer"
+        >
+          Posts
+        </button>
+      </div>
+
       {/* Stories Grid */}
       {loading ? (
         <div className="text-center py-16 text-text-muted">
@@ -111,18 +128,36 @@ export const StoryArchive = () => {
               )}
 
               {/* Gradient Overlay */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition p-3 flex flex-col justify-between">
+              <div
+                onClick={() =>
+                  navigate("/story", {
+                    state: {
+                      stories: [story],
+                      initialUserIndex: 0,
+                    },
+                  })
+                }
+                className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition p-3 flex flex-col justify-between cursor-pointer"
+              >
                 <button
-                  onClick={() => handleDeleteStory(story._id)}
-                  className="self-end p-1.5 rounded-lg bg-rose-600/80 text-text hover:bg-rose-600 transition"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteStory(story._id);
+                  }}
+                  className="self-end p-1.5 rounded-lg bg-rose-600/80 text-white hover:bg-rose-600 transition cursor-pointer"
                   title="Delete from archive"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
 
-                <div className="flex items-center gap-1.5 text-xs text-text">
-                  <Eye className="w-3.5 h-3.5 text-text-secondary" />
-                  <span>{story.viewers?.length || 0} views</span>
+                <div className="flex items-center justify-between text-xs text-white">
+                  <div className="flex items-center gap-1.5">
+                    <Eye className="w-3.5 h-3.5 text-zinc-300" />
+                    <span>{story.viewers?.length || 0}</span>
+                  </div>
+                  <span className="text-[10px] text-zinc-400">
+                    {moment(story.createdAt).format("MMM D")}
+                  </span>
                 </div>
               </div>
             </motion.div>

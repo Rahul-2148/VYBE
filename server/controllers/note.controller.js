@@ -6,7 +6,7 @@ import { getBlockedUserIds } from "../utils/blockHelper.js";
 export const createOrUpdateNote = async (req, res) => {
   try {
     const userId = req.userId;
-    const { text, musicTitle, musicArtist } = req.body;
+    const { text, music, musicTitle, musicArtist } = req.body;
 
     if (!text || !text.trim()) {
       return res.status(400).json({ success: false, message: "Note text is required" });
@@ -16,13 +16,24 @@ export const createOrUpdateNote = async (req, res) => {
       return res.status(400).json({ success: false, message: "Note text cannot exceed 60 characters" });
     }
 
+    let parsedMusic = null;
+    if (music) {
+      try {
+        parsedMusic = typeof music === "string" ? JSON.parse(music) : music;
+      } catch {
+        parsedMusic = { title: String(music) };
+      }
+    } else if (musicTitle) {
+      parsedMusic = { title: musicTitle.trim(), artist: musicArtist?.trim() || "" };
+    }
+
     // Delete any existing active note for this user
     await Note.deleteMany({ user: userId });
 
     const note = await Note.create({
       user: userId,
       text: text.trim(),
-      music: musicTitle ? { title: musicTitle.trim(), artist: musicArtist?.trim() || "" } : null,
+      music: parsedMusic,
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     });
 

@@ -5,7 +5,7 @@ import { Toaster as SonnerToaster } from "sonner";
 export const Toaster = (props) => {
   return (
     <SonnerToaster
-      position="bottom-right"
+      position="top-center"
       richColors
       closeButton
       theme="system"

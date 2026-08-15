@@ -1,21 +1,32 @@
-// Lightweight IP Rate Limiter Middleware for Auth & Public APIs
-const requestStore = new Map();
+// rateLimiter.js - Scoped IP Rate Limiter Middleware for Auth & Public APIs
 
-// Run a cleanup job every 15 minutes to evict old IPs and prevent memory leaks
-setInterval(() => {
-  const now = Date.now();
-  const fifteenMinsAgo = now - 15 * 60 * 1000;
-  for (const [ip, timestamps] of requestStore.entries()) {
-    const active = timestamps.some((t) => t > fifteenMinsAgo);
-    if (!active) {
-      requestStore.delete(ip);
+export const createRateLimiter = ({
+  windowMs = 15 * 60 * 1000,
+  max = 100,
+  message = "Too many requests, please try again later.",
+}) => {
+  // Scoped store for each limiter instance
+  const requestStore = new Map();
+
+  // Cleanup job for this limiter
+  setInterval(() => {
+    const now = Date.now();
+    const expiry = now - windowMs;
+    for (const [ip, timestamps] of requestStore.entries()) {
+      const active = timestamps.some((t) => t > expiry);
+      if (!active) {
+        requestStore.delete(ip);
+      }
     }
-  }
-}, 15 * 60 * 1000).unref();
+  }, windowMs).unref();
 
-export const createRateLimiter = ({ windowMs = 15 * 60 * 1000, max = 100, message = "Too many requests, please try again later." }) => {
   return (req, res, next) => {
+    // Bypass in local development or for loopback to prevent false 429 locks during active testing
     const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+    if (process.env.NODE_ENV !== "production" || ip === "127.0.0.1" || ip === "::1" || ip === "localhost") {
+      return next();
+    }
+
     const now = Date.now();
 
     if (!requestStore.has(ip)) {
@@ -41,12 +52,12 @@ export const createRateLimiter = ({ windowMs = 15 * 60 * 1000, max = 100, messag
 
 export const authRateLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000, // 15 mins
-  max: 20, // 20 login/signup attempts per 15 min per IP
+  max: 20, // 20 attempts per 15 min per IP
   message: "Too many authentication attempts. Please try again in 15 minutes.",
 });
 
 export const apiRateLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 2000, // Raised to 2000 to prevent false-positive blocks during standard browsing
+  max: 5000,
   message: "API rate limit exceeded. Please slow down your requests.",
 });

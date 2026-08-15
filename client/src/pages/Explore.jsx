@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { Search, Compass, Heart, MessageCircle, Play, ArrowLeft, TrendingUp, Grid3X3, Film, Bookmark, Users, Eye } from "lucide-react";
-import { AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import SearchModal from "../components/SearchModal";

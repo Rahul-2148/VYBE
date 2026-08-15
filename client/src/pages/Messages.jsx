@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
-import { ArrowLeft, Search, Pin, MessageSquare, Users, Send, Edit, X, Archive, Bell, BellOff, Trash2, Volume2, VolumeX, SlidersHorizontal, CheckCircle, MessageCircleReply, Star, UserCheck, UserPlus, Flag } from "lucide-react";
+import { ArrowLeft, Search, Pin, MessageSquare, Users, Send, Edit, X, Archive, Bell, BellOff, Trash2, Volume2, VolumeX, SlidersHorizontal, CheckCircle, MessageCircleReply, Star, UserCheck, UserPlus, Flag, Minimize2 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
 import ChatListItem from "../components/ChatListItem";
@@ -7,7 +7,7 @@ import CreateGroupModal from "../components/CreateGroupModal";
 import NotesBar from "../components/NotesBar";
 import MessageArea from "./MessageArea";
 import api from "../lib/axios";
-import { setConversations, setSelectedChatUser, togglePinInRedux, toggleMuteInRedux, toggleArchiveInRedux, removeConversationInRedux } from "../redux/features/messageSlice";
+import { setConversations, setSelectedChatUser, togglePinInRedux, toggleMuteInRedux, toggleArchiveInRedux, removeConversationInRedux, minimizeToFloatingDock } from "../redux/features/messageSlice";
 import { toast } from "sonner";
 
 const INBOX_TABS = [
@@ -345,6 +345,16 @@ export const Messages = () => {
           </div>
 
           <div className="flex items-center gap-1">
+            <button
+              onClick={() => {
+                dispatch(minimizeToFloatingDock(null));
+                navigate("/");
+              }}
+              className="p-2.5 text-text-secondary hover:text-text rounded-xl hover:bg-surface-hover/80 transition cursor-pointer hidden md:flex"
+              title="Minimize to Mini Window"
+            >
+              <Minimize2 className="w-5 h-5" />
+            </button>
             <button
               onClick={() => setShowCreateGroupModal(true)}
               className="p-2.5 text-text-secondary hover:text-text rounded-xl hover:bg-surface-hover/80 transition cursor-pointer"

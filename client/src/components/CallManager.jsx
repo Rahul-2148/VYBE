@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Phone, PhoneCall, PhoneOff, Video, X } from "lucide-react";
+import { useSelector } from "react-redux";
 import { getSocket } from "../lib/socket";
 import api from "../lib/axios";
 import CallScreen from "./CallScreen";
@@ -18,7 +19,10 @@ const RING_TIMEOUT_MS = 30000; // 30 seconds ring timeout
 export const CallManager = () => {
   const [incomingCall, setIncomingCall] = useState(null); // { room, from, callerName, callerAvatar, type, conversationId }
   const [activeCall, setActiveCall] = useState(null); // { room, type, targetUser, isIncoming, conversationId }
-  const [userData, setUserData] = useState(null);
+  
+  const { userData } = useSelector((s) => s.user);
+  const currentUserId = userData?.user?._id || userData?._id;
+  const [socket, setSocket] = useState(null);
 
   const ringTimeoutRef = useRef(null);
   const leaveRoomFnRef = useRef(null); // Ref to hold the leaveRoom function from WebRTC hook
@@ -30,24 +34,26 @@ export const CallManager = () => {
     }
   }, []);
 
-  // Fetch logged in user details
+  // Poll for socket connection and keep it in state once connected
   useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const res = await api.get("/user/current-user");
-        if (res.data?.success) {
-          setUserData(res.data.user);
-        }
-      } catch (err) {
-        console.warn("Could not load user profile for CallManager:", err);
+    const s = getSocket();
+    if (s) {
+      setSocket(s);
+      return;
+    }
+    const interval = setInterval(() => {
+      const currentSocket = getSocket();
+      if (currentSocket) {
+        setSocket(currentSocket);
+        clearInterval(interval);
       }
-    };
-    fetchUser();
-  }, []);
+    }, 500);
+    return () => clearInterval(interval);
+  }, [currentUserId]);
 
   // Recover active call session on mount / userData load
   useEffect(() => {
-    if (!userData) return;
+    if (!currentUserId) return;
 
     const checkActiveCall = async () => {
       try {
@@ -55,11 +61,11 @@ export const CallManager = () => {
         if (res.data?.success && res.data.session) {
           const session = res.data.session;
           const myParticipant = session.participants.find(
-            (p) => (p.user?._id || p.user) === userData._id
+            (p) => (p.user?._id || p.user) === currentUserId
           );
 
           if (myParticipant && (myParticipant.status === "ringing" || myParticipant.status === "joined")) {
-            if (session.initiator?._id !== userData._id) {
+            if (session.initiator?._id !== currentUserId) {
               // It's an incoming call
               if (myParticipant.status === "ringing") {
                 setIncomingCall({
@@ -84,7 +90,7 @@ export const CallManager = () => {
             } else {
               // We are the initiator
               const otherParticipant = session.participants.find(
-                (p) => (p.user?._id || p.user) !== userData._id
+                (p) => (p.user?._id || p.user) !== currentUserId
               );
               setActiveCall({
                 room: session.room,
@@ -102,11 +108,10 @@ export const CallManager = () => {
     };
 
     checkActiveCall();
-  }, [userData]);
+  }, [currentUserId]);
 
   // Socket signaling listeners
   useEffect(() => {
-    const socket = getSocket();
     if (!socket) return;
 
     const handleInvite = (data) => {
@@ -150,11 +155,17 @@ export const CallManager = () => {
     };
 
     const handleRejected = (data) => {
+      // If user is offline or not immediately answering, keep ringing until caller cancels or 30s timeout
+      if (data.reason === "User is offline") {
+        toast.dismiss("call-ringing");
+        toast.loading("Calling... (Waiting for user)", { id: "call-ringing" });
+        return;
+      }
       stopOutgoingSound();
       stopIncomingRingtone();
       clearRingTimeout();
       toast.dismiss("call-ringing");
-      toast.error(data.reason || "Call failed");
+      toast.error(data.reason || "Call declined");
       setActiveCall(null);
     };
 
@@ -181,6 +192,7 @@ export const CallManager = () => {
 
       try {
         setActiveCall({ room, type, targetUser: user, isIncoming: false, conversationId });
+        startOutgoingSound();
 
         // Initiate session in DB
         await api.post("/call/initiate", {
@@ -195,8 +207,8 @@ export const CallManager = () => {
           room,
           userToCall: user._id,
           type,
-          callerName: userData?.userName || userData?.name || "VYBE User",
-          callerAvatar: userData?.profileImage?.url,
+          callerName: userData?.user?.userName || userData?.userName || userData?.name || "VYBE User",
+          callerAvatar: userData?.user?.profileImage?.url || userData?.profileImage?.url,
           conversationId,
         });
 
@@ -204,6 +216,7 @@ export const CallManager = () => {
 
         // Ring timeout — auto-cancel after 30s
         ringTimeoutRef.current = setTimeout(() => {
+          stopOutgoingSound();
           toast.dismiss("call-ringing");
           toast.error("No answer");
           // End the DB session
@@ -229,7 +242,7 @@ export const CallManager = () => {
       stopOutgoingSound();
       clearRingTimeout();
     };
-  }, [activeCall, incomingCall, userData, clearRingTimeout]);
+  }, [socket, activeCall, incomingCall, userData, clearRingTimeout]);
 
   const handleAcceptCall = async () => {
     if (!incomingCall) return;
@@ -371,7 +384,7 @@ export const CallManager = () => {
         <CallScreenWrapper
           room={activeCall.room}
           type={activeCall.type}
-          currentUserId={userData?._id}
+          currentUserId={currentUserId}
           callerName={activeCall.targetUser?.userName}
           onEndCall={handleHangUp}
           leaveRoomFnRef={leaveRoomFnRef}

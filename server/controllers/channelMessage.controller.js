@@ -1,6 +1,7 @@
 import { ChannelMessage } from "../models/channelMessage.model.js";
 import { Channel } from "../models/channel.model.js";
 import { Community } from "../models/community.model.js";
+import uploadOnCloudinary from "../config/cloudinary.js";
 
 // Fetch channel messages history
 export const getChannelMessages = async (req, res) => {
@@ -59,15 +60,20 @@ export const sendChannelMessage = async (req, res) => {
 
     const mediaList = [];
     if (req.files && req.files.length > 0) {
-      // If there are files from multer upload (e.g. image/video attachments)
       for (const file of req.files) {
-        mediaList.push({
-          url: file.path || file.secure_url,
-          public_id: file.filename || file.public_id || "",
-          type: file.mimetype?.split("/")[0] || "file",
-          name: file.originalname || "Attachment",
-          size: file.size || 0,
-        });
+        try {
+          const uploaded = await uploadOnCloudinary(file.path, "VYBE/community/channels");
+          mediaList.push({
+            url: uploaded.url,
+            public_id: uploaded.public_id,
+            type: file.mimetype?.split("/")[0] || "file",
+            name: file.originalname || "Attachment",
+            size: file.size || 0,
+          });
+        } catch (uploadErr) {
+          console.warn("Channel media upload failed for file:", file.originalname, uploadErr.message);
+          // Skip failed uploads, continue with others
+        }
       }
     }
 

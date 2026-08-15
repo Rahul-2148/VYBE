@@ -106,6 +106,21 @@ const postSchema = new mongoose.Schema(
       audioUrl: { type: String },
       coverUrl: { type: String },
     },
+    // AI Content Disclosure (Instagram-style "Made with AI" label)
+    aiLabel: {
+      isAIGenerated: { type: Boolean, default: false },
+      tool: { type: String, default: "" },           // e.g. "DALL-E", "Midjourney", "ChatGPT"
+      disclosedAt: { type: Date, default: null },
+    },
+    // Edit tracking
+    isEdited: {
+      type: Boolean,
+      default: false,
+    },
+    editedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

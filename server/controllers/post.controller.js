@@ -13,7 +13,7 @@ import { getBlockedUserIds } from "../utils/blockHelper.js";
 export const uploadPost = async (req, res) => {
   try {
     const author = req.userId;
-    let { caption, altText, mediaType, location, hashtags, music, taggedUsers, likesHidden, allowComments, scheduledPublishTime } = req.body;
+    let { caption, altText, mediaType, location, hashtags, music, taggedUsers, likesHidden, allowComments, scheduledPublishTime, aiLabel } = req.body;
     hashtags = parseHashtags(hashtags);
 
     if (!req.file) {
@@ -40,6 +40,20 @@ export const uploadPost = async (req, res) => {
       }
     }
 
+    let parsedAiLabel = { isAIGenerated: false, tool: "", disclosedAt: null };
+    if (aiLabel) {
+      try {
+        const raw = typeof aiLabel === "string" ? JSON.parse(aiLabel) : aiLabel;
+        if (raw.isAIGenerated === true || raw.isAIGenerated === "true") {
+          parsedAiLabel = {
+            isAIGenerated: true,
+            tool: raw.tool || "",
+            disclosedAt: new Date(),
+          };
+        }
+      } catch (e) {}
+    }
+
     const createdPost = await Post.create({
       caption,
       altText,
@@ -53,6 +67,7 @@ export const uploadPost = async (req, res) => {
       likesHidden: likesHidden === "true" || likesHidden === true,
       allowComments: allowComments !== "false" && allowComments !== false,
       scheduledPublishTime: scheduledPublishTime ? new Date(scheduledPublishTime) : null,
+      aiLabel: parsedAiLabel,
     });
 
     await User.findByIdAndUpdate(author, { $push: { posts: createdPost._id } });
@@ -76,7 +91,7 @@ export const uploadPost = async (req, res) => {
 export const uploadCarouselPost = async (req, res) => {
   try {
     const author = req.userId;
-    let { caption, altText, location, hashtags, music, taggedUsers, likesHidden, allowComments, scheduledPublishTime } = req.body;
+    let { caption, altText, location, hashtags, music, taggedUsers, likesHidden, allowComments, scheduledPublishTime, aiLabel } = req.body;
     hashtags = parseHashtags(hashtags);
 
     if (!req.files || req.files.length === 0) {
@@ -118,6 +133,20 @@ export const uploadCarouselPost = async (req, res) => {
       }
     }
 
+    let parsedAiLabel = { isAIGenerated: false, tool: "", disclosedAt: null };
+    if (aiLabel) {
+      try {
+        const raw = typeof aiLabel === "string" ? JSON.parse(aiLabel) : aiLabel;
+        if (raw.isAIGenerated === true || raw.isAIGenerated === "true") {
+          parsedAiLabel = {
+            isAIGenerated: true,
+            tool: raw.tool || "",
+            disclosedAt: new Date(),
+          };
+        }
+      } catch (e) {}
+    }
+
     const createdPost = await Post.create({
       caption,
       altText,
@@ -132,6 +161,7 @@ export const uploadCarouselPost = async (req, res) => {
       likesHidden: likesHidden === "true" || likesHidden === true,
       allowComments: allowComments !== "false" && allowComments !== false,
       scheduledPublishTime: scheduledPublishTime ? new Date(scheduledPublishTime) : null,
+      aiLabel: parsedAiLabel,
     });
 
     await User.findByIdAndUpdate(author, { $push: { posts: createdPost._id } });
@@ -151,42 +181,113 @@ export const uploadCarouselPost = async (req, res) => {
   }
 };
 
-// 3. Toggle Archive Post Controller
+// 3. Toggle Archive Post Controller (Instagram-style)
 export const toggleArchivePost = async (req, res) => {
   try {
     const { postId } = req.params;
     const userId = req.userId;
 
     const post = await Post.findById(postId);
-    if (!post) return res.status(404).json({ message: "Post not found" });
+    if (!post) return res.status(404).json({ success: false, message: "Post not found" });
 
     if (post.author.toString() !== userId.toString()) {
-      return res.status(403).json({ message: "Not authorized to archive this post" });
+      return res.status(403).json({ success: false, message: "Not authorized to archive this post" });
     }
 
-    post.isArchived = !post.isArchived;
-    await post.save();
+    const newArchiveState = !post.isArchived;
+
+    // Use findOneAndUpdate to bypass full schema re-validation on save()
+    const updatedPost = await Post.findOneAndUpdate(
+      { _id: postId },
+      { $set: { isArchived: newArchiveState } },
+      { new: true }
+    ).populate("author", "name userName profileImage isVerified");
 
     return res.status(200).json({
       success: true,
-      isArchived: post.isArchived,
-      message: post.isArchived ? "Post moved to archive" : "Post unarchived to feed",
+      isArchived: updatedPost.isArchived,
+      post: updatedPost,
+      message: updatedPost.isArchived ? "Post moved to archive" : "Post unarchived to feed",
     });
   } catch (error) {
-    return res.status(500).json({ message: `toggleArchive error: ${error.message}` });
+    return res.status(500).json({ success: false, message: `toggleArchive error: ${error.message}` });
   }
 };
 
-// 4. Get Private Archived Posts Controller
+// 4. Get Private Archived Posts Controller (Instagram-style)
 export const getArchivedPosts = async (req, res) => {
   try {
     const posts = await Post.find({ author: req.userId, isArchived: true })
       .sort({ createdAt: -1 })
-      .populate("author", "name userName profileImage isVerified");
+      .populate("author", "name userName profileImage isVerified")
+      .lean();
 
-    return res.status(200).json({ success: true, posts });
+    return res.status(200).json({ success: true, posts: posts || [] });
   } catch (error) {
-    return res.status(500).json({ message: `getArchived error: ${error.message}` });
+    return res.status(500).json({ success: false, message: `getArchived error: ${error.message}` });
+  }
+};
+
+// 4b. Edit Post Controller (Instagram-style post editing)
+export const editPost = async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const userId = req.userId;
+
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json({ success: false, message: "Post not found" });
+
+    if (post.author.toString() !== userId.toString()) {
+      return res.status(403).json({ success: false, message: "Not authorized to edit this post" });
+    }
+
+    const { caption, location, altText, allowComments, likesHidden, aiLabel } = req.body;
+
+    // Build update object — only include fields that were actually sent
+    const updateFields = {
+      isEdited: true,
+      editedAt: new Date(),
+    };
+
+    if (caption !== undefined) {
+      updateFields.caption = caption;
+      // Auto-extract hashtags from caption
+      const hashtagMatches = caption.match(/#[a-zA-Z0-9_]+/g);
+      updateFields.hashtags = hashtagMatches ? hashtagMatches.map((h) => h.slice(1).toLowerCase()) : [];
+    }
+    if (location !== undefined) updateFields.location = location;
+    if (altText !== undefined) updateFields.altText = altText;
+    if (allowComments !== undefined) updateFields.allowComments = allowComments;
+    if (likesHidden !== undefined) updateFields.likesHidden = likesHidden;
+
+    // AI Content Disclosure
+    if (aiLabel !== undefined) {
+      updateFields["aiLabel.isAIGenerated"] = !!aiLabel.isAIGenerated;
+      updateFields["aiLabel.tool"] = aiLabel.tool || "";
+      if (aiLabel.isAIGenerated && !post.aiLabel?.disclosedAt) {
+        updateFields["aiLabel.disclosedAt"] = new Date();
+      }
+      if (!aiLabel.isAIGenerated) {
+        updateFields["aiLabel.disclosedAt"] = null;
+      }
+    }
+
+    const updatedPost = await Post.findOneAndUpdate(
+      { _id: postId },
+      { $set: updateFields },
+      { new: true }
+    )
+      .populate("author", "name userName profileImage isVerified")
+      .populate("comments.author", "name userName profileImage isVerified")
+      .populate("taggedUsers.user", "userName profileImage");
+
+    return res.status(200).json({
+      success: true,
+      post: updatedPost,
+      message: "Post updated successfully",
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: `editPost error: ${error.message}` });
   }
 };
 

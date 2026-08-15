@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from "react"
 import {
   Loader2, LucideImage, Search, SendHorizonal, X, Phone, Video, Mic, MapPin,
   Edit3, Smile, Users, ArrowLeft, Info, CheckCheck, Check, Clock, CornerUpRight,
-  Pin, Image, FileText, Link2, ChevronDown, Reply, Heart, Sparkles, BadgeCheck
+  Pin, Image, FileText, Link2, ChevronDown, Reply, Heart, Sparkles, BadgeCheck, Minimize2
 } from "lucide-react";
 import moment from "moment";
 import { toast } from "sonner";
@@ -22,7 +22,7 @@ import useTypingIndicator from "../hooks/useTypingIndicator";
 import {
   addMessage, addOptimisticMessage, replaceOptimisticMessage, markOptimisticFailed,
   setMessages, prependHistoricalMessages, updateConversationLastMessage, setConversations,
-  clearSelectedChatUser, setChatInfoOpen, setForwardModal,
+  clearSelectedChatUser, setChatInfoOpen, setForwardModal, minimizeToFloatingDock
 } from "../redux/features/messageSlice";
 import api from "../lib/axios";
 import { getSocket } from "../lib/socket";
@@ -650,15 +650,32 @@ export const MessageArea = () => {
             <div className="flex items-center gap-0.5 shrink-0">
               {!isGroup && (
                 <>
-                  <button onClick={() => startCall("audio")} className="p-2 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer">
+                  <button onClick={() => startCall("audio")} className="p-2 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer" title="Voice Call">
                     <Phone className="w-5 h-5" />
                   </button>
-                  <button onClick={() => startCall("video")} className="p-2 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer">
+                  <button onClick={() => startCall("video")} className="p-2 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer" title="Video Call">
                     <Video className="w-5 h-5" />
                   </button>
                 </>
               )}
-              <button onClick={() => dispatch(setChatInfoOpen(!chatInfoOpen))} className="p-2 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer">
+              {/* Minimize to Floating Dock / Mini Window */}
+              <button
+                onClick={() => {
+                  dispatch(
+                    minimizeToFloatingDock({
+                      _id: selectedChatUser.conversationId,
+                      name: isGroup ? selectedChatUser.user?.groupName : undefined,
+                      participant: otherUser,
+                    })
+                  );
+                  navigate(-1);
+                }}
+                className="p-2 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer hidden md:flex"
+                title="Minimize to Mini Window"
+              >
+                <Minimize2 className="w-5 h-5" />
+              </button>
+              <button onClick={() => dispatch(setChatInfoOpen(!chatInfoOpen))} className="p-2 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer" title="Conversation Details">
                 <Info className="w-5 h-5" />
               </button>
             </div>

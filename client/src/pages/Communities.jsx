@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-// framer-motion not used directly in this file
+import { motion, AnimatePresence } from "framer-motion";
 import { 
   Users, Hash, Volume2, Video, Plus, Search, Send, Image, Mic, MicOff,
   VideoOff, Monitor, Settings, LogOut, Compass, Sparkles, Copy, X, Lock, Check,
@@ -436,6 +436,10 @@ export const Communities = () => {
                 >
                   Join Channel
                 </button>
+              </div>
+            ) : !currentUserId ? (
+              <div className="text-center p-8 bg-surface/45 border border-border backdrop-blur-xl rounded-3xl shadow-2xl max-w-md w-full">
+                <p className="text-xs text-text-muted">Unable to connect. Please sign in again.</p>
               </div>
             ) : (
               <ActiveWebRTCChannelRoom

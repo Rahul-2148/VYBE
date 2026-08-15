@@ -46,7 +46,7 @@ export const Upload = () => {
   const [caption, setCaption] = useState("");
   const [locationText, setLocationText] = useState("");
   const [tagUsernames, setTagUsernames] = useState("");
-  const [selectedMusic, setSelectedMusic] = useState(null);
+  const [selectedMusic, setSelectedMusic] = useState(() => location.state?.preselectedMusic || null);
 
   // Autocomplete Suggestions
   const [locationSuggestions, setLocationSuggestions] = useState([]);
@@ -813,13 +813,25 @@ export const Upload = () => {
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowMusicPicker(true)}
-                  className="px-3.5 py-1.5 bg-surface hover:bg-surface-hover border border-border text-text text-[10px] font-extrabold rounded-full transition cursor-pointer"
-                >
-                  {selectedMusic ? "Change" : "Add Soundtrack"}
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {selectedMusic && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMusic(null)}
+                      className="p-1.5 text-text-muted hover:text-rose-500 rounded-full hover:bg-surface transition cursor-pointer"
+                      title="Remove soundtrack"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowMusicPicker(true)}
+                    className="px-3.5 py-1.5 bg-surface hover:bg-surface-hover border border-border text-text text-[10px] font-extrabold rounded-full transition cursor-pointer"
+                  >
+                    {selectedMusic ? "Change" : "Add Soundtrack"}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -948,7 +960,16 @@ export const Upload = () => {
           open={showMusicPicker}
           onClose={() => setShowMusicPicker(false)}
           selectedMusic={selectedMusic}
-          onSelectMusic={(track) => setSelectedMusic(track)}
+          contentContext={{
+            caption,
+            mediaName: activeItem?.file?.name || activeItem?.preview || "",
+            mediaType: activeItem?.type || "image",
+            tags: tagUsernames ? tagUsernames.split(" ") : [],
+          }}
+          onSelectMusic={(track) => {
+            setSelectedMusic(track);
+            toast.success(`Attached Soundtrack: "${track.title}" 🎵`);
+          }}
         />
       )}
     </div>

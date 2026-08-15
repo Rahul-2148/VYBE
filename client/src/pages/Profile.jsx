@@ -533,7 +533,7 @@ const Profile = () => {
                   </button>
                   <button
                     className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-bold text-zinc-300 transition hover:border-zinc-700 hover:text-white"
-                    onClick={() => navigate("/story/archive")}
+                    onClick={() => navigate("/post/archive")}
                   >
                     <Archive className="h-3.5 w-3.5" />
                     Archive

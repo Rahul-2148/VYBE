@@ -1,7 +1,6 @@
-import axios from "axios";
-import { Check, Archive, FolderPlus, Tag, VolumeX, Volume2, BadgeCheck } from "lucide-react";
+import { Check, Archive, FolderPlus, Tag, VolumeX, Volume2, BadgeCheck, Sparkles, Info, Bot, X, Music } from "lucide-react";
 import moment from "moment";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { toast } from "sonner";
 import { GoBookmark, GoBookmarkFill, GoHeart, GoHeartFill } from "react-icons/go";
 import { IoSendSharp } from "react-icons/io5";
@@ -21,6 +20,7 @@ import TaggedUsersOverlay from "./TaggedUsersOverlay";
 import CollectionsModal from "./CollectionsModal";
 import AITranslateButton from "./AITranslateButton";
 import ShareSheet from "./ShareSheet";
+import EditPostModal from "./EditPostModal";
 import api from "../lib/axios";
 
 // Render interactive caption with clickable @mentions and #hashtags
@@ -80,35 +80,65 @@ const Post = ({ post }) => {
 
   // Background Looping Music State
   const [musicMuted, setMusicMuted] = useState(true);
-  const [audio] = useState(() => {
-    if (post?.music && typeof post.music === "object" && post.music.audioUrl) {
-      const a = new Audio(post.music.audioUrl);
+  const audioRef = useRef(null);
+
+  const getMusicObject = (musicField) => {
+    if (!musicField) return null;
+    if (typeof musicField === "object") return musicField;
+    try {
+      return JSON.parse(musicField);
+    } catch {
+      return null;
+    }
+  };
+
+  const parsedMusic = useMemo(() => getMusicObject(post?.music), [post?.music]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    if (parsedMusic?.audioUrl) {
+      const a = new Audio(parsedMusic.audioUrl);
       a.loop = true;
-      return a;
-    }
-    return null;
-  });
+      audioRef.current = a;
 
-  useEffect(() => {
-    if (!audio) return;
-    if (musicMuted) {
-      audio.pause();
-    } else {
-      audio.play().catch(() => null);
+      if (!musicMuted) {
+        a.play().catch(() => null);
+      }
     }
-  }, [musicMuted, audio]);
 
-  useEffect(() => {
     return () => {
-      if (audio) {
-        audio.pause();
+      if (audioRef.current) {
+        audioRef.current.pause();
       }
     };
-  }, [audio]);
+  }, [parsedMusic?.audioUrl]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      if (musicMuted) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play().catch(() => null);
+      }
+    }
+  }, [musicMuted]);
+
 
   // Collections & Share Modal states
   const [showCollectionsModal, setShowCollectionsModal] = useState(false);
   const [showShareSheet, setShowShareSheet] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showAIInfoModal, setShowAIInfoModal] = useState(false);
+
+  const handlePostUpdated = (updatedPost) => {
+    if (!updatedPost) return;
+    const updatedPosts = postData?.map((p) => (p._id === updatedPost._id ? updatedPost : p));
+    dispatch(setPostData(updatedPosts));
+  };
 
   const handleLike = async () => {
     try {
@@ -168,8 +198,11 @@ const Post = ({ post }) => {
       const res = await api.post(`/post/archive/${post?._id}`);
       if (res.data.success) {
         toast.success(res.data.message);
-        const updatedPosts = postData.filter((p) => p._id !== post._id);
-        dispatch(setPostData(updatedPosts));
+        // Only remove from feed if the post was archived (not unarchived)
+        if (res.data.isArchived) {
+          const updatedPosts = postData.filter((p) => p._id !== post._id);
+          dispatch(setPostData(updatedPosts));
+        }
       }
     } catch {
       toast.error("Archive failed");
@@ -234,7 +267,26 @@ const Post = ({ post }) => {
                 <BadgeCheck className="h-4 w-4 fill-[#0095f6] text-white shrink-0" />
               )}
             </span>
-            <span className="text-[10px] text-text-muted font-medium">{moment(post?.createdAt).fromNow()}</span>
+            <div className="flex items-center gap-1.5 text-[10px] text-text-muted font-medium flex-wrap">
+              <span>{moment(post?.createdAt).fromNow()}</span>
+              {post?.isEdited && (
+                <span className="text-[9px] text-text-muted opacity-80 font-semibold">• Edited</span>
+              )}
+              {post?.aiLabel?.isAIGenerated && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowAIInfoModal(true);
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-500/10 border border-purple-500/30 text-[9px] font-bold text-purple-300 hover:bg-purple-500/20 hover:text-purple-200 transition cursor-pointer"
+                  title="Content made or edited with AI"
+                >
+                  <Sparkles className="w-2.5 h-2.5 text-purple-400" />
+                  <span>AI info</span>
+                </button>
+              )}
+            </div>
             {post?.location && (
               <span
                 onClick={() => navigate(`/explore/location/${encodeURIComponent(post.location)}`)}
@@ -258,6 +310,14 @@ const Post = ({ post }) => {
           {userData?.user?._id === post?.author?._id ? (
             <div className="flex items-center gap-1">
               <button
+                onClick={() => setShowEditModal(true)}
+                className="p-2 text-text-secondary hover:text-text rounded-full hover:bg-surface transition cursor-pointer"
+                title="Edit Post"
+              >
+                <MdEdit className="w-4 h-4" />
+              </button>
+
+              <button
                 onClick={handleToggleArchive}
                 className="p-2 text-text-secondary hover:text-text rounded-full hover:bg-surface transition cursor-pointer"
                 title="Archive Post"
@@ -268,7 +328,7 @@ const Post = ({ post }) => {
               {deletePostLoading ? (
                 <ClipLoader size={16} color="white" />
               ) : (
-                <button onClick={handleDeletePost} className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-full transition cursor-pointer">
+                <button onClick={handleDeletePost} className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-full transition cursor-pointer" title="Delete Post">
                   <MdDeleteOutline className="w-4 h-4" />
                 </button>
               )}
@@ -322,18 +382,53 @@ const Post = ({ post }) => {
           </div>
         )}
 
-        {/* Floating Background Music Control */}
-        {post?.music && typeof post.music === "object" && post.music.audioUrl && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setMusicMuted(!musicMuted);
-            }}
-            className="absolute bottom-4 right-4 z-40 p-2 rounded-full bg-surface-overlay backdrop-blur text-text hover:bg-surface-overlay transition cursor-pointer"
-            title={musicMuted ? "Unmute Music" : "Mute Music"}
+        {/* Instagram-Style Floating Soundtrack Pill */}
+        {post?.music && (
+          <div
+            className="absolute bottom-3 left-3 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/75 hover:bg-black/90 backdrop-blur-md text-white border border-white/20 shadow-xl transition cursor-pointer group select-none"
           >
-            {musicMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-rose-500" />}
-          </button>
+            {/* Click to Navigate to Audio Detail Page */}
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                const trackId = typeof post.music === "object" ? post.music.id || post.music.title : post.music;
+                navigate(`/audio/${encodeURIComponent(trackId)}`, {
+                  state: { music: parsedMusic },
+                });
+              }}
+              className="flex items-center gap-2 hover:opacity-90 transition"
+            >
+              <div className={`w-4 h-4 rounded-full bg-gradient-to-tr from-rose-500 to-purple-600 flex items-center justify-center shrink-0 ${!musicMuted && parsedMusic?.audioUrl ? "animate-spin-slow" : ""}`}>
+                <Music className="w-2.5 h-2.5 text-white" />
+              </div>
+              <span className="text-[10px] font-bold truncate max-w-[130px] sm:max-w-[190px] hover:underline">
+                {typeof post.music === "object" ? `${post.music.title} • ${post.music.artist}` : post.music}
+              </span>
+            </div>
+
+            {/* Click to Toggle Mute / Unmute */}
+            {parsedMusic?.audioUrl && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMusicMuted(!musicMuted);
+                }}
+                className="flex items-center gap-1 ml-1 border-l border-white/20 pl-1.5 cursor-pointer hover:scale-105 transition"
+                title={musicMuted ? "Unmute" : "Mute"}
+              >
+                {!musicMuted ? (
+                  <div className="flex items-end gap-0.5 h-3">
+                    <span className="w-0.5 bg-rose-400 h-full animate-pulse" />
+                    <span className="w-0.5 bg-rose-300 h-2/3 animate-bounce" />
+                    <span className="w-0.5 bg-rose-400 h-4/5 animate-pulse" />
+                  </div>
+                ) : (
+                  <VolumeX className="w-3 h-3 text-zinc-400 group-hover:text-white" />
+                )}
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -458,6 +553,61 @@ const Post = ({ post }) => {
           entityType="post"
           following={userData?.user?.following || []}
         />
+      )}
+
+      {/* Edit Post Modal (Instagram-style) */}
+      {showEditModal && (
+        <EditPostModal
+          post={post}
+          isOpen={showEditModal}
+          onClose={() => setShowEditModal(false)}
+          onPostUpdated={handlePostUpdated}
+        />
+      )}
+
+      {/* AI Information Modal */}
+      {showAIInfoModal && (
+        <div
+          className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setShowAIInfoModal(false)}
+        >
+          <div
+            className="bg-bg border border-border rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 animate-scale-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-purple-400">
+                <Sparkles className="w-5 h-5" />
+                <h3 className="font-bold text-sm text-text">AI Info</h3>
+              </div>
+              <button
+                onClick={() => setShowAIInfoModal(false)}
+                className="p-1 rounded-full text-text-muted hover:text-text hover:bg-surface transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2 text-xs text-text-secondary leading-relaxed">
+              <p>
+                The creator of this post or VYBE's detection systems indicated that this media was created or modified using Generative AI tools.
+              </p>
+              {post?.aiLabel?.tool && (
+                <div className="p-3 bg-surface rounded-xl border border-border flex items-center gap-2 mt-2">
+                  <Bot className="w-4 h-4 text-purple-400 shrink-0" />
+                  <span className="font-medium text-text">Tool used: {post.aiLabel.tool}</span>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() => setShowAIInfoModal(false)}
+              className="w-full py-2 bg-surface hover:bg-surface-hover text-text font-semibold text-xs rounded-xl border border-border transition"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

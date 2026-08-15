@@ -1,19 +1,40 @@
 import React, { useEffect, useRef, useState } from "react";
-import { MessageCircle, X, Maximize2, SquarePen, Search, ChevronDown, ArrowLeft, Send, Loader2 } from "lucide-react";
+import {
+  MessageCircle,
+  X,
+  Maximize2,
+  SquarePen,
+  Search,
+  ChevronDown,
+  ArrowLeft,
+  Send,
+  Loader2,
+  Phone,
+  Video,
+  CheckCheck,
+  Check,
+  Smile,
+  Mic,
+  Image as ImageIcon,
+} from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
 import moment from "moment";
 import dp from "../assets/dp3.png";
 import api from "../lib/axios";
 import { getSocket } from "../lib/socket";
-import { setConversations, updateConversationLastMessage } from "../redux/features/messageSlice";
+import {
+  setConversations,
+  setFloatingDockOpen,
+  setFloatingActiveConvo,
+} from "../redux/features/messageSlice";
 
 const FloatingMessagesDock = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const dispatch = useDispatch();
   const { userData } = useSelector((state) => state.user);
-  const { conversations } = useSelector((state) => state.message);
+  const { conversations, isFloatingDockOpen, floatingActiveConvo } = useSelector((state) => state.message);
 
   const isMessagesPage =
     location.pathname.startsWith("/messages") ||
@@ -29,8 +50,22 @@ const FloatingMessagesDock = () => {
   const [loading, setLoading] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
 
   const chatEndRef = useRef(null);
+
+  // Sync Redux floating dock state
+  useEffect(() => {
+    if (isFloatingDockOpen) {
+      setIsOpen(true);
+    }
+  }, [isFloatingDockOpen]);
+
+  useEffect(() => {
+    if (floatingActiveConvo) {
+      setActiveConvo(floatingActiveConvo);
+    }
+  }, [floatingActiveConvo]);
 
   useEffect(() => {
     if (userData?.user?._id) {
@@ -48,6 +83,7 @@ const FloatingMessagesDock = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Realtime Socket Listeners for Floating Dock
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
@@ -70,12 +106,20 @@ const FloatingMessagesDock = () => {
       }
     };
 
+    const handleTyping = (data) => {
+      if (activeConvo && data.conversationId === activeConvo._id && data.userId !== userData?.user?._id) {
+        setIsTyping(Boolean(data.isTyping));
+      }
+    };
+
     socket.on("message-received", handleNewMessage);
+    socket.on("user-typing", handleTyping);
 
     return () => {
       socket.off("message-received", handleNewMessage);
+      socket.off("user-typing", handleTyping);
     };
-  }, [activeConvo, dispatch]);
+  }, [activeConvo, dispatch, userData]);
 
   const fetchConversations = async () => {
     try {
@@ -141,6 +185,15 @@ const FloatingMessagesDock = () => {
     }
   };
 
+  const startCall = (type) => {
+    if (!activeOtherUser) return;
+    window.dispatchEvent(
+      new CustomEvent("vybe:initiate-call", {
+        detail: { type, user: activeOtherUser, conversationId: activeConvo?._id },
+      })
+    );
+  };
+
   if (!userData?.user?._id) return null;
 
   const filteredConversations = conversations.filter((c) => {
@@ -172,20 +225,23 @@ const FloatingMessagesDock = () => {
     <div className="fixed bottom-0 right-6 z-[200] font-sans select-none hidden md:block">
       {/* EXPANDED FLOATING MESSAGES DRAWER */}
       {isOpen ? (
-        <div className="w-[360px] h-[520px] bg-surface-inset/98 backdrop-blur-2xl border-x border-t border-border rounded-t-2xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-300">
+        <div className="w-[370px] h-[530px] bg-surface-inset/98 backdrop-blur-2xl border-x border-t border-border rounded-t-2xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-300">
           {/* HEADER */}
-          <div className="h-13 px-3 border-b border-border/80 flex items-center justify-between bg-surface shrink-0">
+          <div className="h-14 px-3.5 border-b border-border/80 flex items-center justify-between bg-surface shrink-0">
             {activeConvo ? (
               /* Active Chat Header */
               <div className="flex items-center gap-2.5 min-w-0">
                 <button
-                  onClick={() => setActiveConvo(null)}
-                  className="p-1 text-text-secondary hover:text-text rounded-full hover:bg-surface transition cursor-pointer"
+                  onClick={() => {
+                    setActiveConvo(null);
+                    dispatch(setFloatingActiveConvo(null));
+                  }}
+                  className="p-1 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer"
                   title="Back to Conversations"
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </button>
-                <div className="relative">
+                <div className="relative shrink-0">
                   <img
                     src={activeOtherUser?.profileImage?.url || dp}
                     alt=""
@@ -196,11 +252,24 @@ const FloatingMessagesDock = () => {
                   )}
                 </div>
                 <div className="flex flex-col min-w-0">
-                  <span className="text-xs font-bold text-text truncate max-w-[140px]">
+                  <span className="text-xs font-bold text-text truncate max-w-[120px]">
                     {activeOtherUser?.userName || activeOtherUser?.name || activeConvo.name || "User"}
                   </span>
                   <span className="text-[10px] text-text-secondary font-medium">
-                    {activeOtherUser?.isOnline ? "Active now" : "Offline"}
+                    {isTyping ? (
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                        <span className="flex gap-0.5">
+                          <span className="w-1 h-1 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                          <span className="w-1 h-1 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                          <span className="w-1 h-1 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                        </span>
+                        typing...
+                      </span>
+                    ) : activeOtherUser?.isOnline ? (
+                      <span className="text-emerald-400 font-medium">Active now</span>
+                    ) : (
+                      "Offline"
+                    )}
                   </span>
                 </div>
               </div>
@@ -218,23 +287,45 @@ const FloatingMessagesDock = () => {
 
             {/* Header Actions */}
             <div className="flex items-center gap-1">
+              {activeConvo && activeOtherUser && (
+                <>
+                  <button
+                    onClick={() => startCall("audio")}
+                    className="p-1.5 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer"
+                    title="Voice Call"
+                  >
+                    <Phone className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => startCall("video")}
+                    className="p-1.5 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer"
+                    title="Video Call"
+                  >
+                    <Video className="w-4 h-4" />
+                  </button>
+                </>
+              )}
               <button
                 onClick={() => {
                   setIsOpen(false);
+                  dispatch(setFloatingDockOpen(false));
                   if (activeConvo?._id) {
                     navigate(`/messages/${activeConvo._id}`);
                   } else {
                     navigate("/messages");
                   }
                 }}
-                className="p-1.5 text-text-secondary hover:text-text rounded-full hover:bg-surface transition cursor-pointer"
-                title="Expand to Full Page"
+                className="p-1.5 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer"
+                title="Maximize to Full Window"
               >
                 <Maximize2 className="w-4 h-4" />
               </button>
               <button
-                onClick={() => setIsOpen(false)}
-                className="p-1.5 text-text-secondary hover:text-text rounded-full hover:bg-surface transition cursor-pointer"
+                onClick={() => {
+                  setIsOpen(false);
+                  dispatch(setFloatingDockOpen(false));
+                }}
+                className="p-1.5 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer"
                 title="Minimize Drawer"
               >
                 <ChevronDown className="w-5 h-5" />
@@ -269,7 +360,7 @@ const FloatingMessagesDock = () => {
                         className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}
                       >
                         <div
-                          className={`max-w-[78%] px-3.5 py-2 rounded-2xl text-xs font-normal leading-relaxed ${
+                          className={`max-w-[80%] px-3.5 py-2 rounded-2xl text-xs font-normal leading-relaxed ${
                             isMe
                               ? "bg-gradient-to-r from-pink-500 to-rose-600 text-text rounded-br-xs shadow"
                               : "bg-surface text-text border border-border/80 rounded-bl-xs"
@@ -281,8 +372,15 @@ const FloatingMessagesDock = () => {
                             <img key={i} src={m.url} alt="" className="rounded-xl mt-1.5 max-h-48 object-cover" />
                           ))}
                         </div>
-                        <span className="text-[9px] text-text-muted mt-1 px-1">
-                          {moment(msg.createdAt).format("h:mm A")}
+                        <span className="text-[9px] text-text-muted mt-1 px-1 flex items-center gap-1">
+                          <span>{moment(msg.createdAt).format("h:mm A")}</span>
+                          {isMe && (
+                            msg.status === "seen" ? (
+                              <CheckCheck className="w-3 h-3 text-blue-400" />
+                            ) : (
+                              <Check className="w-3 h-3 text-text-muted" />
+                            )
+                          )}
                         </span>
                       </div>
                     );
@@ -303,7 +401,7 @@ const FloatingMessagesDock = () => {
                 <button
                   type="submit"
                   disabled={!messageText.trim() || sending}
-                  className="p-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-text rounded-full transition cursor-pointer"
+                  className="p-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-text rounded-full transition cursor-pointer shrink-0"
                 >
                   <Send className="w-3.5 h-3.5" />
                 </button>
@@ -348,6 +446,7 @@ const FloatingMessagesDock = () => {
                         key={chat._id}
                         onClick={() => {
                           setActiveConvo(chat);
+                          dispatch(setFloatingActiveConvo(chat));
                         }}
                         className={`flex items-center justify-between p-2.5 rounded-2xl cursor-pointer transition ${
                           hasUnread
@@ -356,7 +455,7 @@ const FloatingMessagesDock = () => {
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="relative">
+                          <div className="relative shrink-0">
                             <img
                               src={other?.profileImage?.url || dp}
                               alt=""
@@ -396,6 +495,7 @@ const FloatingMessagesDock = () => {
                 <button
                   onClick={() => {
                     setIsOpen(false);
+                    dispatch(setFloatingDockOpen(false));
                     navigate("/messages");
                   }}
                   className="p-2.5 rounded-full bg-gradient-to-tr from-pink-500 to-rose-600 text-text shadow-xl hover:scale-105 active:scale-95 transition flex items-center gap-2 text-xs font-bold px-4 cursor-pointer"
@@ -413,6 +513,7 @@ const FloatingMessagesDock = () => {
           onClick={() => {
             fetchConversations();
             setIsOpen(true);
+            dispatch(setFloatingDockOpen(true));
           }}
           className="flex items-center gap-3 px-4 py-3 bg-surface hover:bg-surface-hover border-x border-t border-border rounded-t-2xl shadow-2xl text-text backdrop-blur-xl transition-all duration-300 hover:py-3.5 group cursor-pointer"
         >

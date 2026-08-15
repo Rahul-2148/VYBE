@@ -30,6 +30,7 @@ import liveRouter from "./routes/liveStream.route.js";
 import monetizationRouter from "./routes/monetization.route.js";
 import communityRouter from "./routes/community.route.js";
 import callRouter from "./routes/call.route.js";
+import musicRouter from "./routes/music.route.js";
 
 import { setSecurityHeaders } from "./middlewares/securityHeaders.js";
 import { apiRateLimiter } from "./middlewares/rateLimiter.js";
@@ -85,6 +86,7 @@ app.use("/api/v1/live", liveRouter);
 app.use("/api/v1/monetization", monetizationRouter);
 app.use("/api/v1/community", communityRouter);
 app.use("/api/v1/call", callRouter);
+app.use("/api/v1/music", musicRouter);
 
 // Default home route
 app.get("/", (req, res) => {

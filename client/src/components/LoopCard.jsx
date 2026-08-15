@@ -657,18 +657,36 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
             {loop?.caption && <p className="text-xs text-white font-normal line-clamp-2 pointer-events-none">{loop.caption}</p>}
 
             {/* Audio Track & Spinning Disc */}
-            <div
-              onClick={(e) => {
-                e.stopPropagation();
-                navigate(`/audio/${audioId}`);
-              }}
-              className="flex items-center gap-2 cursor-pointer text-xs text-white hover:text-white/80 transition interactive-btn"
-            >
-              <div className="w-5 h-5 rounded-full bg-surface-hover border border-border-strong flex items-center justify-center animate-spin-slow">
-                <Disc className="w-3 h-3 text-rose-500" />
-              </div>
-              <span className="truncate max-w-[180px] font-medium">{audioName}</span>
-            </div>
+            {(() => {
+              let trackObj = loop?.audioTrack || loop?.music;
+              if (typeof trackObj === "string") {
+                try {
+                  trackObj = JSON.parse(trackObj);
+                } catch {
+                  trackObj = { title: trackObj };
+                }
+              }
+              const title = trackObj?.title || `${loop?.author?.userName || "Original"} • Audio`;
+              const artist = trackObj?.artist || "Original Audio";
+              const trackParam = trackObj?.id || trackObj?.title || `${loop?.author?.userName}-original`;
+
+              return (
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/audio/${encodeURIComponent(trackParam)}`, {
+                      state: { music: trackObj },
+                    });
+                  }}
+                  className="flex items-center gap-2 cursor-pointer text-xs text-white hover:text-white/80 transition interactive-btn bg-black/40 px-2.5 py-1 rounded-full border border-white/10 backdrop-blur w-fit"
+                >
+                  <div className="w-4 h-4 rounded-full bg-gradient-to-tr from-rose-500 to-purple-600 flex items-center justify-center animate-spin-slow shrink-0">
+                    <Disc className="w-2.5 h-2.5 text-white" />
+                  </div>
+                  <span className="truncate max-w-[170px] font-bold text-[11px]">{title}</span>
+                </div>
+              );
+            })()}
           </div>
 
           {/* RIGHT SIDE ACTION BUTTONS */}

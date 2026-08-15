@@ -4,6 +4,7 @@ import {
   deleteComment,
   deletePost,
   editComment,
+  editPost,
   getAllPosts,
   getAllPostsOfLoggedInUser,
   likePost,
@@ -35,6 +36,9 @@ postRouter.get("/get-all-Of-logged-in-user", isAuthenticated, getAllPostsOfLogge
 postRouter.post("/archive/:postId", isAuthenticated, toggleArchivePost);
 postRouter.get("/archived-posts", isAuthenticated, getArchivedPosts);
 
+// Edit Post (Instagram-style)
+postRouter.patch("/edit/:postId", isAuthenticated, editPost);
+
 // Custom Collections & Bookmarks
 postRouter.post("/save-post/:postId", isAuthenticated, savePost);
 postRouter.post("/collections", isAuthenticated, createCollection);
@@ -49,7 +53,13 @@ postRouter.get("/drafts", isAuthenticated, getUserDrafts);
 postRouter.post("/like/:postId", isAuthenticated, likePost);
 postRouter.post("/comment/:postId", isAuthenticated, commentPost);
 postRouter.delete("/delete-post/:postId", isAuthenticated, deletePost);
+postRouter.delete("/delete/:postId", isAuthenticated, deletePost); // client alias
 postRouter.delete("/delete-comment/:postId/:commentId", isAuthenticated, deleteComment);
+postRouter.delete("/comment/:postId/:commentId", isAuthenticated, deleteComment); // client alias
 postRouter.patch("/edit-comment/:postId/:commentId", isAuthenticated, editComment);
+postRouter.put("/comment/:postId/:commentId", isAuthenticated, editComment); // client alias (PUT)
+
+// Save post alias (client sends /saved/:postId)
+postRouter.post("/saved/:postId", isAuthenticated, savePost);
 
 export default postRouter;

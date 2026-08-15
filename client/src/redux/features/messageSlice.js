@@ -13,12 +13,34 @@ const initialState = {
   chatInfoOpen: false, // Chat info/details drawer
   forwardModalOpen: false, // Forward message modal
   forwardingMessage: null, // Message being forwarded
+  isFloatingDockOpen: false, // Mini window drawer state
+  floatingActiveConvo: null, // Active conversation inside floating mini dock
 };
 
 const messageSlice = createSlice({
   name: "message",
   initialState,
   reducers: {
+    setFloatingDockOpen(state, action) {
+      state.isFloatingDockOpen = action.payload;
+    },
+
+    setFloatingActiveConvo(state, action) {
+      state.floatingActiveConvo = action.payload;
+    },
+
+    minimizeToFloatingDock(state, action) {
+      state.isFloatingDockOpen = true;
+      if (action.payload) {
+        state.floatingActiveConvo = action.payload;
+      } else if (state.selectedChatUser?.conversationId) {
+        state.floatingActiveConvo = {
+          _id: state.selectedChatUser.conversationId,
+          participant: state.selectedChatUser.user,
+        };
+      }
+    },
+
     setSelectedChatUser(state, action) {
       state.selectedChatUser = {
         conversationId: action.payload.conversationId,
@@ -308,6 +330,9 @@ const messageSlice = createSlice({
 });
 
 export const {
+  setFloatingDockOpen,
+  setFloatingActiveConvo,
+  minimizeToFloatingDock,
   setSelectedChatUser,
   clearSelectedChatUser,
   setConversations,

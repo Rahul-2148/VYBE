@@ -13,8 +13,13 @@ const noteSchema = new mongoose.Schema(
       maxlength: 60,
     },
     music: {
-      title: String,
-      artist: String,
+      id: { type: String },
+      title: { type: String },
+      artist: { type: String },
+      audioUrl: { type: String },
+      coverUrl: { type: String },
+      duration: { type: Number },
+      startTime: { type: Number },
     },
     expiresAt: {
       type: Date,

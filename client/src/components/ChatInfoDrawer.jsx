@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import {
   X, Bell, BellOff, Archive, Search, Pin, Shield, UserMinus, Users,
   Image, Film, FileText, Link2, ChevronRight, VolumeX, Volume2,
-  Clock, Trash2, Flag, Lock, Palette
+  Clock, Trash2, Flag, Lock, Palette, ExternalLink, Download, Play
 } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { toggleMuteInRedux, toggleArchiveInRedux, removeConversationInRedux, clearMessagesInRedux, updateConversationThemeInRedux, updateConversationDisappearingInRedux, toggleVanish } from "../redux/features/messageSlice";
@@ -11,6 +11,7 @@ import api from "../lib/axios";
 import { toast } from "sonner";
 import moment from "moment";
 import ChatThemePickerModal from "./ChatThemePickerModal";
+import { MediaLightboxModal } from "./MediaLightboxModal";
 
 const MEDIA_TABS = [
   { id: "image", label: "Photos", icon: <Image className="w-4 h-4" /> },
@@ -33,6 +34,7 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
   const [details, setDetails] = useState(null);
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [activeTheme, setActiveTheme] = useState(conversation?.theme || "default");
+  const [lightboxData, setLightboxData] = useState({ open: false, url: null, type: "image" });
 
   // Fetch conversation details
   useEffect(() => {
@@ -376,14 +378,14 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
             Shared Media
           </h4>
 
-          <div className="flex gap-1 mb-3">
+          <div className="flex gap-1 mb-3 overflow-x-auto hide-scrollbar">
             {MEDIA_TABS.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveMediaTab(tab.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0 ${
                   activeMediaTab === tab.id
-                    ? "bg-surface-hover text-text"
+                    ? "bg-surface-hover text-text font-bold"
                     : "text-text-muted hover:text-text hover:bg-surface"
                 }`}
               >
@@ -399,40 +401,181 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
                 <div key={i} className="aspect-square bg-surface-hover rounded-lg animate-pulse" />
               ))}
             </div>
-          ) : sharedMedia.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-xs text-text-muted">No shared {activeMediaTab}s yet</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 gap-1">
-              {sharedMedia.map((msg) => {
-                const mediaList = Array.isArray(msg?.content?.media)
-                  ? msg.content.media
-                  : msg?.content?.media
-                  ? [msg.content.media]
-                  : [];
-                const media = mediaList[0];
-                if (!media || !media.url) return null;
+          ) : (() => {
+            const items = [];
+            sharedMedia.forEach((msg) => {
+              // 1. Direct media array in content.media
+              if (Array.isArray(msg?.content?.media) && msg.content.media.length > 0) {
+                msg.content.media.forEach((m, idx) => {
+                  if (m && m.url) {
+                    items.push({
+                      id: `${msg._id}-${idx}`,
+                      messageId: msg._id,
+                      url: m.url,
+                      type: m.type || msg.type || "image",
+                      name: m.name || "Attachment",
+                      size: m.size,
+                      createdAt: msg.createdAt,
+                    });
+                  }
+                });
+              } else if (msg?.content?.media?.url) {
+                items.push({
+                  id: `${msg._id}-0`,
+                  messageId: msg._id,
+                  url: msg.content.media.url,
+                  type: msg.content.media.type || msg.type || "image",
+                  name: msg.content.media.name || "Attachment",
+                  size: msg.content.media.size,
+                  createdAt: msg.createdAt,
+                });
+              }
 
-                return (
-                  <div key={msg._id} className="aspect-square rounded-lg overflow-hidden cursor-pointer hover:opacity-80 transition">
-                    {media.type === "image" || activeMediaTab === "image" ? (
-                      <img src={media.url} alt="" className="w-full h-full object-cover" />
-                    ) : media.type === "video" || activeMediaTab === "video" ? (
-                      <div className="w-full h-full bg-surface-hover flex items-center justify-center relative">
-                        <Film className="w-8 h-8 text-text-muted" />
+              // 2. Shared Data media (shared post, reel, story)
+              const sharedUrl = msg?.content?.sharedData?.mediaUrl || msg?.sharedData?.mediaUrl;
+              if (sharedUrl) {
+                items.push({
+                  id: `${msg._id}-shared`,
+                  messageId: msg._id,
+                  url: sharedUrl,
+                  type: msg.type?.includes("reel") || msg.type?.includes("video") ? "video" : "image",
+                  name: msg.content?.sharedData?.caption || "Shared Post",
+                  createdAt: msg.createdAt,
+                });
+              }
+
+              // 3. Link items
+              if (activeMediaTab === "link") {
+                const linkUrl = msg?.content?.linkPreview?.url || (msg?.content?.text?.match(/https?:\/\/[^\s]+/i)?.[0]);
+                if (linkUrl) {
+                  let hostname = "";
+                  try {
+                    hostname = new URL(linkUrl).hostname.replace(/^www\./, "");
+                  } catch (e) {
+                    hostname = linkUrl;
+                  }
+                  items.push({
+                    id: `${msg._id}-link`,
+                    messageId: msg._id,
+                    url: linkUrl,
+                    type: "link",
+                    title: msg?.content?.linkPreview?.title || linkUrl,
+                    description: msg?.content?.linkPreview?.description || "",
+                    image: msg?.content?.linkPreview?.image || null,
+                    siteName: msg?.content?.linkPreview?.siteName || hostname,
+                    createdAt: msg.createdAt,
+                  });
+                }
+              }
+            });
+
+            // Filter for current tab
+            let displayItems = items;
+            if (activeMediaTab === "image") {
+              displayItems = items.filter((it) => it.type === "image" || it.type === "sticker" || !it.type);
+            } else if (activeMediaTab === "video") {
+              displayItems = items.filter((it) => it.type === "video");
+            } else if (activeMediaTab === "file") {
+              displayItems = items.filter((it) => it.type === "file" || it.type === "document" || it.type === "audio");
+            } else if (activeMediaTab === "link") {
+              displayItems = items.filter((it) => it.type === "link");
+            }
+
+            if (displayItems.length === 0) {
+              return (
+                <div className="text-center py-8">
+                  <p className="text-xs text-text-muted">No shared {activeMediaTab}s yet</p>
+                </div>
+              );
+            }
+
+            if (activeMediaTab === "link") {
+              return (
+                <div className="space-y-2 max-h-[300px] overflow-y-auto hide-scrollbar">
+                  {displayItems.map((item) => (
+                    <a
+                      key={item.id}
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-3 p-2.5 rounded-xl bg-surface hover:bg-surface-hover border border-border transition group"
+                    >
+                      {item.image ? (
+                        <img src={item.image} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" />
+                      ) : (
+                        <div className="w-12 h-12 rounded-lg bg-surface-inset flex items-center justify-center shrink-0">
+                          <Link2 className="w-5 h-5 text-text-muted" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-text truncate group-hover:text-blue-400 transition">
+                          {item.title}
+                        </p>
+                        <p className="text-[10px] text-text-muted truncate">{item.siteName}</p>
                       </div>
+                      <ExternalLink className="w-3.5 h-3.5 text-text-muted group-hover:text-text shrink-0 transition" />
+                    </a>
+                  ))}
+                </div>
+              );
+            }
+
+            if (activeMediaTab === "file") {
+              return (
+                <div className="space-y-2 max-h-[300px] overflow-y-auto hide-scrollbar">
+                  {displayItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center gap-3 p-2.5 rounded-xl bg-surface border border-border hover:bg-surface-hover transition"
+                    >
+                      <div className="w-10 h-10 rounded-lg bg-surface-inset flex items-center justify-center shrink-0">
+                        <FileText className="w-5 h-5 text-rose-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-text truncate">{item.name}</p>
+                        <p className="text-[10px] text-text-muted">
+                          {item.size ? `${(item.size / 1024).toFixed(1)} KB` : "Document"}
+                        </p>
+                      </div>
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        download
+                        className="p-2 rounded-lg hover:bg-surface text-text-muted hover:text-text transition"
+                        title="Download file"
+                      >
+                        <Download className="w-4 h-4" />
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              );
+            }
+
+            return (
+              <div className="grid grid-cols-3 gap-1 max-h-[350px] overflow-y-auto hide-scrollbar">
+                {displayItems.map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => setLightboxData({ open: true, url: item.url, type: item.type === "video" ? "video" : "image" })}
+                    className="aspect-square rounded-lg overflow-hidden cursor-pointer hover:opacity-80 transition relative bg-surface border border-border/40 group"
+                  >
+                    {item.type === "video" ? (
+                      <>
+                        <video src={item.url} className="w-full h-full object-cover" muted preload="metadata" />
+                        <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                          <Play className="w-6 h-6 text-white drop-shadow-md fill-white" />
+                        </div>
+                      </>
                     ) : (
-                      <div className="w-full h-full bg-surface-hover flex flex-col items-center justify-center p-2">
-                        <FileText className="w-6 h-6 text-text-muted mb-1" />
-                        <p className="text-[9px] text-text-muted truncate w-full text-center">{media.name || "File"}</p>
-                      </div>
+                      <img src={item.url} alt="" className="w-full h-full object-cover" loading="lazy" />
                     )}
                   </div>
-                );
-              })}
-            </div>
-          )}
+                ))}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Danger Zone */}
@@ -486,6 +629,14 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
           setActiveTheme(newTheme);
           dispatch(updateConversationThemeInRedux({ conversationId, theme: newTheme }));
         }}
+      />
+
+      {/* Fullscreen Media Lightbox */}
+      <MediaLightboxModal
+        isOpen={lightboxData.open}
+        onClose={() => setLightboxData({ open: false, url: null, type: "image" })}
+        mediaUrl={lightboxData.url}
+        mediaType={lightboxData.type}
       />
     </div>
   );

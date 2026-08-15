@@ -32,7 +32,7 @@ const messageSchema = new mongoose.Schema(
         {
           url: String,
           public_id: String,
-          type: String, // image / video / audio / document
+          type: { type: String }, // image / video / audio / document
           name: String, // original filename
           size: Number, // bytes
           mimeType: String,

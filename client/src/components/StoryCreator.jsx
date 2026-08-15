@@ -1,44 +1,155 @@
 import React, { useRef, useState, useEffect } from "react";
-import { 
-  X, 
-  Type, 
-  Smile, 
-  Music, 
-  Pencil, 
-  Send, 
-  RotateCw, 
-  Camera, 
-  Trash2, 
-  Palette, 
+import {
+  X,
+  Type,
+  Smile,
+  Music,
+  Pencil,
+  Send,
+  RotateCw,
+  Camera,
+  Trash2,
+  Palette,
   Star,
   Image as ImageIcon,
   Loader2,
-  Check
+  Check,
+  Download,
+  Sparkles,
+  Sliders,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Layers,
+  Plus,
+  Quote,
+  Flame,
+  Zap,
+  BookOpen,
+  Eye,
+  Settings,
 } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ClipLoader } from "react-spinners";
 import api from "../lib/axios";
 import { setStoryFeed } from "../redux/features/storySlice";
 import StoryMusicPickerModal from "./StoryMusicPickerModal";
 import StoryStickersDrawer from "./StoryStickersDrawer";
+import dp from "../assets/dp3.png";
 
+// Text Story Fonts
 const FONTS = [
-  { id: "classic", name: "Classic", className: "font-sans" },
-  { id: "modern", name: "Modern", className: "font-mono uppercase tracking-widest" },
+  { id: "classic", name: "Classic", className: "font-sans font-bold" },
+  { id: "modern", name: "Modern", className: "font-mono uppercase tracking-widest font-bold" },
   { id: "neon", name: "Neon", className: "font-serif italic font-black" },
+  { id: "typewriter", name: "Typewriter", className: "font-mono font-medium" },
   { id: "bold", name: "Bold", className: "font-extrabold tracking-tight" },
+  { id: "serif", name: "Editorial", className: "font-serif font-bold tracking-normal" },
 ];
 
-const GRADIENTS = [
-  "from-purple-600 via-pink-600 to-rose-500",
-  "from-blue-600 via-indigo-600 to-purple-700",
-  "from-emerald-500 via-teal-600 to-cyan-700",
-  "from-amber-500 via-orange-600 to-red-600",
-  "from-card via-background-secondary to-background",
+// Rich Instagram-Style Text Story Theme Templates
+const TEXT_THEMES = [
+  {
+    id: "sunset_aura",
+    name: "Sunset Aura",
+    gradient: "from-amber-500 via-rose-600 to-purple-800",
+    font: FONTS[4], // Bold
+    textColor: "#ffffff",
+    highlightStyle: "glass",
+    icon: "🌅",
+  },
+  {
+    id: "neon_cyber",
+    name: "Cyberpunk",
+    gradient: "from-cyan-500 via-indigo-900 to-purple-950",
+    font: FONTS[2], // Neon
+    textColor: "#22d3ee",
+    highlightStyle: "neon",
+    icon: "⚡",
+  },
+  {
+    id: "midnight_gold",
+    name: "Midnight Noir",
+    gradient: "from-zinc-950 via-neutral-900 to-black",
+    font: FONTS[5], // Editorial
+    textColor: "#fef08a",
+    highlightStyle: "solid",
+    icon: "✨",
+  },
+  {
+    id: "pastel_dream",
+    name: "Pastel Dream",
+    gradient: "from-pink-400 via-purple-300 to-indigo-400",
+    font: FONTS[0], // Classic
+    textColor: "#ffffff",
+    highlightStyle: "glass",
+    icon: "🌸",
+  },
+  {
+    id: "flame_energy",
+    name: "Flame Pulse",
+    gradient: "from-red-600 via-orange-600 to-amber-500",
+    font: FONTS[4], // Bold
+    textColor: "#ffffff",
+    highlightStyle: "solid",
+    icon: "🔥",
+  },
+  {
+    id: "emerald_luxury",
+    name: "Emerald Glow",
+    gradient: "from-emerald-950 via-teal-900 to-cyan-950",
+    font: FONTS[1], // Modern
+    textColor: "#a7f3d0",
+    highlightStyle: "neon",
+    icon: "💎",
+  },
+  {
+    id: "vintage_journal",
+    name: "Vintage Diary",
+    gradient: "from-amber-950 via-stone-900 to-zinc-950",
+    font: FONTS[3], // Typewriter
+    textColor: "#fed7aa",
+    highlightStyle: "transparent",
+    icon: "📜",
+  },
+  {
+    id: "aurora_hologram",
+    name: "Aurora Borealis",
+    gradient: "from-violet-600 via-fuchsia-600 to-cyan-500",
+    font: FONTS[0], // Classic
+    textColor: "#ffffff",
+    highlightStyle: "glass",
+    icon: "🌌",
+  },
+  {
+    id: "card_minimal",
+    name: "Clean Minimal",
+    gradient: "from-zinc-900 via-zinc-900 to-zinc-950",
+    font: FONTS[0], // Classic
+    textColor: "#ffffff",
+    highlightStyle: "transparent",
+    icon: "🖤",
+  },
 ];
 
+// Color Swatches
+const COLORS = [
+  "#ffffff",
+  "#000000",
+  "#f43f5e",
+  "#ec4899",
+  "#a855f7",
+  "#6366f1",
+  "#3b82f6",
+  "#06b6d4",
+  "#10b981",
+  "#84cc16",
+  "#eab308",
+  "#f97316",
+];
+
+// 11 Instagram Photo/Video Filters
 const FILTERS = [
   { id: "none", name: "Normal", class: "", canvasFilter: "none" },
   { id: "clarendon", name: "Clarendon", class: "contrast-[1.20] saturate-[1.25] hue-rotate-[-5deg]", canvasFilter: "contrast(120%) saturate(125%) hue-rotate(-5deg)" },
@@ -58,10 +169,10 @@ export const StoryCreator = ({ onClose, initialState }) => {
   const dispatch = useDispatch();
   const { userData } = useSelector((state) => state.user);
 
-  // Story Mode: 'media' | 'text'
+  // Story Mode: 'media' | 'text' | 'templates'
   const [mode, setMode] = useState("media");
-  
-  // Multiple Story Queue state
+
+  // Multi-item Queue state (upload multiple stories in 1 go)
   const [items, setItems] = useState([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [sharedEntityData, setSharedEntityData] = useState(initialState?.sharedEntity || null);
@@ -69,14 +180,16 @@ export const StoryCreator = ({ onClose, initialState }) => {
   useEffect(() => {
     if (initialState?.initialMediaUrl) {
       const isVid = initialState.initialMediaUrl.endsWith(".mp4") || initialState.initialMediaUrl.includes("/video/");
-      setItems([{
-        preview: initialState.initialMediaUrl,
-        mediaType: isVid ? "video" : "image",
-        file: null,
-        stickers: [],
-        filter: "none",
-        isShared: true,
-      }]);
+      setItems([
+        {
+          preview: initialState.initialMediaUrl,
+          mediaType: isVid ? "video" : "image",
+          file: null,
+          stickers: [],
+          filter: "none",
+          isShared: true,
+        },
+      ]);
     }
   }, [initialState]);
 
@@ -93,11 +206,13 @@ export const StoryCreator = ({ onClose, initialState }) => {
   const [stream, setStream] = useState(null);
   const videoRef = useRef(null);
 
-  // Text Story State
+  // Text Story State & Themes
+  const [activeTheme, setActiveTheme] = useState(TEXT_THEMES[0]);
   const [textContent, setTextContent] = useState("");
-  const [selectedFont, setSelectedFont] = useState(FONTS[0]);
-  const [gradientIdx, setGradientIdx] = useState(0);
-  const [textColor, setTextColor] = useState("#ffffff");
+  const [selectedFont, setSelectedFont] = useState(TEXT_THEMES[0].font);
+  const [textColor, setTextColor] = useState(TEXT_THEMES[0].textColor);
+  const [highlightStyle, setHighlightStyle] = useState(TEXT_THEMES[0].highlightStyle); // 'transparent' | 'solid' | 'glass' | 'neon'
+  const [textAlign, setTextAlign] = useState("center"); // 'left' | 'center' | 'right'
 
   // Privacy Target
   const [visibleTo, setVisibleTo] = useState("public");
@@ -106,22 +221,27 @@ export const StoryCreator = ({ onClose, initialState }) => {
   const [showStickersDrawer, setShowStickersDrawer] = useState(false);
   const [showMusicPicker, setShowMusicPicker] = useState(false);
   const [showDrawCanvas, setShowDrawCanvas] = useState(false);
+  const [showTextModal, setShowTextModal] = useState(false);
+  const [showThemesDrawer, setShowThemesDrawer] = useState(false);
+  const [customOverlayText, setCustomOverlayText] = useState("");
 
-  // Music Data (Applies globally to the post/stories batch)
+  // Music Data
   const [selectedMusic, setSelectedMusic] = useState(null);
 
   // Dragging state
   const [activeDragIdx, setActiveDragIdx] = useState(null);
   const [selectedStickerIdx, setSelectedStickerIdx] = useState(null);
   const startDragPosition = useRef(null);
-  const touchStartRef = useRef(null);
-  
+
   const [isLoading, setIsLoading] = useState(false);
   const [uploadProgressText, setUploadProgressText] = useState("");
   const fileInputRef = useRef(null);
+  const additionalFileInputRef = useRef(null);
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [brushColor, setBrushColor] = useState("#f43f5e");
+  const [brushSize, setBrushSize] = useState(6);
 
   // 1. Live Camera Handlers
   const startCamera = async () => {
@@ -162,10 +282,10 @@ export const StoryCreator = ({ onClose, initialState }) => {
     if (!video) return;
 
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth || 720;
-    canvas.height = video.videoHeight || 1280;
+    canvas.width = video.videoWidth || 1080;
+    canvas.height = video.videoHeight || 1920;
     const ctx = canvas.getContext("2d");
-    
+
     if (facingMode === "user") {
       ctx.translate(canvas.width, 0);
       ctx.scale(-1, 1);
@@ -179,10 +299,10 @@ export const StoryCreator = ({ onClose, initialState }) => {
         preview: URL.createObjectURL(blob),
         mediaType: "image",
         stickers: [],
-        filter: "none"
+        filter: "none",
       };
-      setItems([newItem]);
-      setActiveIndex(0);
+      setItems((prev) => [...prev, newItem]);
+      setActiveIndex(items.length);
       stopCamera();
     }, "image/png");
   };
@@ -201,19 +321,18 @@ export const StoryCreator = ({ onClose, initialState }) => {
     };
   }, [stream]);
 
-  // 2. Drag & Drop Sticker Repositioning with boundary limits & Trash deletion
+  // 2. Drag & Drop Sticker Repositioning
   const handleStartDrag = (e, index) => {
     e.preventDefault();
     setActiveDragIdx(index);
     setSelectedStickerIdx(index);
-    
-    // Save starting position to determine if release is a quick tap vs a drag
+
     const targetItem = items[activeIndex];
     const sticker = targetItem?.stickers?.[index];
     if (sticker) {
       startDragPosition.current = {
         x: sticker.position?.x || 50,
-        y: sticker.position?.y || 50
+        y: sticker.position?.y || 50,
       };
     }
   };
@@ -240,11 +359,11 @@ export const StoryCreator = ({ onClose, initialState }) => {
         const activeStickers = [...(next[activeIndex].stickers || [])];
         activeStickers[activeDragIdx] = {
           ...activeStickers[activeDragIdx],
-          position: { x, y }
+          position: { x, y },
         };
         next[activeIndex] = {
           ...next[activeIndex],
-          stickers: activeStickers
+          stickers: activeStickers,
         };
         return next;
       });
@@ -256,26 +375,28 @@ export const StoryCreator = ({ onClose, initialState }) => {
           if (!prev[activeIndex]) return prev;
           const sticker = prev[activeIndex].stickers?.[activeDragIdx];
           if (sticker) {
-            // Delete if dropped in the bottom trash bin area (y > 82%)
+            // Delete if dropped in bottom trash bin
             if (sticker.position?.y > 82) {
               toast.success("Sticker removed");
               const next = [...prev];
               next[activeIndex] = {
                 ...next[activeIndex],
-                stickers: next[activeIndex].stickers.filter((_, i) => i !== activeDragIdx)
+                stickers: next[activeIndex].stickers.filter((_, i) => i !== activeDragIdx),
               };
               setSelectedStickerIdx(null);
               return next;
             }
 
-            // Check if it was a quick click release (drag distance < 1.5%)
+            // Quick click toggle style
             const dragX = Math.abs((sticker.position?.x || 50) - (startDragPosition.current?.x || 50));
             const dragY = Math.abs((sticker.position?.y || 50) - (startDragPosition.current?.y || 50));
-            
+
             if (dragX < 1.5 && dragY < 1.5) {
               const next = [...prev];
               const updatedSticker = { ...next[activeIndex].stickers[activeDragIdx] };
-              updatedSticker.styleIndex = ((updatedSticker.styleIndex || 0) + 1) % (updatedSticker.type === "music_sticker" ? 4 : 3);
+              updatedSticker.styleIndex =
+                ((updatedSticker.styleIndex || 0) + 1) %
+                (updatedSticker.type === "music_sticker" ? 4 : 3);
               next[activeIndex].stickers[activeDragIdx] = updatedSticker;
               return next;
             }
@@ -313,49 +434,17 @@ export const StoryCreator = ({ onClose, initialState }) => {
     });
   };
 
-  const handleViewportTouchStart = (e) => {
-    if (activeDragIdx !== null) return;
-    // Don't gesture swipe if typing inside textarea
-    if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT" || e.target.tagName === "BUTTON") {
-      return;
-    }
-    const touch = e.touches ? e.touches[0] : e;
-    touchStartRef.current = {
-      x: touch.clientX,
-      y: touch.clientY,
-      time: Date.now()
-    };
+  // Apply Theme Template
+  const handleSelectTheme = (theme) => {
+    setActiveTheme(theme);
+    setSelectedFont(theme.font);
+    setTextColor(theme.textColor);
+    setHighlightStyle(theme.highlightStyle);
+    setShowThemesDrawer(false);
+    toast(`Applied Theme: ${theme.name}`, { icon: theme.icon });
   };
 
-  const handleViewportTouchEnd = (e) => {
-    if (!touchStartRef.current || activeDragIdx !== null) return;
-    if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT" || e.target.tagName === "BUTTON") {
-      return;
-    }
-    const touch = e.changedTouches ? e.changedTouches[0] : e;
-    const diffX = touch.clientX - touchStartRef.current.x;
-    const diffY = touch.clientY - touchStartRef.current.y;
-    const elapsedTime = Date.now() - touchStartRef.current.time;
-
-    // Swipe left/right gesture (diffX > 60px, vertical shift < 50px, under 300ms)
-    if (Math.abs(diffX) > 60 && Math.abs(diffY) < 50 && elapsedTime < 300) {
-      const currentIdx = FILTERS.findIndex((f) => f.id === filter);
-      if (diffX > 0) {
-        // Swipe Right: Previous filter
-        const prevIdx = (currentIdx - 1 + FILTERS.length) % FILTERS.length;
-        handleSetFilter(FILTERS[prevIdx].id);
-        toast(`Filter: ${FILTERS[prevIdx].name}`, { icon: "✨", duration: 1000 });
-      } else {
-        // Swipe Left: Next filter
-        const nextIdx = (currentIdx + 1) % FILTERS.length;
-        handleSetFilter(FILTERS[nextIdx].id);
-        toast(`Filter: ${FILTERS[nextIdx].name}`, { icon: "✨", duration: 1000 });
-      }
-    }
-    touchStartRef.current = null;
-  };
-
-  // 3. File Input Select
+  // 3. File Input Select (Initial & Multi-Slide Addition)
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -368,10 +457,22 @@ export const StoryCreator = ({ onClose, initialState }) => {
       filter: "none",
     }));
 
-    setItems(newItems);
-    setActiveIndex(0);
+    setItems((prev) => [...prev, ...newItems]);
+    setActiveIndex(items.length);
     setMode("media");
     stopCamera();
+  };
+
+  // Remove slide from multi-queue
+  const handleRemoveSlide = (idx, e) => {
+    e.stopPropagation();
+    setItems((prev) => {
+      const filtered = prev.filter((_, i) => i !== idx);
+      if (activeIndex >= filtered.length) {
+        setActiveIndex(Math.max(0, filtered.length - 1));
+      }
+      return filtered;
+    });
   };
 
   // 4. Drawing Canvas Handlers
@@ -391,9 +492,10 @@ export const StoryCreator = ({ onClose, initialState }) => {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     const rect = canvas.getBoundingClientRect();
-    ctx.strokeStyle = textColor;
-    ctx.lineWidth = 5;
+    ctx.strokeStyle = brushColor;
+    ctx.lineWidth = brushSize;
     ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
     ctx.stroke();
   };
@@ -409,257 +511,190 @@ export const StoryCreator = ({ onClose, initialState }) => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   };
 
-  // 5. Merge canvas drawings and photo filters on client before upload
-  const getCombinedMediaBlob = (idx) => {
-    return new Promise((resolve) => {
-      const targetItem = items[idx];
-      if (!targetItem) {
-        resolve(null);
-        return;
-      }
-
-      if (targetItem.mediaType === "video" || !targetItem.preview) {
-        resolve(targetItem.file);
-        return;
-      }
-
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.src = targetItem.preview;
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth || 1080;
-        canvas.height = img.naturalHeight || 1920;
-        const ctx = canvas.getContext("2d");
-
-        // Map CSS filter classes to canvas context filters
-        const filterMapCtx = {
-          none: "none",
-          clarendon: "contrast(120%) saturate(125%) hue-rotate(-5deg)",
-          juno: "sepia(20%) contrast(115%) saturate(130%) hue-rotate(10deg)",
-          lark: "brightness(110%) contrast(90%) saturate(95%)",
-          gingham: "brightness(105%) contrast(85%) sepia(30%) saturate(85%)",
-          crema: "sepia(45%) contrast(95%) brightness(105%) saturate(90%)",
-          aden: "hue-rotate(-10deg) saturate(85%) contrast(90%) brightness(115%) sepia(20%)",
-          ludwig: "contrast(105%) saturate(95%) sepia(10%)",
-          slumber: "saturate(60%) sepia(40%) contrast(80%) brightness(100%)",
-          reyes: "sepia(35%) brightness(110%) contrast(85%) saturate(75%)",
-          moon: "grayscale(100%) contrast(110%) brightness(110%)",
-        };
-        ctx.filter = filterMapCtx[targetItem.filter || "none"] || "none";
-
-        // Draw image with active filter
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-        // Reset filter so drawing layer is not affected
-        ctx.filter = "none";
-
-        // Scale and draw hand-drawn annotations from canvas (only if currently edited canvas match)
-        if (idx === activeIndex && canvasRef.current) {
-          ctx.drawImage(canvasRef.current, 0, 0, canvas.width, canvas.height);
-        }
-
-        canvas.toBlob((blob) => {
-          resolve(new File([blob], `combined_${Date.now()}.png`, { type: "image/png" }));
-        }, "image/png");
-      };
-      img.onerror = () => {
-        resolve(targetItem.file);
-      };
+  // 5. Add Text Overlay to Media
+  const handleAddTextOverlay = () => {
+    if (!customOverlayText.trim()) return;
+    handleAddSticker({
+      type: "overlay",
+      overlay: {
+        text: customOverlayText.trim(),
+        icon: "",
+      },
     });
+    setCustomOverlayText("");
+    setShowTextModal(false);
   };
 
-  const generateTextStoryBlob = () => {
-    return new Promise((resolve) => {
-      const canvas = document.createElement("canvas");
-      canvas.width = 1080;
-      canvas.height = 1920;
-      const ctx = canvas.getContext("2d");
-
-      // Set canvas background color or gradient
-      const grad = ctx.createLinearGradient(0, 0, 1080, 1920);
-      const gradsConfig = [
-        ["#9333ea", "#db2777", "#e11d48"],
-        ["#2563eb", "#4f46e5", "#7c3aed"],
-        ["#10b981", "#0d9488", "#0891b2"],
-        ["#f59e0b", "#ea580c", "#dc2626"],
-        ["#18181b", "#09090b", "#18181b"]
-      ];
-      const colors = gradsConfig[gradientIdx] || gradsConfig[0];
-      
-      grad.addColorStop(0, colors[0]);
-      grad.addColorStop(0.5, colors[1]);
-      grad.addColorStop(1, colors[2] || colors[1]);
-      
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, 1080, 1920);
-
-      // Draw Text
-      ctx.fillStyle = textColor;
-      ctx.font = "bold 65px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-
-      const lines = (textContent || "VYBE Story").split("\n");
-      const startY = 960 - ((lines.length - 1) * 45);
-      lines.forEach((line, index) => {
-        ctx.fillText(line, 540, startY + (index * 90));
-      });
-
-      canvas.toBlob((blob) => {
-        resolve(new File([blob], "text_story.png", { type: "image/png" }));
-      });
-    });
-  };
-
-  const handlePublishStory = async () => {
-    try {
-      setIsLoading(true);
-
+  // 6. Add Sticker
+  const handleAddSticker = (sticker) => {
+    setItems((prev) => {
+      const next = [...prev];
       if (mode === "text") {
-        setUploadProgressText("Sharing text story...");
-        const fileToUpload = await generateTextStoryBlob();
-        if (!fileToUpload) {
-          toast.error("Failed to generate text story media.");
-          setIsLoading(false);
-          return;
+        if (!next[0]) {
+          next[0] = { preview: null, mediaType: "text", stickers: [], filter: "none" };
         }
-
-        const formData = new FormData();
-        formData.append("mediaType", "text");
-        formData.append("media", fileToUpload);
-        formData.append("visibleTo", visibleTo);
-        formData.append("filter", GRADIENTS[gradientIdx] || "from-purple-600 via-pink-600 to-rose-500");
-        formData.append("location", selectedFont.className || "font-sans");
-
-        if (textContent) formData.append("caption", textContent);
-        if (selectedMusic) formData.append("music", JSON.stringify(selectedMusic));
-        if (stickers.length > 0) formData.append("stickers", JSON.stringify(stickers));
-
-        await api.post("/story/upload", formData);
-      } else {
-        if (items.length === 0) {
-          toast.error("Please select photos/videos or take a snapshot!");
-          setIsLoading(false);
-          return;
-        }
-
-        // Upload sequentially
-        for (let i = 0; i < items.length; i++) {
-          setUploadProgressText(`Uploading story ${i + 1} of ${items.length}...`);
-          const targetItem = items[i];
-
-          const formData = new FormData();
-          formData.append("mediaType", targetItem.mediaType);
-          formData.append("visibleTo", visibleTo);
-          formData.append("filter", targetItem.filter || "none");
-
-          if (targetItem.isShared || !targetItem.file) {
-            formData.append("mediaUrl", targetItem.preview);
-          } else {
-            const fileToUpload = await getCombinedMediaBlob(i);
-            formData.append("media", fileToUpload);
-          }
-
-          if (sharedEntityData) {
-            formData.append("sharedEntity", JSON.stringify(sharedEntityData));
-          }
-
-          if (selectedMusic) formData.append("music", JSON.stringify(selectedMusic));
-          if (targetItem.stickers && targetItem.stickers.length > 0) {
-            formData.append("stickers", JSON.stringify(targetItem.stickers));
-          }
-
-          await api.post("/story/upload", formData);
-        }
+        next[0].stickers = [
+          ...(next[0].stickers || []),
+          { ...sticker, position: { x: 50, y: 50 }, scale: 1, styleIndex: 0 },
+        ];
+        return next;
       }
 
-      // Fetch refreshed story feed
-      const feedRes = await api.get("/story/feed");
-      dispatch(setStoryFeed(feedRes.data.stories));
+      if (!next[activeIndex]) {
+        toast.error("Please add a photo or video first");
+        return prev;
+      }
+      const currentStickers = next[activeIndex].stickers || [];
+      next[activeIndex] = {
+        ...next[activeIndex],
+        stickers: [
+          ...currentStickers,
+          { ...sticker, position: { x: 50, y: 50 }, scale: 1, styleIndex: 0 },
+        ],
+      };
+      return next;
+    });
+    setShowStickersDrawer(false);
+    toast.success("Sticker added! Drag to position.");
+  };
 
-      toast.success("Stories shared to feed successfully! ✨");
+  // 7. Download Crafted Story
+  const handleDownloadStory = () => {
+    if (!mediaPreview) return;
+    const a = document.createElement("a");
+    a.href = mediaPreview;
+    a.download = `vybe-story-${Date.now()}.${mediaType === "video" ? "mp4" : "png"}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast.success("Story downloaded to device!");
+  };
+
+  // 8. Publish Stories Batch
+  const handlePublishStory = async () => {
+    if (mode === "text" && !textContent.trim()) {
+      toast.error("Please write something in your text story");
+      return;
+    }
+
+    if (mode === "media" && items.length === 0 && !useCamera) {
+      toast.error("Please select a photo or video");
+      return;
+    }
+
+    setIsLoading(true);
+    setUploadProgressText("Sharing story...");
+
+    try {
+      if (mode === "text") {
+        const textStickers = items[0]?.stickers || [];
+        const res = await api.post("/story/upload", {
+          mediaType: "text",
+          caption: textContent.trim(),
+          mediaUrl: `text_theme_${activeTheme.id}`,
+          stickers: JSON.stringify(textStickers),
+          visibleTo,
+          music: selectedMusic ? JSON.stringify(selectedMusic) : null,
+        });
+
+        if (res.data?.success) {
+          toast.success("Story published! ✨");
+          api.get("/story/feed").then((feedRes) => {
+            if (feedRes.data?.success) dispatch(setStoryFeed(feedRes.data.feed));
+          });
+          setIsLoading(false);
+          if (onClose) onClose();
+          else navigate("/");
+        }
+        return;
+      }
+
+      // Media Stories Batch Upload (Uploads all multi-slides in sequence)
+      for (let i = 0; i < items.length; i++) {
+        setUploadProgressText(`Uploading slide ${i + 1} of ${items.length}...`);
+        const item = items[i];
+        const formData = new FormData();
+
+        if (item.file) {
+          formData.append("media", item.file);
+        } else if (item.preview) {
+          formData.append("mediaUrl", item.preview);
+        }
+
+        formData.append("mediaType", item.mediaType);
+        formData.append("filter", item.filter || "none");
+        formData.append("visibleTo", visibleTo);
+        formData.append("stickers", JSON.stringify(item.stickers || []));
+
+        if (selectedMusic) {
+          formData.append("music", JSON.stringify(selectedMusic));
+        }
+
+        if (sharedEntityData) {
+          formData.append("sharedEntity", JSON.stringify(sharedEntityData));
+        }
+
+        await api.post("/story/upload", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+      }
+
+      toast.success("Stories published successfully! 🚀");
+      api.get("/story/feed").then((feedRes) => {
+        if (feedRes.data?.success) dispatch(setStoryFeed(feedRes.data.feed));
+      });
+
       setIsLoading(false);
       if (onClose) onClose();
       else navigate("/");
     } catch (err) {
-      toast.error(err.response?.data?.message || "Story upload failed");
+      toast.error(err.response?.data?.message || "Failed to publish story.");
       setIsLoading(false);
     }
   };
 
-  const handleAddSticker = (newSticker) => {
-    setItems((prev) => {
-      if (mode === "text") {
-        // Text mode stores stickers on the root level (single item)
-        // Wait! Let's make text mode act like a single item queue or just update items[0]
-        // Since we render text mode, we can just put a dummy item in items if empty:
-        const next = [...prev];
-        if (next.length === 0) {
-          next.push({ preview: null, mediaType: "image", stickers: [], filter: "none" });
-        }
-        next[0].stickers = [...(next[0].stickers || []), { ...newSticker, position: { x: 50, y: 50 } }];
-        return next;
-      } else {
-        if (!prev[activeIndex]) return prev;
-        const next = [...prev];
-        next[activeIndex] = {
-          ...next[activeIndex],
-          stickers: [...(next[activeIndex].stickers || []), { ...newSticker, position: { x: 50, y: 50 } }]
-        };
-        return next;
-      }
-    });
-    setShowStickersDrawer(false);
-  };
-
+  // Render stickers overlay inside editor
   const renderStickersInEditor = () => {
+    const targetStickers = mode === "text" ? items[0]?.stickers || [] : stickers;
+
     return (
       <div className="absolute inset-0 pointer-events-none z-20 overflow-hidden">
-        {stickers.map((s, idx) => {
-          const isSelected = selectedStickerIdx === idx;
-          const styleIdx = s.styleIndex || 0;
-          const scaleVal = s.scale || 1;
-
-          // Time Analog Hour/Min Degrees
-          const timeDate = new Date();
-          const hourDeg = (timeDate.getHours() % 12) * 30 + timeDate.getMinutes() * 0.5;
-          const minDeg = timeDate.getMinutes() * 6;
-
+        {targetStickers.map((s, index) => {
           return (
             <div
-              key={idx}
-              onMouseDown={(e) => handleStartDrag(e, idx)}
-              onTouchStart={(e) => handleStartDrag(e, idx)}
-              style={{ 
-                left: `${s.position?.x || 50}%`, 
+              key={index}
+              onMouseDown={(e) => handleStartDrag(e, index)}
+              onTouchStart={(e) => handleStartDrag(e, index)}
+              style={{
+                position: "absolute",
+                left: `${s.position?.x || 50}%`,
                 top: `${s.position?.y || 50}%`,
-                transform: `translate(-50%, -50%) scale(${scaleVal})`,
-                touchAction: "none"
+                transform: `translate(-50%, -50%) scale(${s.scale || 1})`,
+                pointerEvents: "auto",
+                cursor: "grab",
               }}
-              className={`absolute pointer-events-auto z-30 cursor-grab active:cursor-grabbing select-none w-64 max-w-[80%] transition-transform duration-75 ${
-                isSelected ? "ring-2 ring-rose-500 rounded-2xl shadow-rose-500/10 shadow-2xl" : ""
+              className={`transition-shadow duration-150 select-none ${
+                selectedStickerIdx === index ? "ring-2 ring-rose-500 rounded-2xl p-1" : ""
               }`}
             >
-              {/* 1. POLL STICKER */}
+              {/* 1. Poll */}
               {s.type === "poll" && (
-                <div className={`rounded-2xl p-3.5 shadow-2xl text-center space-y-1.5 pointer-events-none border transition-all duration-300 ${
-                  styleIdx === 1
-                    ? "bg-surface-inset text-text border-border"
-                    : styleIdx === 2
-                    ? "bg-white/20 backdrop-blur-md text-text border-white/20"
-                    : "bg-white/95 text-text border-white/40"
-                }`}>
-                  <p className="text-xs font-bold leading-snug">{s.poll?.question || "Poll"}</p>
+                <div className="bg-white/95 text-black rounded-2xl p-3 shadow-2xl text-center w-52 border border-white/40">
+                  <p className="font-bold text-xs mb-2">{s.poll?.question || "Ask a question..."}</p>
                   <div className="flex gap-2">
-                    {s.poll?.options?.map((opt, i) => (
-                      <div key={i} className={`flex-1 py-1.5 rounded-xl text-[10px] font-bold border transition ${
-                        styleIdx === 1
-                          ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                          : styleIdx === 2
-                          ? "bg-white/10 border-white/20 text-text"
-                          : "bg-rose-500/10 border-rose-500/20 text-rose-600"
-                      }`}>
+                    <div className="flex-1 py-1.5 bg-black/10 rounded-xl font-bold text-xs">Yes</div>
+                    <div className="flex-1 py-1.5 bg-black/10 rounded-xl font-bold text-xs">No</div>
+                  </div>
+                </div>
+              )}
+
+              {/* 2. Quiz */}
+              {s.type === "quiz" && (
+                <div className="bg-white/95 text-black rounded-2xl p-3 shadow-2xl text-center w-52 border border-white/40">
+                  <p className="font-bold text-xs mb-2">{s.quiz?.question || "Quiz question..."}</p>
+                  <div className="space-y-1">
+                    {(s.quiz?.options || ["Option A", "Option B"]).map((opt, i) => (
+                      <div key={i} className="py-1 bg-black/10 rounded-lg text-[10px] font-bold">
                         {opt}
                       </div>
                     ))}
@@ -667,218 +702,66 @@ export const StoryCreator = ({ onClose, initialState }) => {
                 </div>
               )}
 
-              {/* 2. MENTION STICKER */}
-              {s.type === "mention" && (
-                <span className={`inline-flex items-center gap-1 px-4 py-2 font-black text-xs rounded-2xl shadow-2xl transition border ${
-                  styleIdx === 1
-                    ? "bg-card text-text-inverse border-white"
-                    : styleIdx === 2
-                    ? "bg-black/35 border-white/30 text-text backdrop-blur"
-                    : "bg-gradient-to-r from-emerald-500 to-teal-600 text-text border-white/10"
-                }`}>
-                  @{s.mention?.username}
-                </span>
-              )}
-
-              {/* 3. HASHTAG STICKER */}
-              {s.type === "hashtag" && (
-                <span className={`inline-flex items-center gap-1 px-4 py-2 font-black text-xs rounded-2xl shadow-2xl transition border ${
-                  styleIdx === 1
-                    ? "bg-card text-text-inverse border-white"
-                    : styleIdx === 2
-                    ? "bg-black/35 border-white/30 text-text backdrop-blur"
-                    : "bg-gradient-to-r from-amber-500 to-orange-600 text-text border-white/10"
-                }`}>
-                  #{s.hashtag?.tag}
-                </span>
-              )}
-
-              {/* 4. QUESTION BOX STICKER */}
+              {/* 3. Question */}
               {s.type === "question" && (
-                <div className={`rounded-2xl p-4 shadow-2xl text-center w-full pointer-events-none border transition-all duration-300 ${
-                  styleIdx === 1
-                    ? "bg-surface-inset text-text border-border"
-                    : styleIdx === 2
-                    ? "bg-white/20 backdrop-blur text-text border-white/20"
-                    : "bg-white/95 text-text border-white/40"
-                }`}>
+                <div className="bg-white/95 text-black rounded-2xl p-3 shadow-2xl text-center w-52 border border-white/40">
                   <p className="font-bold text-[11px] mb-2">{s.question?.prompt || "Ask me a question"}</p>
-                  <div className={`w-full h-8 rounded-lg border transition ${
-                    styleIdx === 1 ? "bg-surface border-border" : styleIdx === 2 ? "bg-white/10 border-white/15" : "bg-background-secondary border-border"
-                  }`} />
+                  <div className="w-full h-7 rounded-lg bg-black/10" />
                 </div>
               )}
 
-              {/* 5. SLIDER STICKER */}
+              {/* 4. Slider */}
               {s.type === "slider" && (
-                <div className={`rounded-2xl p-3 shadow-2xl text-center w-full pointer-events-none flex items-center gap-2 border transition ${
-                  styleIdx === 1
-                    ? "bg-surface-inset text-text border-border"
-                    : styleIdx === 2
-                    ? "bg-white/20 backdrop-blur text-text border-white/20"
-                    : "bg-white/95 text-text border-white/40"
-                }`}>
+                <div className="bg-white/95 text-black rounded-2xl p-2.5 shadow-2xl flex items-center gap-2 w-52 border border-white/40">
                   <span className="text-xl">{s.slider?.emoji || "🔥"}</span>
-                  <div className="flex-1 h-1.5 bg-card-active/40 rounded-full relative">
-                    <div className="w-4.5 h-4.5 bg-orange-500 rounded-full absolute -top-1.5 left-1/2 -translate-x-1/2 shadow" />
+                  <div className="flex-1 h-1.5 bg-black/20 rounded-full relative">
+                    <div className="w-4 h-4 bg-orange-500 rounded-full absolute -top-1.5 left-1/2 -translate-x-1/2 shadow" />
                   </div>
                 </div>
               )}
 
-              {/* 6. COUNTDOWN STICKER */}
+              {/* 5. Countdown */}
               {s.type === "countdown" && (
-                <div className={`rounded-2xl p-3 shadow-2xl text-center space-y-1.5 w-full border transition ${
-                  styleIdx === 1
-                    ? "bg-surface-inset text-text border-border"
-                    : styleIdx === 2
-                    ? "bg-white/25 backdrop-blur text-text border-white/20"
-                    : "bg-gradient-to-r from-cyan-600 to-blue-700 text-text border-white/20"
-                }`}>
+                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl p-3 shadow-2xl text-center space-y-1 w-48">
                   <span className="font-bold text-[10px] uppercase tracking-wider">{s.countdown?.title || "Countdown"}</span>
-                  <div className={`flex justify-center gap-2 text-sm font-black font-mono py-1 rounded-lg ${
-                    styleIdx === 2 ? "bg-white/10" : "bg-bg/20"
-                  }`}>
+                  <div className="flex justify-center gap-2 text-sm font-black font-mono py-1">
                     <div>23h</div>
                     <div>59m</div>
-                    <div>45s</div>
                   </div>
                 </div>
               )}
 
-              {/* 7. LINK STICKER */}
+              {/* 6. Link */}
               {s.type === "link" && (
-                <span className={`inline-flex items-center gap-1 px-4 py-2.5 font-extrabold text-[11px] rounded-full shadow-2xl border transition ${
-                  styleIdx === 1
-                    ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-text border-white/10"
-                    : styleIdx === 2
-                    ? "bg-black/45 border-white/30 text-text backdrop-blur-md"
-                    : "bg-card text-text border-border"
-                }`}>
+                <span className="inline-flex items-center gap-1 px-4 py-2 font-extrabold text-[11px] rounded-full shadow-2xl bg-white text-black border border-white/40">
                   🔗 {s.link?.title || s.link?.url}
                 </span>
               )}
 
-              {/* 8. TIME STICKER */}
-              {s.type === "time" && (
-                <div className="flex justify-center">
-                  {styleIdx === 2 ? (
-                    /* Analog Clock style configuration */
-                    <div className="w-16 h-16 rounded-full border-4 border-white bg-bg/40 backdrop-blur-sm relative flex items-center justify-center shadow-2xl">
-                      <div className="absolute w-[3px] h-5 bg-card origin-bottom bottom-1/2 rounded" style={{ transform: `rotate(${hourDeg}deg)` }} />
-                      <div className="absolute w-[2px] h-7 bg-white/90 origin-bottom bottom-1/2 rounded" style={{ transform: `rotate(${minDeg}deg)` }} />
-                      <div className="w-1.5 h-1.5 rounded-full bg-rose-500 z-10" />
-                    </div>
-                  ) : (
-                    /* Digital & Minimal Styles */
-                    <div className={`text-center font-mono transition-all duration-300 ${
-                      styleIdx === 1 
-                        ? "font-sans text-2xl tracking-widest bg-bg/40 text-text px-4 py-2 rounded-2xl backdrop-blur-sm border border-white/10" 
-                        : "text-3xl font-black bg-card text-text-inverse px-4 py-2.5 rounded-2xl shadow-2xl border border-white/40"
-                    }`}>
-                      {s.time?.timeString}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* 9. DAY STICKER */}
-              {s.type === "day" && (
-                <div className="flex justify-center">
-                  {styleIdx === 2 ? (
-                    /* Comic Bold Yellow badge configuration */
-                    <div className="font-sans font-black uppercase text-base bg-yellow-300 text-text-inverse px-3.5 py-1.5 rounded-xl border-3 border-bg shadow-lg transform rotate-2">
-                      {s.day?.dayString}
-                    </div>
-                  ) : (
-                    <div className={`text-center transition-all duration-300 ${
-                      styleIdx === 1
-                        ? "font-mono text-xs font-bold tracking-widest bg-bg/50 text-text px-4 py-2 rounded-xl border border-white/20 uppercase"
-                        : "font-serif italic text-2xl font-black bg-gradient-to-r from-yellow-300 via-amber-400 to-orange-500 bg-clip-text text-transparent transform rotate-1"
-                    }`}>
-                      {s.day?.dayString}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* 10. EMOJI STICKER */}
-              {s.type === "emoji" && (
-                <div className={`text-5xl text-center select-none ${
-                  styleIdx === 1 ? "animate-pulse drop-shadow-2xl" : styleIdx === 2 ? "transform rotate-12 scale-110" : ""
-                }`}>
-                  {s.emoji?.val}
-                </div>
-              )}
-
-              {/* 11. OVERLAY BADGE STICKER */}
-              {s.type === "overlay" && (
-                <div className={`font-black text-xs p-3 px-5 rounded-2xl shadow-2xl border flex flex-col items-center justify-center gap-1 text-center transition ${
-                  styleIdx === 1
-                    ? "bg-card text-text-inverse border-white"
-                    : styleIdx === 2
-                    ? "bg-black/45 text-text border-white/20 backdrop-blur-sm"
-                    : "bg-gradient-to-tr from-amber-400 via-rose-500 to-purple-600 text-text border-white/30"
-                }`}>
-                  <span className="text-2xl">{s.overlay?.icon}</span>
-                  <span className="tracking-wider uppercase font-black">{s.overlay?.text}</span>
-                </div>
-              )}
-
-              {/* 12. MUSIC STICKER */}
+              {/* 7. Music Sticker */}
               {s.type === "music_sticker" && s.music_sticker && (
-                <div className="select-none">
-                  {styleIdx === 0 && (
-                    <div className="bg-black/55 border border-white/10 backdrop-blur-md rounded-full p-2.5 flex items-center gap-3 text-left w-56 shadow-2xl transition hover:scale-[1.02]">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-rose-500 via-purple-600 to-cyan-500 flex items-center justify-center shrink-0 shadow animate-spin-slow">
-                        <Music className="w-4 h-4 text-white" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[10px] font-black text-white truncate leading-tight">{s.music_sticker.title}</p>
-                        <p className="text-[8px] text-white/70 font-bold truncate mt-0.5">{s.music_sticker.artist || "Unknown"}</p>
-                      </div>
-                      <div className="eq-container shrink-0 pr-1 flex items-end gap-[1.5px] h-3">
-                        <div className="w-[1.5px] bg-white rounded-full h-1.5 animate-bounce" />
-                        <div className="w-[1.5px] bg-white rounded-full h-2.5 animate-bounce [animation-delay:0.15s]" />
-                        <div className="w-[1.5px] bg-white rounded-full h-1 animate-bounce [animation-delay:0.3s]" />
-                      </div>
-                    </div>
-                  )}
+                <div className="bg-black/70 border border-white/20 backdrop-blur-md rounded-full p-2 flex items-center gap-2.5 text-left w-52 shadow-2xl text-white">
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-rose-500 to-purple-600 flex items-center justify-center shrink-0 animate-spin-slow">
+                    <Music className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-black truncate">{s.music_sticker.title}</p>
+                    <p className="text-[8px] text-white/70 font-semibold truncate">{s.music_sticker.artist}</p>
+                  </div>
+                </div>
+              )}
 
-                  {styleIdx === 1 && (
-                    <div className="bg-white text-black border border-white/20 rounded-full py-1.5 px-3 flex items-center gap-2 shadow-2xl text-left w-auto max-w-[210px] hover:scale-[1.02] transition">
-                      <div className="eq-container shrink-0 flex items-end gap-[1.5px] h-2.5">
-                        <div className="w-[1.5px] bg-black rounded-full h-1.5 animate-bounce" />
-                        <div className="w-[1.5px] bg-black rounded-full h-2.5 animate-bounce [animation-delay:0.15s]" />
-                        <div className="w-[1.5px] bg-black rounded-full h-1 animate-bounce [animation-delay:0.3s]" />
-                      </div>
-                      <span className="text-[9px] font-black truncate tracking-tight">{s.music_sticker.title}</span>
-                    </div>
-                  )}
+              {/* 8. Text Overlay */}
+              {s.type === "overlay" && (
+                <div className="bg-white/95 text-black px-4 py-2 rounded-2xl shadow-2xl font-black text-sm border border-white/40">
+                  {s.overlay?.text}
+                </div>
+              )}
 
-                  {styleIdx === 2 && (
-                    <div className="bg-gradient-to-br from-zinc-900/95 to-black border border-white/10 rounded-2xl p-2.5 flex items-center gap-3 shadow-2xl text-left w-52 hover:scale-[1.02] transition relative overflow-hidden">
-                      <div className="relative w-10 h-10 shrink-0">
-                        <div className="absolute right-[-8px] top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center animate-spin-slow z-0">
-                          <div className="w-2.5 h-2.5 rounded-full bg-black border border-zinc-600" />
-                        </div>
-                        <div className="relative w-10 h-10 rounded-lg bg-gradient-to-tr from-pink-500 via-purple-600 to-indigo-500 flex items-center justify-center shadow-lg z-10 border border-white/15">
-                          <Music className="w-5 h-5 text-white" />
-                        </div>
-                      </div>
-                      <div className="min-w-0 flex-1 z-10">
-                        <p className="text-[10px] font-black text-white truncate leading-tight">{s.music_sticker.title}</p>
-                        <p className="text-[8px] text-white/70 font-semibold truncate mt-0.5">{s.music_sticker.artist || "Unknown"}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {styleIdx === 3 && (
-                    <div className="bg-black/55 backdrop-blur-md rounded-2xl border border-white/10 p-2 shadow-2xl w-60 hover:scale-[1.02] transition text-center text-white">
-                      <p className="text-[11px] font-black text-rose-500 animate-pulse tracking-wide select-none">
-                        🎵 Lyrics styling preview...
-                      </p>
-                    </div>
-                  )}
+              {/* 9. Emoji */}
+              {s.type === "emoji" && (
+                <div className="text-5xl text-center select-none drop-shadow-2xl">
+                  {s.emoji?.val}
                 </div>
               )}
             </div>
@@ -890,30 +773,38 @@ export const StoryCreator = ({ onClose, initialState }) => {
 
   const resolvedFilterClass = FILTERS.find((f) => f.id === filter)?.class || "";
 
+  // Text highlight wrapper class
+  const getHighlightClass = () => {
+    if (highlightStyle === "solid") return "bg-black/80 text-white px-4 py-2 rounded-2xl shadow-2xl border border-white/20";
+    if (highlightStyle === "glass") return "bg-white/20 backdrop-blur-md text-white px-4 py-2 rounded-2xl border border-white/30 shadow-2xl";
+    if (highlightStyle === "neon") return "bg-black/90 text-cyan-300 px-4 py-2 rounded-2xl border-2 border-cyan-400 shadow-[0_0_25px_rgba(34,211,238,0.5)]";
+    return "";
+  };
+
   return (
-    <div className="fixed inset-0 z-[400] bg-bg text-text flex flex-col justify-between select-none overflow-hidden font-sans">
-      
-      {/* TOP HEADER CONTROLS */}
-      <div className="h-16 shrink-0 px-4 flex items-center justify-between z-50 bg-gradient-to-b from-black/80 to-transparent">
+    <div className="fixed inset-0 z-[500] bg-black text-white flex flex-col justify-between select-none overflow-hidden font-sans">
+      {/* TOP HEADER TOOLBAR (Instagram Studio Layout) */}
+      <div className="h-14 shrink-0 px-4 flex items-center justify-between z-50 bg-gradient-to-b from-black/90 to-transparent">
+        {/* Close */}
         <button
           onClick={() => {
             stopCamera();
             if (onClose) onClose();
             else navigate(-1);
           }}
-          className="p-2 rounded-full bg-surface/80 hover:bg-surface-hover text-text transition cursor-pointer"
+          className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
         >
-          <X className="w-6 h-6" />
+          <X className="w-5 h-5" />
         </button>
 
-        {/* MODE TOGGLE */}
-        <div className="flex items-center gap-1 bg-surface/90 border border-border p-1 rounded-full text-xs font-bold shadow-lg">
+        {/* Mode Selector (Media, Text Story, Theme Templates) */}
+        <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-full text-xs font-bold border border-white/10">
           <button
             onClick={() => {
               setMode("media");
               stopCamera();
             }}
-            className={`px-4 py-1.5 rounded-full transition ${mode === "media" ? "bg-rose-600 text-text" : "text-text-secondary hover:text-text"}`}
+            className={`px-3.5 py-1 rounded-full transition ${mode === "media" ? "bg-white text-black shadow" : "text-zinc-400 hover:text-white"}`}
           >
             Media
           </button>
@@ -922,110 +813,198 @@ export const StoryCreator = ({ onClose, initialState }) => {
               setMode("text");
               stopCamera();
             }}
-            className={`px-4 py-1.5 rounded-full transition ${mode === "text" ? "bg-rose-600 text-text" : "text-text-secondary hover:text-text"}`}
+            className={`px-3.5 py-1 rounded-full transition ${mode === "text" ? "bg-white text-black shadow" : "text-zinc-400 hover:text-white"}`}
           >
             Text Story
           </button>
         </div>
 
-        {/* TOOL PANEL */}
+        {/* Studio Tools */}
         <div className="flex items-center gap-2">
-          {(mediaPreview || mode === "text") && (
-            <>
-              <button
-                onClick={() => setShowStickersDrawer(true)}
-                className="p-2 rounded-full bg-surface/80 hover:bg-surface-hover text-rose-400 transition cursor-pointer hover:scale-105"
-                title="Add Sticker"
-              >
-                <Smile className="w-5 h-5" />
-              </button>
+          {/* Themes Drawer Toggle (in Text mode) */}
+          {mode === "text" && (
+            <button
+              onClick={() => setShowThemesDrawer(!showThemesDrawer)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-gradient-to-r from-pink-500 to-rose-600 text-white text-xs font-bold shadow-lg cursor-pointer hover:scale-105 transition"
+              title="Change Story Theme"
+            >
+              <span>{activeTheme.icon}</span>
+              <span className="hidden sm:inline">{activeTheme.name}</span>
+            </button>
+          )}
 
-              <button
-                onClick={() => setShowMusicPicker(true)}
-                className="p-2 rounded-full bg-surface/80 hover:bg-surface-hover text-purple-400 transition cursor-pointer hover:scale-105"
-                title="Select Music"
-              >
-                <Music className="w-5 h-5" />
-              </button>
+          {/* Text Tool */}
+          {mode === "media" && (
+            <button
+              onClick={() => setShowTextModal(true)}
+              className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+              title="Add Text"
+            >
+              <Type className="w-5 h-5" />
+            </button>
+          )}
 
-              {mediaPreview && (
-                <button
-                  onClick={() => setShowDrawCanvas(!showDrawCanvas)}
-                  className={`p-2 rounded-full transition cursor-pointer hover:scale-105 ${
-                    showDrawCanvas ? "bg-rose-600 text-text" : "bg-surface/80 hover:bg-surface-hover text-amber-400"
-                  }`}
-                  title="Doodle Draw"
-                >
-                  <Pencil className="w-5 h-5" />
-                </button>
-              )}
-            </>
+          {/* Stickers */}
+          <button
+            onClick={() => setShowStickersDrawer(true)}
+            className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-rose-400 transition cursor-pointer"
+            title="Stickers"
+          >
+            <Smile className="w-5 h-5" />
+          </button>
+
+          {/* Music */}
+          <button
+            onClick={() => setShowMusicPicker(true)}
+            className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-purple-400 transition cursor-pointer"
+            title="Select Music"
+          >
+            <Music className="w-5 h-5" />
+          </button>
+
+          {/* Doodle Draw */}
+          {mediaPreview && mode === "media" && (
+            <button
+              onClick={() => setShowDrawCanvas(!showDrawCanvas)}
+              className={`p-2 rounded-full transition cursor-pointer ${
+                showDrawCanvas ? "bg-rose-600 text-white" : "bg-white/10 hover:bg-white/20 text-amber-400"
+              }`}
+              title="Draw Sketch"
+            >
+              <Pencil className="w-5 h-5" />
+            </button>
+          )}
+
+          {/* Download to Device */}
+          {mediaPreview && (
+            <button
+              onClick={handleDownloadStory}
+              className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+              title="Save to Device"
+            >
+              <Download className="w-5 h-5" />
+            </button>
           )}
         </div>
       </div>
 
-      {/* CENTER CREATIVE VIEWPORT */}
-      <div 
+      {/* CENTER CREATIVE CANVAS VIEWPORT */}
+      <div
         onClick={() => setSelectedStickerIdx(null)}
-        onMouseDown={handleViewportTouchStart}
-        onMouseUp={handleViewportTouchEnd}
-        onTouchStart={handleViewportTouchStart}
-        onTouchEnd={handleViewportTouchEnd}
-        className="flex-1 min-h-0 relative flex items-center justify-center p-2 cursor-default select-none touch-none"
+        className="flex-1 min-h-0 relative flex items-center justify-center p-2 sm:p-4 select-none touch-none"
       >
         {mode === "text" ? (
-          /* TEXT STORY EDITOR */
+          /* TEXT STORY THEMED CANVAS */
           <div
             ref={containerRef}
             onClick={(e) => e.stopPropagation()}
-            className={`w-auto h-full max-h-[55vh] sm:max-h-[60vh] aspect-[9/16] rounded-3xl bg-gradient-to-tr ${GRADIENTS[gradientIdx]} flex flex-col items-center justify-center p-6 shadow-2xl relative border border-white/10 overflow-hidden`}
+            className={`w-full max-w-[420px] h-full max-h-[82vh] aspect-[9/16] rounded-3xl bg-gradient-to-tr ${activeTheme.gradient} flex flex-col items-center justify-between p-6 shadow-2xl relative border border-white/15 overflow-hidden`}
           >
-            <textarea
-              rows={4}
-              value={textContent}
-              onChange={(e) => setTextContent(e.target.value)}
-              placeholder="Type your story..."
-              className={`w-full bg-transparent text-center text-3xl font-extrabold outline-none resize-none placeholder-white/55 ${selectedFont.className}`}
-              style={{ color: textColor }}
-            />
+            {/* Top Text Style Controls (Font, Alignment, Highlight Style) */}
+            <div className="w-full flex items-center justify-between z-30 pt-2">
+              {/* Font Picker */}
+              <div className="flex items-center gap-1 overflow-x-auto hide-scrollbar max-w-[180px]">
+                {FONTS.map((font) => (
+                  <button
+                    key={font.id}
+                    onClick={() => setSelectedFont(font)}
+                    className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition whitespace-nowrap ${
+                      selectedFont.id === font.id
+                        ? "bg-white text-black shadow"
+                        : "bg-black/30 text-white/80 hover:text-white"
+                    }`}
+                  >
+                    {font.name}
+                  </button>
+                ))}
+              </div>
+
+              {/* Text Highlight & Align Toggles */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => {
+                    const styles = ["transparent", "solid", "glass", "neon"];
+                    const next = styles[(styles.indexOf(highlightStyle) + 1) % styles.length];
+                    setHighlightStyle(next);
+                  }}
+                  className="px-2 py-1 bg-black/40 hover:bg-black/60 rounded-xl text-[10px] font-bold text-white border border-white/10 transition"
+                  title="Toggle Highlight Banner"
+                >
+                  <Quote className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => {
+                    const aligns = ["left", "center", "right"];
+                    const next = aligns[(aligns.indexOf(textAlign) + 1) % aligns.length];
+                    setTextAlign(next);
+                  }}
+                  className="p-1.5 bg-black/40 hover:bg-black/60 rounded-xl text-white border border-white/10 transition"
+                >
+                  {textAlign === "left" ? (
+                    <AlignLeft className="w-3.5 h-3.5" />
+                  ) : textAlign === "right" ? (
+                    <AlignRight className="w-3.5 h-3.5" />
+                  ) : (
+                    <AlignCenter className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Main Interactive Text Area with Active Highlight Styling */}
+            <div className="w-full my-auto z-20 flex justify-center">
+              <div className={`w-full max-w-sm ${getHighlightClass()}`}>
+                <textarea
+                  rows={4}
+                  value={textContent}
+                  onChange={(e) => setTextContent(e.target.value)}
+                  placeholder="Type your story..."
+                  className={`w-full bg-transparent text-2xl sm:text-3xl font-extrabold outline-none resize-none placeholder-white/50 leading-relaxed ${selectedFont.className}`}
+                  style={{ color: textColor, textAlign }}
+                />
+              </div>
+            </div>
 
             {renderStickersInEditor()}
 
-            {/* Background Color Preview Dots Tray */}
-            <div className="absolute bottom-6 flex items-center justify-center gap-3 bg-surface-overlay backdrop-blur-md p-2.5 px-4 rounded-full border border-white/10 z-40 max-w-[90%] overflow-x-auto">
-              {GRADIENTS.map((g, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setGradientIdx(idx)}
-                  className={`w-7 h-7 rounded-full bg-gradient-to-tr ${g} border-2 transition-all transform hover:scale-115 active:scale-90 cursor-pointer ${
-                    gradientIdx === idx ? "border-white scale-110 shadow-lg shadow-white/30" : "border-transparent"
-                  }`}
-                />
-              ))}
+            {/* Bottom Color Palette Swatches */}
+            <div className="w-full flex items-center justify-center gap-2.5 z-30 pb-2">
+              <div className="flex items-center gap-2 bg-black/50 backdrop-blur-md p-2 px-3.5 rounded-full border border-white/15 overflow-x-auto hide-scrollbar max-w-[90%]">
+                {COLORS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setTextColor(c)}
+                    style={{ backgroundColor: c }}
+                    className={`w-5 h-5 rounded-full border-2 transition-transform cursor-pointer shrink-0 ${
+                      textColor === c ? "border-white scale-125 shadow-lg" : "border-transparent"
+                    }`}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         ) : (
-          /* MEDIA EDITOR & LIVE CAMERA VIEWPORT */
-          <div 
+          /* MEDIA CANVAS & CAMERA VIEWPORT */
+          <div
             ref={containerRef}
             onClick={(e) => e.stopPropagation()}
-            className="relative w-auto h-full max-h-[55vh] sm:max-h-[60vh] aspect-[9/16] rounded-3xl bg-surface-inset border border-border/80 shadow-2xl overflow-hidden flex items-center justify-center"
+            className="relative w-full max-w-[420px] h-full max-h-[82vh] aspect-[9/16] rounded-3xl bg-zinc-950 border border-white/10 shadow-2xl overflow-hidden flex items-center justify-center"
           >
             {useCamera ? (
-              /* Live Camera View */
+              /* Live Camera Viewport */
               <div className="relative w-full h-full">
-                <video 
-                  ref={videoRef} 
-                  autoPlay 
-                  playsInline 
-                  className={`w-full h-full object-cover rounded-3xl transform ${facingMode === "user" ? "scale-x-[-1]" : ""}`} 
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  className={`w-full h-full object-cover rounded-3xl ${facingMode === "user" ? "scale-x-[-1]" : ""}`}
                 />
-                
-                {/* Camera Overlay HUD */}
+
+                {/* Camera HUD Controls */}
                 <div className="absolute inset-x-0 bottom-6 z-40 flex items-center justify-around px-8">
                   <button
                     onClick={flipCamera}
-                    className="p-3 bg-bg/40 backdrop-blur border border-white/20 text-text rounded-full hover:bg-surface-overlay transition active:scale-90 cursor-pointer"
+                    className="p-3 bg-black/40 backdrop-blur-md border border-white/20 text-white rounded-full hover:bg-black/60 transition cursor-pointer"
                     title="Flip Camera"
                   >
                     <RotateCw className="w-6 h-6" />
@@ -1033,15 +1012,15 @@ export const StoryCreator = ({ onClose, initialState }) => {
 
                   <button
                     onClick={capturePhoto}
-                    className="w-18 h-18 rounded-full border-4 border-white flex items-center justify-center p-1 cursor-pointer bg-white/10 hover:bg-white/20 active:scale-90 transition"
-                    title="Take Snapshot"
+                    className="w-18 h-18 rounded-full border-4 border-white flex items-center justify-center p-1 cursor-pointer bg-white/20 hover:bg-white/30 active:scale-95 transition"
+                    title="Take Photo"
                   >
-                    <div className="w-full h-full bg-card rounded-full shadow" />
+                    <div className="w-full h-full bg-white rounded-full shadow" />
                   </button>
 
                   <button
                     onClick={stopCamera}
-                    className="p-3 bg-bg/40 backdrop-blur border border-white/20 text-text rounded-full hover:bg-surface-overlay transition active:scale-90 cursor-pointer"
+                    className="p-3 bg-black/40 backdrop-blur-md border border-white/20 text-white rounded-full hover:bg-black/60 transition cursor-pointer"
                     title="Close Camera"
                   >
                     <X className="w-6 h-6" />
@@ -1049,75 +1028,54 @@ export const StoryCreator = ({ onClose, initialState }) => {
                 </div>
               </div>
             ) : mediaPreview ? (
-              /* Media File Preview with Filters */
+              /* Image / Video Preview with Filter */
               mediaType === "image" ? (
                 <img
                   src={mediaPreview}
                   alt=""
-                  className={`w-full h-full object-cover pointer-events-none transition-all duration-300 ${resolvedFilterClass}`}
+                  className={`w-full h-full object-cover pointer-events-none transition-all duration-200 ${resolvedFilterClass}`}
                 />
               ) : (
                 <video src={mediaPreview} controls autoPlay loop className="w-full h-full object-cover" />
               )
             ) : (
-              /* Drag & Drop Import Picker Box */
-              <div className="flex flex-col items-center justify-center gap-6 text-center p-6 w-full h-full select-none">
-                <div 
+              /* Media Import Box */
+              <div className="flex flex-col items-center justify-center gap-5 text-center p-6 w-full h-full">
+                <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex flex-col items-center justify-center gap-4 text-center p-6 border border-dashed border-border rounded-2xl cursor-pointer group hover:bg-surface/50 hover:border-border-strong transition w-4/5"
+                  className="flex flex-col items-center justify-center gap-3 text-center p-6 border-2 border-dashed border-zinc-700 hover:border-zinc-500 rounded-3xl cursor-pointer transition w-4/5 group"
                 >
-                  <div className="w-14 h-14 rounded-2xl bg-surface border border-border flex items-center justify-center text-rose-500 group-hover:scale-110 transition shadow-xl">
+                  <div className="w-14 h-14 rounded-2xl bg-zinc-800 flex items-center justify-center text-rose-500 group-hover:scale-110 transition shadow-xl">
                     <ImageIcon className="w-7 h-7" />
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-xs font-bold text-text">Import from Device</p>
-                    <p className="text-[10px] text-text-muted">Tap to upload photo or video</p>
+                  <div>
+                    <p className="text-sm font-bold text-white">Import Photos & Videos</p>
+                    <p className="text-[10px] text-zinc-400">Select multiple files from device</p>
                   </div>
                 </div>
 
-                <div 
+                <div
                   onClick={startCamera}
-                  className="flex flex-col items-center justify-center gap-4 text-center p-6 border border-dashed border-border rounded-2xl cursor-pointer group hover:bg-surface/50 hover:border-border-strong transition w-4/5"
+                  className="flex flex-col items-center justify-center gap-3 text-center p-6 border-2 border-dashed border-zinc-700 hover:border-zinc-500 rounded-3xl cursor-pointer transition w-4/5 group"
                 >
-                  <div className="w-14 h-14 rounded-2xl bg-surface border border-border flex items-center justify-center text-purple-400 group-hover:scale-110 transition shadow-xl">
+                  <div className="w-14 h-14 rounded-2xl bg-zinc-800 flex items-center justify-center text-purple-400 group-hover:scale-110 transition shadow-xl">
                     <Camera className="w-7 h-7" />
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-xs font-bold text-text">Open Live Camera</p>
-                    <p className="text-[10px] text-text-muted">Capture using your webcam</p>
+                  <div>
+                    <p className="text-sm font-bold text-white">Open Live Camera</p>
+                    <p className="text-[10px] text-zinc-400">Capture with your camera</p>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* SHARED REEL / POST OVERLAY BADGES - Clean Top Left Author & Bottom Watch Link */}
-            {sharedEntityData && (
-              <>
-                <div className="absolute top-4 left-4 z-35 flex items-center gap-2 bg-black/60 backdrop-blur-md border border-white/20 px-3 py-1.5 rounded-full shadow-lg pointer-events-none select-none">
-                  <img
-                    src={sharedEntityData.authorAvatar || dp}
-                    alt=""
-                    className="w-6 h-6 rounded-full object-cover border border-white/40"
-                  />
-                  <span className="text-xs font-bold text-white tracking-tight">
-                    @{sharedEntityData.authorName || "user"}
-                  </span>
-                </div>
-
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-35 flex items-center gap-1.5 bg-black/60 backdrop-blur-md border border-white/20 px-3.5 py-1 rounded-full shadow-lg text-[11px] font-bold text-white pointer-events-none select-none">
-                  <span>Watch Reel</span>
-                  <span className="text-rose-400 font-extrabold">&rarr;</span>
-                </div>
-              </>
-            )}
-
-            {/* DOODLE CANVAS DRAWING OVERLAY */}
+            {/* Doodle Drawing Canvas */}
             {showDrawCanvas && mediaPreview && (
               <div className="absolute inset-0 z-30">
                 <canvas
                   ref={canvasRef}
                   width={400}
-                  height={640}
+                  height={680}
                   onMouseDown={startDrawing}
                   onMouseMove={draw}
                   onMouseUp={stopDrawing}
@@ -1133,28 +1091,39 @@ export const StoryCreator = ({ onClose, initialState }) => {
                   onTouchEnd={stopDrawing}
                   className="w-full h-full cursor-crosshair"
                 />
-                
-                {/* Clear canvas helper */}
-                <button
-                  onClick={clearCanvas}
-                  className="absolute top-4 left-4 z-40 bg-surface-overlay hover:bg-bg border border-white/20 text-text rounded-full px-3 py-1 text-[10px] font-bold cursor-pointer transition active:scale-95"
-                >
-                  Clear Sketch
-                </button>
+
+                {/* Doodle Controls (Color & Clear) */}
+                <div className="absolute top-4 inset-x-4 z-40 flex items-center justify-between">
+                  <button
+                    onClick={clearCanvas}
+                    className="bg-black/70 border border-white/20 text-white rounded-full px-3 py-1 text-[10px] font-bold cursor-pointer"
+                  >
+                    Clear Sketch
+                  </button>
+                  <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur p-1.5 rounded-full">
+                    {["#f43f5e", "#3b82f6", "#10b981", "#eab308", "#ffffff"].map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setBrushColor(c)}
+                        style={{ backgroundColor: c }}
+                        className={`w-4 h-4 rounded-full border ${brushColor === c ? "border-white scale-125" : "border-transparent"}`}
+                      />
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* STICKERS LIVE CREATOR PREVIEW OVERLAY */}
+            {/* Stickers Overlay */}
             {mediaPreview && renderStickersInEditor()}
 
-            {/* DRAG DELETION TRASH BIN NOTIFIER */}
+            {/* Trash Bin for Drag Deletion */}
             {activeDragIdx !== null && (
-              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 bg-red-600/90 border border-red-500 text-text rounded-full p-3.5 shadow-2xl flex items-center justify-center animate-pulse scale-110">
-                <Trash2 className="w-5 h-5 text-text" />
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 bg-red-600/90 border border-red-500 text-white rounded-full p-3.5 shadow-2xl flex items-center justify-center animate-pulse scale-110">
+                <Trash2 className="w-5 h-5" />
               </div>
             )}
 
-            {/* File Input */}
             <input
               type="file"
               ref={fileInputRef}
@@ -1163,65 +1132,60 @@ export const StoryCreator = ({ onClose, initialState }) => {
               multiple
               hidden
             />
+            <input
+              type="file"
+              ref={additionalFileInputRef}
+              accept="image/*,video/*"
+              onChange={handleFileSelect}
+              multiple
+              hidden
+            />
           </div>
         )}
 
-        {/* FLOAT SCALE SLIDER */}
+        {/* Sticker Scale Slider */}
         {selectedStickerIdx !== null && stickers[selectedStickerIdx] && (
-          <div 
+          <div
             onClick={(e) => e.stopPropagation()}
-            className="absolute right-4 sm:right-12 top-1/2 -translate-y-1/2 z-50 bg-bg/85 backdrop-blur-md p-3.5 py-5 rounded-2xl border border-white/10 flex flex-col items-center gap-3.5 shadow-2xl min-h-[220px]"
+            className="absolute right-4 top-1/2 -translate-y-1/2 z-50 bg-black/85 backdrop-blur-md p-3.5 py-4 rounded-2xl border border-white/10 flex flex-col items-center gap-3 shadow-2xl"
           >
-            <span className="text-[9px] uppercase font-black tracking-widest text-text-secondary">Scale</span>
-            <input 
+            <span className="text-[8px] uppercase font-bold text-zinc-400">Scale</span>
+            <input
               type="range"
               min="0.4"
-              max="3"
+              max="2.5"
               step="0.05"
               value={stickers[selectedStickerIdx]?.scale || 1}
               onChange={(e) => {
                 const val = parseFloat(e.target.value);
                 setItems((prev) => {
-                  if (mode === "text") {
-                    const next = [...prev];
-                    if (next[0] && next[0].stickers[selectedStickerIdx]) {
-                      next[0].stickers[selectedStickerIdx].scale = val;
-                    }
-                    return next;
-                  } else {
-                    if (!prev[activeIndex]) return prev;
-                    const next = [...prev];
-                    next[activeIndex].stickers[selectedStickerIdx].scale = val;
-                    return next;
-                  }
+                  if (!prev[activeIndex]) return prev;
+                  const next = [...prev];
+                  next[activeIndex].stickers[selectedStickerIdx].scale = val;
+                  return next;
                 });
               }}
-              className="w-32 cursor-pointer accent-rose-500 appearance-none bg-surface-hover rounded-full h-1"
-              style={{ writingMode: "bt-lr" }}
+              className="w-24 cursor-pointer accent-rose-500 appearance-none bg-zinc-700 rounded-full h-1"
             />
-            <span className="text-[10px] font-bold text-text font-mono">
-              {Math.round((stickers[selectedStickerIdx]?.scale || 1) * 100)}%
-            </span>
             <button
               onClick={() => setSelectedStickerIdx(null)}
-              className="p-1.5 bg-surface-hover hover:bg-surface-active rounded-full border border-white/10 text-text transition cursor-pointer"
-              title="Close editor"
+              className="p-1 bg-zinc-800 rounded-full text-white"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-3 h-3" />
             </button>
           </div>
         )}
       </div>
 
-      {/* Selected Items Thumbnail Queue Row */}
-      {items.length > 1 && (
-        <div className="w-full shrink-0 flex items-center justify-center gap-3 px-6 py-2 bg-black/45 border-t border-border overflow-x-auto hide-scrollbar">
+      {/* MULTI-SLIDE BATCH QUEUE THUMBNAILS (When multiple items exist) */}
+      {items.length > 1 && mode === "media" && (
+        <div className="w-full shrink-0 flex items-center justify-center gap-2.5 px-6 py-2 bg-black/70 border-t border-zinc-800 overflow-x-auto hide-scrollbar z-40">
           {items.map((item, index) => (
             <div
               key={index}
               onClick={() => setActiveIndex(index)}
-              className={`relative w-12 h-16 rounded-lg border-2 cursor-pointer transition transform hover:scale-105 active:scale-95 shrink-0 overflow-hidden ${
-                activeIndex === index ? "border-rose-500 scale-105" : "border-border opacity-60"
+              className={`relative w-11 h-14 rounded-xl border-2 cursor-pointer transition transform hover:scale-105 shrink-0 overflow-hidden ${
+                activeIndex === index ? "border-rose-500 scale-105" : "border-zinc-700 opacity-60"
               }`}
             >
               {item.mediaType === "image" ? (
@@ -1229,45 +1193,47 @@ export const StoryCreator = ({ onClose, initialState }) => {
               ) : (
                 <video src={item.preview} className="w-full h-full object-cover" muted />
               )}
-              <span className="absolute bottom-0.5 right-0.5 bg-surface-overlay text-text text-[8px] font-black px-1.5 py-0.5 rounded-full">
-                {index + 1}
-              </span>
+              <button
+                onClick={(e) => handleRemoveSlide(index, e)}
+                className="absolute top-0.5 right-0.5 p-0.5 bg-black/70 hover:bg-red-600 rounded-full text-white transition"
+              >
+                <X className="w-2.5 h-2.5" />
+              </button>
             </div>
           ))}
+
+          {/* Add more slides button */}
+          <button
+            onClick={() => additionalFileInputRef.current?.click()}
+            className="w-11 h-14 rounded-xl border-2 border-dashed border-zinc-700 hover:border-zinc-500 flex items-center justify-center text-zinc-400 hover:text-white transition shrink-0"
+            title="Add another slide"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
         </div>
       )}
 
-      {/* COLOR PICKER DRAWER OR FILTERS ROW DISPLAY */}
+      {/* FILTERS CAROUSEL ROW */}
       {mediaPreview && mode === "media" && (
-        <div className="w-full shrink-0 flex items-center justify-start overflow-x-auto gap-4 px-6 bg-surface-inset border-t border-border/60 hide-scrollbar py-4 z-40 relative">
+        <div className="w-full shrink-0 flex items-center justify-start overflow-x-auto gap-3 px-6 bg-black/90 border-t border-zinc-900 hide-scrollbar py-2 z-40">
           {FILTERS.map((f) => (
             <button
               key={f.id}
               onClick={() => handleSetFilter(f.id)}
-              className="flex flex-col items-center gap-2 shrink-0 transition group cursor-pointer p-1"
+              className="flex flex-col items-center gap-1 shrink-0 cursor-pointer p-1"
             >
-              {/* Live Preview Thumbnail Circle with Ring Wrapper */}
-              <div className={`relative p-0.5 rounded-full transition-all duration-200 ${
-                filter === f.id ? "bg-gradient-to-tr from-rose-500 via-pink-500 to-amber-400 scale-105 shadow-xl shadow-rose-500/20" : "bg-transparent group-hover:bg-surface-hover"
-              }`}>
-                <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-bg">
-                  {mediaType === "image" ? (
-                    <img
-                      src={mediaPreview}
-                      className={`w-full h-full object-cover ${f.class}`}
-                      alt=""
-                    />
-                  ) : (
-                    <div className="relative w-full h-full bg-surface-inset flex items-center justify-center">
-                      <video src={mediaPreview} className={`w-full h-full object-cover pointer-events-none ${f.class}`} muted />
-                      <div className="absolute inset-0 bg-black/10" />
-                    </div>
-                  )}
-                </div>
+              <div
+                className={`w-11 h-11 rounded-full overflow-hidden border-2 transition-transform ${
+                  filter === f.id ? "border-rose-500 scale-110 ring-2 ring-rose-500/40" : "border-zinc-700"
+                }`}
+              >
+                {mediaType === "image" ? (
+                  <img src={mediaPreview} className={`w-full h-full object-cover ${f.class}`} alt="" />
+                ) : (
+                  <video src={mediaPreview} className={`w-full h-full object-cover ${f.class}`} muted />
+                )}
               </div>
-              <span className={`text-[10px] font-extrabold tracking-tight transition ${
-                filter === f.id ? "text-text font-black" : "text-text-secondary group-hover:text-text"
-              }`}>
+              <span className={`text-[8px] font-bold ${filter === f.id ? "text-rose-400" : "text-zinc-400"}`}>
                 {f.name}
               </span>
             </button>
@@ -1275,51 +1241,89 @@ export const StoryCreator = ({ onClose, initialState }) => {
         </div>
       )}
 
-      {/* BOTTOM PUBLISH HUD BAR */}
-      <div className="h-20 shrink-0 px-6 bg-surface-inset border-t border-border/60 flex items-center justify-between z-50">
-        
-        {/* Privacy Switcher */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setVisibleTo("public")}
-            className={`px-3.5 py-2 rounded-full text-xs font-extrabold transition cursor-pointer ${
-              visibleTo === "public" ? "bg-rose-600 text-text shadow-lg" : "bg-surface text-text-secondary hover:text-text"
-            }`}
-          >
-            Your Story
-          </button>
-          <button
-            onClick={() => setVisibleTo("closeFriends")}
-            className={`px-3.5 py-2 rounded-full text-xs font-extrabold transition flex items-center gap-1 cursor-pointer ${
-              visibleTo === "closeFriends" ? "bg-emerald-600 text-text shadow-lg border border-emerald-500/20" : "bg-surface text-text-secondary hover:text-text"
-            }`}
-          >
-            <Star className="w-3.5 h-3.5 fill-current text-emerald-400" />
-            <span>Close Friends</span>
-          </button>
-        </div>
-
-        {/* Share Button */}
+      {/* BOTTOM 1-TAP PUBLISHING DOCK (Instagram Style) */}
+      <div className="h-18 shrink-0 px-6 bg-black border-t border-zinc-900 flex items-center justify-between z-50">
+        {/* Your Story */}
         <button
+          onClick={() => {
+            setVisibleTo("public");
+            handlePublishStory();
+          }}
           disabled={isLoading || (items.length === 0 && mode === "media" && !useCamera)}
-          onClick={handlePublishStory}
-          className="px-6 py-3.5 bg-gradient-to-tr from-pink-500 via-rose-500 to-purple-600 hover:scale-105 active:scale-95 text-text text-xs font-extrabold rounded-full shadow-2xl transition flex items-center gap-2 cursor-pointer disabled:opacity-50 min-w-[140px] justify-center"
+          className="flex items-center gap-2 px-4 py-2 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-white text-xs font-bold transition cursor-pointer disabled:opacity-50"
         >
-          {isLoading ? (
-            <div className="flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-text" />
-              <span className="text-[10px] uppercase font-bold tracking-tight">{uploadProgressText || "Sharing..."}</span>
-            </div>
-          ) : (
-            <>
-              <span>Share Story</span>
-              <Send className="w-4 h-4" />
-            </>
-          )}
+          <img src={userData?.user?.profileImage?.url || dp} className="w-5 h-5 rounded-full object-cover" alt="" />
+          <span>Your Story</span>
+        </button>
+
+        {/* Close Friends */}
+        <button
+          onClick={() => {
+            setVisibleTo("closeFriends");
+            handlePublishStory();
+          }}
+          disabled={isLoading || (items.length === 0 && mode === "media" && !useCamera)}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-emerald-950/80 hover:bg-emerald-900/80 border border-emerald-500/40 text-emerald-400 text-xs font-bold transition cursor-pointer disabled:opacity-50"
+        >
+          <Star className="w-3.5 h-3.5 fill-current text-emerald-400" />
+          <span>Close Friends</span>
+        </button>
+
+        {/* Send / Share button */}
+        <button
+          onClick={handlePublishStory}
+          disabled={isLoading || (items.length === 0 && mode === "media" && !useCamera)}
+          className="w-10 h-10 rounded-full bg-white hover:bg-zinc-200 text-black flex items-center justify-center shadow-lg transition cursor-pointer disabled:opacity-50"
+          title="Share Story"
+        >
+          {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 text-black" />}
         </button>
       </div>
 
-      {/* STORY STICKERS DRAWER MODAL */}
+      {/* THEMES & TEMPLATES MODAL DRAWER (Text Story Mode) */}
+      {showThemesDrawer && (
+        <div
+          className="fixed inset-0 z-[600] bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={() => setShowThemesDrawer(false)}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-800 rounded-t-3xl sm:rounded-3xl p-5 max-w-md w-full shadow-2xl space-y-4 text-white"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-rose-500" />
+                <span>Choose Story Theme Template</span>
+              </h3>
+              <button
+                onClick={() => setShowThemesDrawer(false)}
+                className="p-1 rounded-full text-zinc-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2.5 max-h-[350px] overflow-y-auto hide-scrollbar">
+              {TEXT_THEMES.map((theme) => (
+                <div
+                  key={theme.id}
+                  onClick={() => handleSelectTheme(theme)}
+                  className={`relative aspect-[9/14] rounded-2xl bg-gradient-to-tr ${theme.gradient} p-2 flex flex-col items-center justify-between cursor-pointer border-2 transition-all hover:scale-105 ${
+                    activeTheme.id === theme.id ? "border-white scale-105 shadow-xl shadow-white/20" : "border-transparent opacity-80 hover:opacity-100"
+                  }`}
+                >
+                  <span className="text-xl mt-2">{theme.icon}</span>
+                  <span className="text-[10px] font-extrabold text-white text-center drop-shadow leading-tight mb-1">
+                    {theme.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STICKERS DRAWER */}
       {showStickersDrawer && (
         <StoryStickersDrawer
           open={showStickersDrawer}
@@ -1328,16 +1332,21 @@ export const StoryCreator = ({ onClose, initialState }) => {
         />
       )}
 
-      {/* STORY MUSIC PICKER MODAL */}
+      {/* MUSIC PICKER MODAL */}
       {showMusicPicker && (
         <StoryMusicPickerModal
           open={showMusicPicker}
           onClose={() => setShowMusicPicker(false)}
           selectedMusic={selectedMusic}
+          contentContext={{
+            caption: mode === "text" ? textContent : customOverlayText,
+            mediaName: activeItem?.file?.name || activeItem?.preview || "",
+            mediaType: mode === "text" ? "text" : mediaType,
+            theme: activeTheme?.id || "",
+          }}
           onSelectMusic={(song) => {
             setSelectedMusic(song);
             toast.success(`Music Selected: ${song.title}`);
-            // Add a draggable music sticker to the story canvas
             handleAddSticker({
               type: "music_sticker",
               music_sticker: {
@@ -1347,6 +1356,42 @@ export const StoryCreator = ({ onClose, initialState }) => {
             });
           }}
         />
+      )}
+
+      {/* ADD TEXT OVERLAY MODAL */}
+      {showTextModal && (
+        <div
+          className="fixed inset-0 z-[600] bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
+          onClick={() => setShowTextModal(false)}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 text-white"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-bold">Add Text Overlay</h3>
+            <textarea
+              value={customOverlayText}
+              onChange={(e) => setCustomOverlayText(e.target.value)}
+              placeholder="Type text overlay..."
+              rows={3}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-2xl p-3 text-sm text-white outline-none focus:border-rose-500 resize-none"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowTextModal(false)}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-xs font-bold rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddTextOverlay}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-xs font-bold rounded-xl text-white"
+              >
+                Add Text
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
