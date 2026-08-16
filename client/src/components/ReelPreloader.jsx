@@ -1,11 +1,28 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
+import { getDataSaverMode } from "../lib/mediaQualitySettings";
 
-export const ReelPreloader = ({ loops = [], currentIndex = 0 }) => {
+export const ReelPreloader = ({ reels = [], currentIndex = 0 }) => {
+  const items = reels;
+  const [dataSaver, setDataSaver] = useState(getDataSaverMode());
+
   useEffect(() => {
+    const handleDataSaverChanged = (e) => {
+      setDataSaver(e.detail);
+    };
+    window.addEventListener("vybe-data-saver-changed", handleDataSaverChanged);
+    return () => {
+      window.removeEventListener("vybe-data-saver-changed", handleDataSaverChanged);
+    };
+  }, []);
+
+  useEffect(() => {
+    // If Data Saver is enabled, do NOT preload background videos to save mobile data
+    if (dataSaver) return;
+
     // Preload next 2 videos in the feed
     const preloadUrls = [];
-    if (loops[currentIndex + 1]?.media?.url) preloadUrls.push(loops[currentIndex + 1].media.url);
-    if (loops[currentIndex + 2]?.media?.url) preloadUrls.push(loops[currentIndex + 2].media.url);
+    if (items[currentIndex + 1]?.media?.url) preloadUrls.push(items[currentIndex + 1].media.url);
+    if (items[currentIndex + 2]?.media?.url) preloadUrls.push(items[currentIndex + 2].media.url);
 
     preloadUrls.forEach((url) => {
       const link = document.createElement("link");
@@ -20,16 +37,16 @@ export const ReelPreloader = ({ loops = [], currentIndex = 0 }) => {
         }
       };
     });
-  }, [loops, currentIndex]);
+  }, [items, currentIndex]);
 
   return (
     <div className="hidden" aria-hidden="true">
       {/* Invisible video buffers to prime browser media cache */}
-      {loops[currentIndex + 1]?.media?.url && (
-        <video src={loops[currentIndex + 1].media.url} preload="auto" muted playsInline />
+      {items[currentIndex + 1]?.media?.url && (
+        <video src={items[currentIndex + 1].media.url} preload="auto" muted playsInline />
       )}
-      {loops[currentIndex + 2]?.media?.url && (
-        <video src={loops[currentIndex + 2].media.url} preload="auto" muted playsInline />
+      {items[currentIndex + 2]?.media?.url && (
+        <video src={items[currentIndex + 2].media.url} preload="auto" muted playsInline />
       )}
     </div>
   );

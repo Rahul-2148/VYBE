@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, Music, X, Sparkles, Trash2, Send, Play, Pause, Volume2, VolumeX } from "lucide-react";
 import { useSelector } from "react-redux";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import StoryMusicPickerModal from "./StoryMusicPickerModal";
 import dp from "../assets/dp3.png";
@@ -60,14 +60,14 @@ export const NotesBar = () => {
       });
 
       if (res.data.success) {
-        toast.success("Note shared with music! ✨");
+        snackbar.success("Note shared with music! ✨");
         setShowNoteModal(false);
         setNoteText("");
         setSelectedMusic(null);
         fetchNotes();
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to post note.");
+      snackbar.error(err.response?.data?.message || "Failed to post note.");
     } finally {
       setPosting(false);
     }
@@ -76,12 +76,12 @@ export const NotesBar = () => {
   const handleDeleteMyNote = async () => {
     try {
       await api.delete("/note");
-      toast.success("Note deleted.");
+      snackbar.success("Note deleted.");
       setShowNoteModal(false);
       fetchNotes();
     } catch (e) {
       console.warn("NotesBar: handleDeleteMyNote failed", e);
-      toast.error("Failed to delete note.");
+      snackbar.error("Failed to delete note.");
     }
   };
 
@@ -226,7 +226,7 @@ export const NotesBar = () => {
       <AnimatePresence>
         {activePlayingNote && (
           <div
-            className="fixed inset-0 z-[650] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-[650] bg-surface-overlay backdrop-blur-sm flex items-center justify-center p-4"
             onClick={closeNotePlayback}
           >
             <motion.div
@@ -234,35 +234,35 @@ export const NotesBar = () => {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-xs bg-zinc-900 border border-zinc-800 rounded-3xl p-5 text-white shadow-2xl space-y-4 text-center"
+              className="w-full max-w-xs bg-surface border border-border rounded-3xl p-5 text-text shadow-2xl space-y-4 text-center"
             >
-              <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-                <span className="text-xs font-bold text-zinc-400">
+              <div className="flex items-center justify-between border-b border-border pb-2">
+                <span className="text-xs font-bold text-text-secondary">
                   @{activePlayingNote.user?.userName}'s Note
                 </span>
-                <button onClick={closeNotePlayback} className="p-1 text-zinc-400 hover:text-white">
+                <button onClick={closeNotePlayback} className="p-1 text-text-muted hover:text-text rounded-full hover:bg-surface-hover">
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
               <div className="py-2">
-                <p className="text-base font-extrabold text-white leading-relaxed">
+                <p className="text-base font-extrabold text-text leading-relaxed">
                   "{activePlayingNote.text}"
                 </p>
               </div>
 
               {/* Soundtrack Preview Card */}
               {activePlayingNote.music && (
-                <div className="bg-zinc-950 border border-zinc-800 p-3 rounded-2xl flex items-center justify-between shadow-inner">
+                <div className="bg-surface-hover border border-border p-3 rounded-2xl flex items-center justify-between shadow-xs">
                   <div className="flex items-center gap-2.5 text-left min-w-0">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-rose-500 to-purple-600 flex items-center justify-center animate-spin-slow shrink-0 shadow">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-rose-500 to-purple-600 flex items-center justify-center animate-spin-slow shrink-0 shadow-xs">
                       <Music className="w-4 h-4 text-white" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-xs font-bold text-rose-400 truncate">
+                      <p className="text-xs font-bold text-primary truncate">
                         {activePlayingNote.music.title}
                       </p>
-                      <p className="text-[10px] text-zinc-400 truncate">
+                      <p className="text-[10px] text-text-muted truncate">
                         {activePlayingNote.music.artist || "Soundtrack"}
                       </p>
                     </div>
@@ -281,9 +281,14 @@ export const NotesBar = () => {
                           }
                         }
                       }}
-                      className="p-2 rounded-full bg-zinc-800 hover:bg-zinc-700 text-white"
+                      className="p-2 bg-surface hover:bg-surface-hover text-text rounded-full transition shadow-xs cursor-pointer border border-border"
+                      title={isPlayingAudio ? "Pause" : "Play"}
                     >
-                      {isPlayingAudio ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+                      {isPlayingAudio ? (
+                        <Pause className="w-4 h-4" />
+                      ) : (
+                        <Play className="w-4 h-4 ml-0.5" />
+                      )}
                     </button>
                   )}
                 </div>
@@ -293,24 +298,28 @@ export const NotesBar = () => {
         )}
       </AnimatePresence>
 
-      {/* CREATE / UPDATE NOTE MODAL */}
+      {/* CREATE / EDIT NOTE MODAL */}
       <AnimatePresence>
         {showNoteModal && (
-          <div className="fixed inset-0 z-[650] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 z-[600] bg-surface-overlay backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => setShowNoteModal(false)}
+          >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-3xl p-5 text-white shadow-2xl space-y-4"
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm bg-surface border border-border rounded-3xl p-5 text-text shadow-2xl space-y-4"
             >
-              <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div className="flex items-center justify-between border-b border-border pb-3">
                 <div className="flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-pink-500" />
-                  <h3 className="text-sm font-bold">{myNote ? "Update Your Note" : "New Note"}</h3>
+                  <Sparkles className="w-5 h-5 text-primary" />
+                  <h3 className="text-sm font-bold text-text">{myNote ? "Update Your Note" : "New Note"}</h3>
                 </div>
                 <button
                   onClick={() => setShowNoteModal(false)}
-                  className="p-1 rounded-full text-zinc-400 hover:text-white"
+                  className="p-1 rounded-full text-text-muted hover:text-text hover:bg-surface-hover transition cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -318,22 +327,22 @@ export const NotesBar = () => {
 
               <form onSubmit={handlePostNote} className="space-y-3">
                 {/* Note Bubble Preview Card */}
-                <div className="bg-gradient-to-br from-zinc-950 to-zinc-900 border border-zinc-800 rounded-2xl p-4 text-center relative overflow-hidden">
-                  <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider mb-2">
+                <div className="bg-surface-hover border border-border rounded-2xl p-4 text-center relative overflow-hidden shadow-xs">
+                  <p className="text-[10px] text-text-muted font-bold uppercase tracking-wider mb-2">
                     Note Preview (60 chars)
                   </p>
-                  <p className="text-sm font-bold text-white min-h-[24px]">
+                  <p className="text-sm font-bold text-text min-h-[24px]">
                     {noteText || myNote?.text || "Share a thought..."}
                   </p>
 
                   {selectedMusic && (
-                    <div className="mt-3 inline-flex items-center gap-1.5 px-3 py-1 bg-black/60 border border-pink-500/30 rounded-full text-[10px] text-pink-300">
-                      <Music className="w-3 h-3 text-pink-400 animate-spin-slow" />
+                    <div className="mt-3 inline-flex items-center gap-1.5 px-3 py-1 bg-surface border border-primary/30 rounded-full text-[10px] text-primary shadow-xs">
+                      <Music className="w-3 h-3 text-primary animate-spin-slow" />
                       <span className="font-bold">{selectedMusic.title}</span>
                       <button
                         type="button"
                         onClick={() => setSelectedMusic(null)}
-                        className="ml-1 text-zinc-400 hover:text-white"
+                        className="ml-1 text-text-muted hover:text-text"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -347,7 +356,7 @@ export const NotesBar = () => {
                   placeholder="Share what's on your mind... (max 60 chars)"
                   value={noteText}
                   onChange={(e) => setNoteText(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 px-4 py-2.5 rounded-xl text-xs text-white placeholder-zinc-500 outline-none focus:border-pink-500"
+                  className="w-full bg-surface border border-border px-4 py-2.5 rounded-xl text-xs text-text placeholder:text-text-muted outline-none focus:border-primary transition shadow-xs"
                   autoFocus
                   required
                 />
@@ -356,15 +365,15 @@ export const NotesBar = () => {
                 <button
                   type="button"
                   onClick={() => setShowMusicPicker(true)}
-                  className="w-full flex items-center justify-between px-3.5 py-2.5 bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 rounded-xl text-xs text-white transition cursor-pointer"
+                  className="w-full flex items-center justify-between px-3.5 py-2.5 bg-surface hover:bg-surface-hover border border-border rounded-xl text-xs text-text transition cursor-pointer shadow-xs"
                 >
                   <div className="flex items-center gap-2">
-                    <Music className="w-4 h-4 text-pink-400" />
+                    <Music className="w-4 h-4 text-primary" />
                     <span className="font-bold">
                       {selectedMusic ? `${selectedMusic.title} - ${selectedMusic.artist}` : "Attach Soundtrack"}
                     </span>
                   </div>
-                  <span className="text-[10px] text-pink-400 font-bold">
+                  <span className="text-[10px] text-primary font-bold">
                     {selectedMusic ? "Change" : "Add"}
                   </span>
                 </button>
@@ -374,7 +383,7 @@ export const NotesBar = () => {
                     <button
                       type="button"
                       onClick={handleDeleteMyNote}
-                      className="p-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl transition cursor-pointer"
+                      className="p-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 rounded-xl transition cursor-pointer"
                       title="Delete Note"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -384,7 +393,7 @@ export const NotesBar = () => {
                   <button
                     type="submit"
                     disabled={posting || !noteText.trim()}
-                    className="flex-1 py-2.5 bg-gradient-to-r from-pink-500 via-rose-500 to-purple-600 font-bold rounded-xl text-xs shadow-lg transition cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1.5 text-white"
+                    className="flex-1 py-2.5 bg-primary hover:bg-primary-hover font-bold rounded-xl text-xs shadow-md transition cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1.5 text-white hover:scale-105 active:scale-95"
                   >
                     <Send className="w-3.5 h-3.5" />
                     <span>{myNote ? "Update Note" : "Share Note"}</span>
@@ -408,7 +417,7 @@ export const NotesBar = () => {
           }}
           onSelectMusic={(track) => {
             setSelectedMusic(track);
-            toast.success(`Attached "${track.title}" to your note! 🎵`);
+            snackbar.success(`Attached "${track.title}" to your note! 🎵`);
           }}
         />
       )}

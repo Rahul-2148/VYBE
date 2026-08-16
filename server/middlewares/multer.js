@@ -17,7 +17,7 @@ const storage = multer.diskStorage({
 
 export const upload = multer({
   storage,
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
+  limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB (1024MB) for high quality 4K & long-form VYBE TV videos
 });
 // Trigger nodemon reload
 

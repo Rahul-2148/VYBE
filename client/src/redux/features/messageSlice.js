@@ -71,31 +71,81 @@ const messageSlice = createSlice({
 
     addMessage(state, action) {
       const message = action.payload;
+      if (!message || !message._id) return;
       const convId = state.selectedChatUser.conversationId;
       // Handle both string and ObjectId comparisons
       const msgConvId = typeof message.conversation === "object"
-        ? message.conversation._id || message.conversation
+        ? message.conversation?._id || message.conversation
         : message.conversation;
 
-      if (
-        convId &&
-        msgConvId?.toString() === convId?.toString() &&
-        !state.messages.some((m) => m._id === message._id)
-      ) {
+      if (!convId || msgConvId?.toString() !== convId?.toString()) {
+        return;
+      }
+
+      // Check if message already exists by real _id
+      const existingIdx = state.messages.findIndex(
+        (m) => m._id?.toString() === message._id?.toString()
+      );
+      if (existingIdx !== -1) {
+        state.messages[existingIdx] = { ...state.messages[existingIdx], ...message };
+        return;
+      }
+
+      // Check if this incoming message matches an optimistic temp message
+      const optimisticIdx = state.messages.findIndex((m) => {
+        if (!m) return false;
+        if (message.clientMessageId && (m._id === message.clientMessageId || m.clientMessageId === message.clientMessageId)) {
+          return true;
+        }
+        // Match temp message with same text and sender
+        if (
+          typeof m._id === "string" &&
+          m._id.startsWith("temp_") &&
+          m.content?.text === message.content?.text &&
+          ((m.sender?._id || m.sender)?.toString() === (message.sender?._id || message.sender)?.toString())
+        ) {
+          return true;
+        }
+        return false;
+      });
+
+      if (optimisticIdx !== -1) {
+        // Replace optimistic placeholder with real confirmed message
+        state.messages[optimisticIdx] = message;
+      } else {
         state.messages.push(message);
       }
     },
 
     // Optimistic message — add immediately with temp ID, replace when server confirms
     addOptimisticMessage(state, action) {
-      state.messages.push(action.payload);
+      if (!action.payload) return;
+      // Ensure no existing message with same temp id exists
+      const exists = state.messages.some((m) => m._id === action.payload._id);
+      if (!exists) {
+        state.messages.push(action.payload);
+      }
     },
 
     replaceOptimisticMessage(state, action) {
       const { tempId, message } = action.payload;
-      const idx = state.messages.findIndex((m) => m._id === tempId);
-      if (idx !== -1) {
-        state.messages[idx] = message;
+      if (!message) return;
+
+      const alreadyHasReal = state.messages.some(
+        (m) => m._id?.toString() === message._id?.toString()
+      );
+      const tempIdx = state.messages.findIndex((m) => m._id === tempId);
+
+      if (tempIdx !== -1) {
+        if (alreadyHasReal) {
+          // Real message was already appended by socket; remove the optimistic duplicate
+          state.messages.splice(tempIdx, 1);
+        } else {
+          // Replace the optimistic placeholder with the real message
+          state.messages[tempIdx] = message;
+        }
+      } else if (!alreadyHasReal) {
+        state.messages.push(message);
       }
     },
 
@@ -313,7 +363,7 @@ const messageSlice = createSlice({
 
     updateConversationThemeInRedux(state, action) {
       const { conversationId, theme } = action.payload;
-      const conv = state.conversations.find((c) => c._id === conversationId);
+      const conv = state.conversations.find((c) => (c._id || c.conversationId)?.toString() === conversationId?.toString());
       if (conv) {
         conv.theme = theme;
       }

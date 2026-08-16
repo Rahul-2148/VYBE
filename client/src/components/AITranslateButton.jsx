@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Languages, RefreshCw } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
 export const AITranslateButton = ({ originalText }) => {
@@ -27,7 +27,7 @@ export const AITranslateButton = ({ originalText }) => {
         setIsTranslated(true);
       }
     } catch {
-      toast.error("Translation failed.");
+      snackbar.error("Translation failed.");
     } finally {
       setLoading(false);
     }

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Megaphone, X, DollarSign, ExternalLink, Sparkles, Check } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
 export const AdManagerModal = ({ isOpen, onClose, onCampaignCreated }) => {
@@ -18,7 +18,7 @@ export const AdManagerModal = ({ isOpen, onClose, onCampaignCreated }) => {
   const handleLaunchAd = async (e) => {
     e.preventDefault();
     if (!title || !mediaUrl || !targetUrl) {
-      toast.error("Please fill in campaign title, media URL, and target link.");
+      snackbar.error("Please fill in campaign title, media URL, and target link.");
       return;
     }
 
@@ -34,12 +34,12 @@ export const AdManagerModal = ({ isOpen, onClose, onCampaignCreated }) => {
       });
 
       if (res.data.success) {
-        toast.success(res.data.message);
+        snackbar.success(res.data.message);
         if (onCampaignCreated) onCampaignCreated(res.data.campaign);
         onClose();
       }
     } catch {
-      toast.error("Failed to launch campaign.");
+      snackbar.error("Failed to launch campaign.");
     } finally {
       setLoading(false);
     }
@@ -61,7 +61,7 @@ export const AdManagerModal = ({ isOpen, onClose, onCampaignCreated }) => {
                 <Megaphone className="w-5 h-5 text-text" />
               </div>
               <div>
-                <h2 className="text-lg font-bold">Meta Ad Manager</h2>
+                <h2 className="text-lg font-bold">VYBE Ad Manager</h2>
                 <p className="text-xs text-text-secondary">Launch Sponsored Feed Campaign</p>
               </div>
             </div>

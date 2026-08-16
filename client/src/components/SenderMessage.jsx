@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CheckCheck, CornerUpLeft, Edit2, EllipsisVertical, SmilePlus, Trash2, MapPin, ExternalLink, Heart, CornerUpRight, Pin, Clock } from "lucide-react";
+import { AlertTriangle, Check, CheckCheck, CornerUpLeft, Edit2, EllipsisVertical, SmilePlus, Trash2, MapPin, ExternalLink, Heart, CornerUpRight, Pin, Clock, Phone, Copy } from "lucide-react";
 import moment from "moment";
 import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
@@ -11,7 +11,9 @@ import "leaflet/dist/leaflet.css";
 import MediaLightboxModal from "./MediaLightboxModal";
 import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
 
-const EMOJIS = ["❤️", "😂", "👍", "🔥", "😢", "🙏", "👏", "💯", "✨", "🎉"];
+import { getChatThemeById } from "../lib/chatThemes";
+
+const EMOJIS = ["❤️", "😂", "🔥", "👍", "😢", "🙏", "👏", "🎉", "✨", "💯"];
 
 const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMessage, onForwardMessage }) => {
   const dispatch = useDispatch();
@@ -22,17 +24,10 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
     ? message.conversation._id || message.conversation.id
     : message.conversation;
   const currentConv = conversations.find((c) => (c._id || c.conversationId)?.toString() === convId?.toString());
-
-  const themeClassMap = {
-    default: "bg-gradient-to-r from-purple-600 via-pink-600 to-rose-500 text-white shadow-md shadow-pink-500/10",
-    sunset: "bg-gradient-to-r from-rose-500 via-amber-500 to-yellow-500 text-white shadow-md shadow-amber-500/10",
-    ocean: "bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/10",
-    forest: "bg-gradient-to-r from-emerald-500 via-teal-600 to-green-600 text-white shadow-md shadow-emerald-500/10",
-    lavender: "bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white shadow-md shadow-purple-500/10",
-    midnight: "bg-surface-hover border border-border-strong text-text shadow-md",
-  };
-
-  const bubbleThemeClass = themeClassMap[currentConv?.theme || "default"] || themeClassMap.default;
+  const activeTheme = currentConv?.theme || "default";
+  const themeObj = getChatThemeById(activeTheme);
+  const isGradientTheme = activeTheme !== "midnight";
+  const bubbleThemeClass = themeObj.senderBubble || "bg-gradient-to-r from-purple-600 via-pink-600 to-rose-500 text-white shadow-md";
 
   const [showOptions, setShowOptions] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
@@ -40,6 +35,19 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
   const [lightboxData, setLightboxData] = useState({ open: false, url: null, type: "image" });
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(message.content?.text || "");
+
+  const isContactRequest = message.type === "contact_request" || 
+    (typeof message.content?.text === "string" && (
+      message.content.text.includes("Contact Request") || 
+      message.content.text.includes("requested to view your phone number") ||
+      message.content.text.includes("requested your contact phone number")
+    ));
+
+  const isContactDecline = message.type === "contact_decline" || 
+    (typeof message.content?.text === "string" && message.content.text.includes("Declined contact request"));
+
+  const isContactCard = message.type === "contact" || 
+    Boolean(message.content?.contactData?.phone);
 
   const handleDoubleClick = async () => {
     triggerHaptic("like");
@@ -59,16 +67,22 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
   const reactionsRef = useRef(null);
   const reactionButtonRef = useRef(null);
   const messageRef = useRef(null);
-  const emojiPickerRef = useRef(null);
 
-  const mediaList = Array.isArray(message.content?.media)
+  const isSharedContent = Boolean(
+    message.type?.startsWith("shared_") ||
+    message.type === "share" ||
+    message.content?.sharedData ||
+    message.sharedData
+  );
+
+  const mediaList = isSharedContent
+    ? []
+    : Array.isArray(message.content?.media)
     ? message.content.media
     : message.content?.media
     ? [message.content.media]
-    : message.content?.sharedData?.mediaUrl
-    ? [{ url: message.content.sharedData.mediaUrl, type: message.type === "sticker" ? "sticker" : "image" }]
-    : message.sharedData?.mediaUrl
-    ? [{ url: message.sharedData.mediaUrl, type: message.type === "sticker" ? "sticker" : "image" }]
+    : message.type === "sticker" && (message.content?.mediaUrl || message.mediaUrl)
+    ? [{ url: message.content?.mediaUrl || message.mediaUrl, type: "sticker" }]
     : [];
 
   // Click outside handler
@@ -86,9 +100,7 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
         reactionsRef.current &&
         !reactionsRef.current.contains(event.target) &&
         reactionButtonRef.current &&
-        !reactionButtonRef.current.contains(event.target) &&
-        emojiPickerRef.current &&
-        !emojiPickerRef.current.contains(event.target)
+        !reactionButtonRef.current.contains(event.target)
       ) {
         setShowReactions(false);
       }
@@ -97,36 +109,6 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
-  // Position emoji picker above message
-  useEffect(() => {
-    if (showReactions && messageRef.current && emojiPickerRef.current) {
-      const messageRect = messageRef.current.getBoundingClientRect();
-      const pickerRect = emojiPickerRef.current.getBoundingClientRect();
-
-      let top = messageRect.top - pickerRect.height - 8;
-      let left =
-        messageRect.left + messageRect.width / 2 - pickerRect.width / 2;
-
-      // Viewport adjustments
-      const viewportWidth = window.innerWidth;
-
-      if (left + pickerRect.width > viewportWidth - 10) {
-        left = viewportWidth - pickerRect.width - 10;
-      }
-
-      if (left < 10) {
-        left = 10;
-      }
-
-      if (top < 10) {
-        top = messageRect.bottom + 8;
-      }
-
-      emojiPickerRef.current.style.top = `${top}px`;
-      emojiPickerRef.current.style.left = `${left}px`;
-    }
-  }, [showReactions]);
 
   const handleReact = async (emoji) => {
     try {
@@ -165,7 +147,7 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
 
   if (message.deletedForEveryone) {
     return (
-      <div className="ml-auto text-xs text-text-primary my-2">
+      <div className="ml-auto text-xs text-text-muted my-1.5 italic px-3 py-1.5 bg-surface-hover rounded-2xl border border-border">
         You deleted this message
       </div>
     );
@@ -177,16 +159,16 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
       ?.toLowerCase()
       .includes(window.__search.toLowerCase());
 
-  const renderReplyChain = (reply, depth = 0) => {
+  const renderReplyChain = (reply) => {
     if (!reply) return null;
 
     return (
       <div
-        className={`cursor-pointer rounded-xl px-3 py-1 mb-1 border-l-4 ${
-          reply.sender?._id === message.sender?._id
-            ? "border-pink-500"
-            : "border-blue-500"
-        } bg-white/10 hover:bg-white/20`}
+        className={`cursor-pointer rounded-xl px-3 py-1.5 mb-1.5 border-l-4 transition ${
+          isGradientTheme
+            ? "border-white/80 bg-black/20 hover:bg-black/30 text-white"
+            : "border-primary bg-surface-hover/80 hover:bg-surface-hover text-text"
+        }`}
         onClick={() => {
           const el = document.getElementById(`msg-${reply._id}`);
           if (el) {
@@ -196,10 +178,10 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
           }
         }}
       >
-        <span className="text-xs font-semibold text-text-primary">
-          {reply?.sender?.userName || "User"}:
-        </span>{" "}
-        <span className="text-sm text-text-primary truncate">
+        <span className={`text-[11px] font-bold block ${isGradientTheme ? "text-white/90" : "text-primary"}`}>
+          {reply?.sender?.userName || "User"}
+        </span>
+        <span className={`text-xs truncate block ${isGradientTheme ? "text-white/80" : "text-text-secondary"}`}>
           {reply.content?.text || "Media"}
         </span>
       </div>
@@ -207,76 +189,109 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
   };
 
   return (
-    <div className="relative group/msg flex items-center justify-end my-1">
+    <div className="relative group/msg flex items-center justify-end my-0.5">
       {/* Floating double-tap Heart animation */}
       {showHeart && (
-        <div className="absolute -top-8 right-6 z-30 animate-bounce text-2xl">
-          ❤️
+        <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
+          <Heart className="w-12 h-12 text-rose-500 fill-rose-500 animate-ping drop-shadow-lg" />
         </div>
       )}
 
-      {/* Emoji Picker popover */}
+      {/* Floating Emoji Reactions Bar (Responsive & Glassmorphic) */}
       {showReactions && (
         <div
-          ref={emojiPickerRef}
-          className="fixed z-50 bg-surface-inset/95 backdrop-blur-md rounded-full shadow-2xl border border-border/90 transition-all duration-200"
-          style={{ animation: "fadeInScale 0.2s ease-out" }}
+          ref={reactionsRef}
+          className="absolute -top-11 right-0 sm:right-auto sm:left-1/2 sm:-translate-x-1/2 z-50 bg-white/95 dark:bg-zinc-900/95 border border-zinc-200 dark:border-zinc-700/80 rounded-full shadow-[0_12px_32px_rgba(0,0,0,0.25)] backdrop-blur-xl px-2 py-1 flex items-center gap-1 max-w-[92vw] overflow-x-auto hide-scrollbar animate-in zoom-in-95 duration-150"
+          onClick={(e) => e.stopPropagation()}
         >
-          <div
-            ref={reactionsRef}
-            className="flex items-center gap-2 px-3 py-2 overflow-x-auto max-w-[90vw] hide-scrollbar"
-          >
-            {EMOJIS.map((e, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleReact(e);
-                }}
-                className="flex-shrink-0 text-2xl hover:scale-125 active:scale-95 transition-transform duration-150 cursor-pointer"
-                style={{ minWidth: "36px", textAlign: "center" }}
-              >
-                {e}
-              </button>
-            ))}
-          </div>
-
-          <div className="absolute -bottom-1.5 left-1/2 transform -translate-x-1/2">
-            <div className="w-3 h-3 bg-surface-inset/95 transform rotate-45 border-b border-r border-border/90"></div>
-          </div>
+          {EMOJIS.map((e, idx) => (
+            <button
+              key={idx}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                handleReact(e);
+              }}
+              className="flex-shrink-0 text-xl hover:scale-130 active:scale-90 transition-transform duration-150 cursor-pointer p-1 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              style={{ minWidth: "30px", textAlign: "center" }}
+            >
+              {e}
+            </button>
+          ))}
         </div>
       )}
 
       <div
         ref={messageRef}
         onDoubleClick={handleDoubleClick}
-        className={`relative ml-auto max-w-[75%] sm:max-w-[65%] px-4 py-2.5 rounded-3xl flex flex-col gap-1.5 cursor-pointer select-none transition-all duration-200 ${
+        className={`relative ml-auto max-w-[88%] sm:max-w-[70%] md:max-w-[60%] px-4 py-2.5 rounded-3xl flex flex-col gap-1 cursor-pointer select-none transition-all duration-200 ${
           highlight
             ? "bg-yellow-500/20 rounded-3xl ring-2 ring-yellow-400"
             : message.status === "failed"
-            ? "bg-red-900/40 border border-red-800/50 rounded-3xl"
+            ? "bg-red-600/20 border border-red-500/50 text-text rounded-3xl"
             : message.status === "sending"
-            ? `${bubbleThemeClass} opacity-70`
+            ? `${bubbleThemeClass} opacity-75`
             : bubbleThemeClass
         }`}
       >
         {/* Forwarded indicator */}
         {message.isForwarded && (
-          <div className="flex items-center gap-1 text-[10px] text-white/50 font-medium">
+          <div className={`flex items-center gap-1 text-[10px] font-medium ${isGradientTheme ? "text-white/70" : "text-text-muted"}`}>
             <CornerUpRight className="w-3 h-3" />
             <span>Forwarded</span>
-          </div>
-        )}
-        {/* Double Tap Floating Heart Overlay */}
-        {showHeart && (
-          <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
-            <Heart className="w-12 h-12 text-text fill-white animate-ping drop-shadow-lg" />
           </div>
         )}
 
         {/* REPLY PREVIEW */}
         {message.replyTo && renderReplyChain(message.replyTo)}
+
+        {/* CONTACT REQUEST CARD (Sender View) */}
+        {isContactRequest && (
+          <div className="rounded-2xl p-4 bg-white/10 border border-white/20 space-y-2 min-w-[240px] my-1 shadow-sm">
+            <div className="flex items-center gap-2 text-amber-300">
+              <div className="p-1.5 rounded-xl bg-amber-400/20">
+                <Phone className="w-4 h-4 text-amber-300" />
+              </div>
+              <span className="text-xs font-bold uppercase tracking-wider text-amber-300">Contact Requested</span>
+            </div>
+            <p className="text-xs text-white/90 leading-relaxed">
+              You sent a contact number request. The user can choose to share or decline with a reason.
+            </p>
+          </div>
+        )}
+
+        {/* CONTACT CARD (Sender View) */}
+        {isContactCard && (
+          <div className="rounded-2xl p-4 bg-white/15 border border-white/25 space-y-2.5 min-w-[220px] my-1">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-xl bg-emerald-400/20 text-emerald-300">
+                <Phone className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-white/70">Contact Card</div>
+                <div className="text-xs font-bold text-white">{message.content?.contactData?.name || "My Contact"}</div>
+              </div>
+            </div>
+            <div className="text-sm font-mono font-bold text-amber-200 tracking-wider">
+              {message.content?.contactData?.phone || "No phone listed"}
+            </div>
+          </div>
+        )}
+
+        {/* CONTACT DECLINED (Sender View) */}
+        {isContactDecline && (
+          <div className="rounded-2xl p-4 bg-white/10 border border-rose-300/30 space-y-2 min-w-[220px] my-1">
+            <div className="flex items-center gap-2 text-rose-300">
+              <div className="p-1.5 rounded-xl bg-rose-400/20">
+                <Phone className="w-4 h-4" />
+              </div>
+              <span className="text-xs font-bold uppercase tracking-wider">Contact Request Declined</span>
+            </div>
+            <p className="text-xs text-white/90 leading-relaxed">
+              {message.content?.text || "You declined this contact request."}
+            </p>
+          </div>
+        )}
 
         {/* SHARED CONTENT CARD */}
         {(message.type?.startsWith("shared_") || message.content?.sharedData) && (
@@ -285,6 +300,8 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
             type={message.type || "shared_post"}
           />
         )}
+
+        {/* MEDIA PREVIEW */}
         {mediaList.map((m, i) => {
           if (m.type === "sticker" || message.type === "sticker") {
             return (
@@ -292,7 +309,7 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
                 key={i}
                 src={m.url}
                 alt="Sticker"
-                className="w-36 h-36 object-contain drop-shadow-md select-none hover:scale-105 transition-transform"
+                className="w-36 h-36 object-contain drop-shadow-md select-none hover:scale-105 transition-transform my-1"
               />
             );
           }
@@ -302,7 +319,8 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
                 key={i}
                 src={m.url}
                 onClick={(e) => { e.stopPropagation(); setLightboxData({ open: true, url: m.url, type: "image" }); }}
-                className="rounded-xl max-h-[250px] object-cover cursor-pointer hover:opacity-95 transition"
+                className="rounded-2xl max-h-[280px] w-full object-cover cursor-pointer hover:opacity-95 transition my-1 shadow-sm"
+                alt="Attachment"
               />
             );
           }
@@ -312,7 +330,7 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
                 key={i}
                 controls
                 onClick={(e) => { e.stopPropagation(); setLightboxData({ open: true, url: m.url, type: "video" }); }}
-                className="rounded-xl max-h-[300px] cursor-pointer"
+                className="rounded-2xl max-h-[300px] w-full cursor-pointer my-1 shadow-sm"
               >
                 <source src={m.url} />
               </video>
@@ -324,7 +342,8 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
                 key={i}
                 href={m.url}
                 target="_blank"
-                className="text-sm underline text-text"
+                rel="noreferrer"
+                className={`text-sm underline flex items-center gap-1.5 py-1 ${isGradientTheme ? "text-white" : "text-text font-medium"}`}
               >
                 📄 {m.name || "Document"}
               </a>
@@ -334,7 +353,7 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
         })}
 
         {/* TEXT */}
-        {(message.type === "text" || message.content?.text) && (
+        {!(isContactRequest || isContactDecline || isContactCard) && (message.type === "text" || message.content?.text) && (
           <>
             {isEditing ? (
               <input
@@ -344,15 +363,15 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
                   if (e.key === "Enter") handleEdit();
                   if (e.key === "Escape") setIsEditing(false);
                 }}
-                className="bg-transparent outline-none text-text"
+                className={`bg-transparent outline-none border-b border-current pb-0.5 text-sm ${isGradientTheme ? "text-white" : "text-text"}`}
                 autoFocus
               />
             ) : (
               message.content?.text?.trim() && (
-                <p className="text-text break-words">
+                <p className={`text-sm break-words leading-relaxed ${isGradientTheme ? "text-white font-normal" : "text-text font-normal"}`}>
                   {message.content?.text}
                   {message.edited && (
-                    <span className="text-xs ml-1 opacity-70">(edited)</span>
+                    <span className={`text-[10px] ml-1.5 italic ${isGradientTheme ? "opacity-75" : "text-text-muted"}`}>(edited)</span>
                   )}
                 </p>
               )
@@ -362,11 +381,15 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
 
         {/* REACTIONS DISPLAY */}
         {message.reactions?.length > 0 && (
-          <div className="flex gap-1 flex-wrap">
+          <div className="flex gap-1 flex-wrap mt-0.5">
             {message.reactions.map((r, i) => (
               <span
                 key={i}
-                className="text-sm bg-bg/30 px-2 py-0.5 rounded-full"
+                className={`text-xs px-2 py-0.5 rounded-full border ${
+                  isGradientTheme
+                    ? "bg-black/25 text-white border-white/20"
+                    : "bg-surface-hover text-text border-border"
+                }`}
               >
                 {r.emoji}
               </span>
@@ -376,67 +399,71 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
 
         {/* TIME + DELIVERY STATUS */}
         <div className="flex justify-end items-center gap-1 mt-0.5">
-          {message.edited && <span className="text-[9px] text-white/40">edited</span>}
-          <span className="text-[10px] text-white/50">
+          {message.edited && (
+            <span className={`text-[9px] ${isGradientTheme ? "text-white/60" : "text-text-muted"}`}>edited</span>
+          )}
+          <span className={`text-[10px] font-medium ${isGradientTheme ? "text-white/75" : "text-text-muted"}`}>
             {moment(message.createdAt).format("h:mm A")}
           </span>
           {message.status === "sending" ? (
-            <Clock size={12} className="text-white/40" />
+            <Clock size={12} className={isGradientTheme ? "text-white/60" : "text-text-muted"} />
           ) : message.status === "failed" ? (
-            <span className="text-[9px] text-red-300 font-semibold">!</span>
+            <span className="text-[10px] text-red-300 font-bold">!</span>
           ) : message.status === "seen" ? (
-            <CheckCheck size={14} className="text-text" />
+            <CheckCheck size={14} className={isGradientTheme ? "text-cyan-200 font-bold" : "text-primary"} />
           ) : message.status === "delivered" ? (
-            <CheckCheck size={14} className="text-white/50" />
+            <CheckCheck size={14} className={isGradientTheme ? "text-white/70" : "text-text-muted"} />
           ) : (
-            <Check size={14} className="text-white/50" />
+            <Check size={14} className={isGradientTheme ? "text-white/70" : "text-text-muted"} />
           )}
-          {message.isPinned && <Pin size={10} className="text-amber-300" />}
-          {message.disappear?.enabled && <Clock size={10} className="text-amber-400/70" />}
+          {message.isPinned && <Pin size={10} className="text-amber-300 transform rotate-45" />}
+          {message.disappear?.enabled && <Clock size={10} className="text-amber-300" />}
         </div>
 
-        {/* REACTION BUTTON */}
+        {/* REACTION BUTTON (visible on hover / active / touch) */}
         <button
           ref={reactionButtonRef}
           onClick={(e) => {
             e.stopPropagation();
             setShowReactions(!showReactions);
           }}
-          className={`absolute -left-6 bottom-2 cursor-pointer bg-card-hover/80 backdrop-blur-sm p-1.5 rounded-full shadow-lg transition-all duration-300 ${
+          className={`absolute -left-8 bottom-1 cursor-pointer bg-surface/90 hover:bg-surface border border-border p-1.5 rounded-full shadow-md transition-all duration-200 ${
             showReactions
-              ? "text-text scale-110 ring-2 ring-purple-400"
-              : "text-white/70 hover:text-text hover:scale-110"
+              ? "text-primary scale-110 ring-2 ring-primary/40 opacity-100"
+              : "text-text-muted hover:text-text hover:scale-110 opacity-0 group-hover/msg:opacity-100 focus:opacity-100"
           }`}
           style={{ zIndex: 10 }}
+          title="React"
         >
-          <SmilePlus size={16} />
+          <SmilePlus size={14} />
         </button>
 
-        {/* OPTIONS MENU */}
+        {/* OPTIONS MENU BUTTON */}
         <button
           data-options-trigger
           onClick={() => setShowOptions(!showOptions)}
-          className="absolute top-1 right-2 text-xs hover:scale-110 transition-transform duration-200"
+          className={`absolute top-1 right-2 text-xs hover:scale-110 transition-all duration-200 opacity-0 group-hover/msg:opacity-100 ${
+            isGradientTheme ? "text-white/80 hover:text-white" : "text-text-secondary hover:text-text"
+          }`}
+          title="More options"
         >
-          <EllipsisVertical
-            size={16}
-            className="text-white/70 cursor-pointer"
-          />
+          <EllipsisVertical size={15} className="cursor-pointer" />
         </button>
 
+        {/* OPTIONS DROPDOWN */}
         {showOptions && (
           <div
             ref={optionsRef}
-            className="absolute top-6 right-2 bg-surface rounded-2xl shadow-2xl text-sm z-50 overflow-hidden min-w-[180px] border border-border py-1"
+            className="absolute top-6 right-2 bg-surface rounded-2xl shadow-2xl text-xs z-50 overflow-hidden min-w-[170px] border border-border py-1 animate-in fade-in zoom-in-95 duration-150"
           >
             <button
               onClick={() => {
                 setReplyTo(message);
                 setShowOptions(false);
               }}
-              className="flex items-center gap-2.5 px-4 py-2.5 hover:bg-surface-hover w-full text-left text-text transition-colors cursor-pointer"
+              className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text transition-colors cursor-pointer"
             >
-              <CornerUpLeft size={16} /> Reply
+              <CornerUpLeft size={14} className="text-text-secondary" /> Reply
             </button>
             {message.type === "text" && (
               <button
@@ -444,9 +471,9 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
                   if (onEditMessage) onEditMessage(message);
                   setShowOptions(false);
                 }}
-                className="flex items-center gap-2.5 px-4 py-2.5 hover:bg-surface-hover w-full text-left text-text transition-colors cursor-pointer"
+                className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text transition-colors cursor-pointer"
               >
-                <Edit2 size={16} /> Edit
+                <Edit2 size={14} className="text-text-secondary" /> Edit
               </button>
             )}
             <button
@@ -454,9 +481,9 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
                 if (onForwardMessage) onForwardMessage(message);
                 setShowOptions(false);
               }}
-              className="flex items-center gap-2.5 px-4 py-2.5 hover:bg-surface-hover w-full text-left text-text transition-colors cursor-pointer"
+              className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text transition-colors cursor-pointer"
             >
-              <CornerUpRight size={16} /> Forward
+              <CornerUpRight size={14} className="text-text-secondary" /> Forward
             </button>
             <button
               onClick={async () => {
@@ -470,22 +497,22 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
                 }
                 setShowOptions(false);
               }}
-              className="flex items-center gap-2.5 px-4 py-2.5 hover:bg-surface-hover w-full text-left text-text transition-colors cursor-pointer"
+              className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text transition-colors cursor-pointer"
             >
-              <Pin size={16} /> {message.isPinned ? "Unpin" : "Pin"}
+              <Pin size={14} className="text-text-secondary" /> {message.isPinned ? "Unpin" : "Pin"}
             </button>
             <div className="border-t border-border my-1" />
             <button
               onClick={() => handleDelete("me")}
-              className="flex items-center gap-2.5 px-4 py-2.5 hover:bg-surface-hover w-full text-left text-text-secondary transition-colors cursor-pointer"
+              className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text-secondary hover:text-text transition-colors cursor-pointer"
             >
-              <Trash2 size={16} /> Delete for me
+              <Trash2 size={14} /> Delete for me
             </button>
             <button
               onClick={() => handleDelete("everyone")}
-              className="flex items-center gap-2.5 px-4 py-2.5 hover:bg-surface-hover/60 w-full text-left text-red-400 transition-colors cursor-pointer"
+              className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-red-500/10 w-full text-left text-red-500 transition-colors cursor-pointer font-medium"
             >
-              <AlertTriangle size={16} /> Delete for everyone
+              <AlertTriangle size={14} /> Delete for everyone
             </button>
           </div>
         )}

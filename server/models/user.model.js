@@ -148,18 +148,19 @@ const userSchema = new mongoose.Schema(
         ref: "Post",
       },
     ],
-    loops: [
+    reels: [
       {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "Loop",
+        ref: "Reel",
       },
     ],
-    savedLoops: [
+    savedReels: [
       {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "Loop",
+        ref: "Reel",
       },
     ],
+
     stories: [
       {
         type: mongoose.Schema.Types.ObjectId,

@@ -1,7 +1,7 @@
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { useRef, useState, useEffect } from "react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import { 
   X, 
   Share2, 
@@ -20,8 +20,8 @@ import dp from "../assets/dp3.png";
 
 const THEMES = [
   {
-    id: "ig-gradient",
-    label: "Instagram",
+    id: "vybe-gradient",
+    label: "VYBE Aura",
     bgStyle: "linear-gradient(to bottom right, #f43f5e, #c084fc, #6366f1)",
     textColor: "text-white",
     badgeBg: "bg-black/25 text-white border-white/20",
@@ -136,13 +136,13 @@ const ProfileQrModal = ({ isOpen, onClose, user }) => {
       } else {
         await navigator.clipboard.writeText(profileUrl);
         setCopied(true);
-        toast.success("Profile link copied to clipboard!");
+        snackbar.success("Profile link copied to clipboard!");
         setTimeout(() => setCopied(false), 2000);
       }
     } catch (err) {
       if (err.name !== "AbortError") {
         await navigator.clipboard.writeText(profileUrl);
-        toast.success("Profile link copied!");
+        snackbar.success("Profile link copied!");
       }
     }
   };
@@ -152,10 +152,10 @@ const ProfileQrModal = ({ isOpen, onClose, user }) => {
     try {
       await navigator.clipboard.writeText(profileUrl);
       setCopied(true);
-      toast.success("Profile link copied!");
+      snackbar.success("Profile link copied!");
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      toast.error("Failed to copy link.");
+      snackbar.error("Failed to copy link.");
     }
   };
 
@@ -175,10 +175,10 @@ const ProfileQrModal = ({ isOpen, onClose, user }) => {
       link.href = image;
       link.download = `VYBE_${user?.userName}_QR.png`;
       link.click();
-      toast.success("Saved QR image to device!");
+      snackbar.success("Saved QR image to device!");
     } catch (err) {
       console.error("PNG export error", err);
-      toast.error("Failed to save image.");
+      snackbar.error("Failed to save image.");
     } finally {
       setIsExporting(false);
     }
@@ -201,10 +201,10 @@ const ProfileQrModal = ({ isOpen, onClose, user }) => {
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
       pdf.addImage(imgData, "PNG", 25, 30, imgWidth, imgHeight);
       pdf.save(`VYBE_${user?.userName}_QR.pdf`);
-      toast.success("Downloaded PDF document!");
+      snackbar.success("Downloaded PDF document!");
     } catch (err) {
       console.error("PDF export error", err);
-      toast.error("Failed to generate PDF.");
+      snackbar.error("Failed to generate PDF.");
     } finally {
       setIsExporting(false);
     }

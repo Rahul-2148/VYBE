@@ -230,6 +230,7 @@ export const getStoriesFeed = async (req, res) => {
       success: true,
       error: false,
       stories: resultList,
+      feed: resultList,
     });
   } catch (err) {
     res.status(500).json({ success: false, error: true, message: err.message });
@@ -254,7 +255,7 @@ export const toggleStoryLike = async (req, res) => {
     let story = await Story.findOneAndUpdate(
       { _id: storyId, likes: userId },
       { $pull: { likes: userId } },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     if (story) {
@@ -270,7 +271,7 @@ export const toggleStoryLike = async (req, res) => {
       story = await Story.findOneAndUpdate(
         { _id: storyId },
         { $addToSet: { likes: userId } },
-        { new: true }
+        { returnDocument: 'after' }
       );
 
       const existingNotif = await Notification.findOne({
@@ -326,7 +327,7 @@ export const reactToStory = async (req, res) => {
     const story = await Story.findByIdAndUpdate(
       storyId,
       { $push: { reactions: { user: userId, emoji, reactedAt: new Date() } } },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     emitStoryReacted(io, story._id, userId, story.author, emoji);
@@ -365,7 +366,7 @@ export const votePoll = async (req, res) => {
     const story = await Story.findByIdAndUpdate(
       storyId,
       { $push: { pollVotes: { user: userId, optionIndex, votedAt: new Date() } } },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     return res.status(200).json({
@@ -399,7 +400,7 @@ export const answerQuiz = async (req, res) => {
     const story = await Story.findByIdAndUpdate(
       storyId,
       { $push: { quizAnswers: { user: userId, optionIndex, isCorrect, answeredAt: new Date() } } },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     return res.status(200).json({
@@ -432,7 +433,7 @@ export const submitQuestionResponse = async (req, res) => {
     const story = await Story.findByIdAndUpdate(
       storyId,
       { $push: { questionResponses: { user: userId, responseText, createdAt: new Date() } } },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     return res.status(200).json({
@@ -513,7 +514,7 @@ export const replyStory = async (req, res) => {
         $set: { lastMessage: message._id },
         ...(Object.keys(incFields).length > 0 ? { $inc: incFields } : {}),
       },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     const populatedMessage = await message.populate("sender", "userName profileImage isVerified");
@@ -583,7 +584,7 @@ export const toggleCloseFriend = async (req, res) => {
     return res.status(200).json({
       success: true,
       isCloseFriend,
-      message: isCloseFriend ? "Added to Close Friends" : "Removed from Close Friends",
+      message: isCloseFriend ? "Added to Close Friends ⭐️" : "Removed from Close Friends",
     });
   } catch (err) {
     res.status(500).json({ success: false, error: true, message: err.message });
@@ -592,8 +593,40 @@ export const toggleCloseFriend = async (req, res) => {
 
 export const getCloseFriends = async (req, res) => {
   try {
-    const user = await User.findById(req.userId).populate("closeFriends", "userName name profileImage");
-    return res.status(200).json({ success: true, closeFriends: user?.closeFriends || [] });
+    const user = await User.findById(req.userId)
+      .populate("closeFriends", "userName name profileImage isVerified")
+      .populate("following", "userName name profileImage isVerified")
+      .populate("followers", "userName name profileImage isVerified");
+
+    const closeFriendsList = user?.closeFriends || [];
+    const closeFriendIds = new Set(closeFriendsList.map((f) => f._id.toString()));
+
+    // Deduplicate suggestions across following & followers
+    const suggestions = [];
+    const seenSuggestionIds = new Set();
+
+    for (const u of [...(user?.following || []), ...(user?.followers || [])]) {
+      const uid = u._id.toString();
+      if (!closeFriendIds.has(uid) && !seenSuggestionIds.has(uid) && uid !== req.userId.toString()) {
+        seenSuggestionIds.add(uid);
+        suggestions.push(u);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      closeFriends: closeFriendsList,
+      suggestions,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: true, message: err.message });
+  }
+};
+
+export const clearAllCloseFriends = async (req, res) => {
+  try {
+    await User.findByIdAndUpdate(req.userId, { $set: { closeFriends: [] } });
+    return res.status(200).json({ success: true, message: "Cleared all Close Friends" });
   } catch (err) {
     res.status(500).json({ success: false, error: true, message: err.message });
   }

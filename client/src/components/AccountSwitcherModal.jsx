@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import { X, Check, Plus, LogIn, UserPlus, Loader2, Trash2 } from "lucide-react";
 import dp from "../assets/dp3.png";
 import api from "../lib/axios";
@@ -72,7 +72,7 @@ const AccountSwitcherModal = ({ isOpen, onClose }) => {
             initializeSocket(newUserId);
           }
 
-          toast.success(res.data.message || `Switched to @${res.data.user.userName}`);
+          snackbar.success(res.data.message || `Switched to @${res.data.user.userName}`);
           onClose();
 
           // Navigate to home to reset all page state
@@ -86,9 +86,9 @@ const AccountSwitcherModal = ({ isOpen, onClose }) => {
           // Session expired for this account — remove from registry and prompt re-login
           removeLinkedAccount(targetUserId);
           setAccounts((prev) => prev.filter((a) => a.userId !== targetUserId));
-          toast.error("Session expired for this account. Please log in again.");
+          snackbar.error("Session expired for this account. Please log in again.");
         } else {
-          toast.error(msg);
+          snackbar.error(msg);
         }
       } finally {
         setSwitching(null);
@@ -102,13 +102,13 @@ const AccountSwitcherModal = ({ isOpen, onClose }) => {
     (e, userId) => {
       e.stopPropagation();
       if (userId === currentUserId) {
-        toast.error("Cannot remove the active account");
+        snackbar.error("Cannot remove the active account");
         return;
       }
       setRemovingId(userId);
       removeLinkedAccount(userId);
       setAccounts((prev) => prev.filter((a) => a.userId !== userId));
-      toast.success("Account removed from list");
+      snackbar.success("Account removed from list");
       setTimeout(() => setRemovingId(null), 300);
     },
     [currentUserId]

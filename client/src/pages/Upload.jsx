@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { toast } from "sonner";
+import { useRef, useState, useEffect } from "react";
+import { snackbar } from "../lib/snackbar";
 import { FiPlusSquare } from "react-icons/fi";
 import { MdOutlineKeyboardBackspace } from "react-icons/md";
 import { 
@@ -15,8 +15,11 @@ import {
   ChevronDown, 
   ChevronUp,
   FolderOpen,
-  Crop
+  Crop,
+  Tv,
+  CheckCircle2
 } from "lucide-react";
+import { getHighQualityUploads, setHighQualityUploads } from "../lib/mediaQualitySettings";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ClipLoader } from "react-spinners";
@@ -24,11 +27,14 @@ import VideoPlayer from "../components/VideoPlayer";
 import AICreationModal from "../components/AICreationModal";
 import StoryCreator from "../components/StoryCreator";
 import StoryMusicPickerModal from "../components/StoryMusicPickerModal";
-import { setLoopData } from "../redux/features/loopSlice";
+import DraftsModal from "../components/DraftsModal";
+import AIInfoModal from "../components/AIInfoModal";
+import { setReelData } from "../redux/features/reelSlice";
 import { setPostData } from "../redux/features/postSlice";
 // removed unused setStoryFeed import
 import api from "../lib/axios";
 import dp from "../assets/dp3.png";
+import { triggerHaptic } from "../lib/interactiveEffects";
 
 export const Upload = () => {
   const navigate = useNavigate();
@@ -37,16 +43,104 @@ export const Upload = () => {
 
   const queryType = new URLSearchParams(location.search).get("type") || location.state?.type || "post";
   const [uploadType, setUploadType] = useState(queryType);
+  const [previousUploadType, setPreviousUploadType] = useState(queryType || "post");
 
-  // Post Carousel Queue State
+  // Post Carousel & Reel Queue State
   const [items, setItems] = useState([]);
   const [activeIndex, setActiveIndex] = useState(0);
+
+  const handleSwitchType = (t) => {
+    if (t !== uploadType) {
+      setPreviousUploadType(uploadType);
+      setUploadType(t);
+      setItems([]);
+      setActiveIndex(0);
+    }
+  };
+
+  const handleHeaderBack = () => {
+    if (uploadType !== queryType && queryType) {
+      setUploadType(queryType);
+    } else {
+      navigate(-1);
+    }
+  };
 
   // Form Fields
   const [caption, setCaption] = useState("");
   const [locationText, setLocationText] = useState("");
   const [tagUsernames, setTagUsernames] = useState("");
   const [selectedMusic, setSelectedMusic] = useState(() => location.state?.preselectedMusic || null);
+
+  // Drafts Modal State
+  const [showDraftsModal, setShowDraftsModal] = useState(false);
+  const [currentDraftId, setCurrentDraftId] = useState(() => location.state?.resumedDraft?._id || null);
+
+  // Helper to convert File to persistent base64 Data URL
+  const fileToDataUrl = (file, fallback = "") => {
+    return new Promise((resolve) => {
+      if (!file) return resolve(fallback);
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => resolve(fallback);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleResumeDraft = (draft) => {
+    if (!draft) return;
+    if (draft._id) setCurrentDraftId(draft._id);
+    const targetType = draft.draftType || "post";
+    setUploadType(targetType);
+    setCaption(draft.caption || "");
+    setLocationText(draft.location || "");
+    if (draft.audioTrack) setSelectedMusic(draft.audioTrack);
+
+    const previewUrl =
+      draft.mediaPreview ||
+      draft.mediaItems?.[0]?.preview ||
+      draft.mediaItems?.[0]?.url;
+
+    if (previewUrl) {
+      const isVideo = targetType === "reel" || previewUrl.startsWith("data:video") || previewUrl.includes(".mp4");
+      
+      let constructedFile = null;
+      if (previewUrl.startsWith("data:")) {
+        try {
+          const arr = previewUrl.split(",");
+          const mime = arr[0].match(/:(.*?);/)?.[1] || (isVideo ? "video/mp4" : "image/jpeg");
+          const bstr = atob(arr[1]);
+          let n = bstr.length;
+          const u8arr = new Uint8Array(n);
+          while (n--) {
+            u8arr[n] = bstr.charCodeAt(n);
+          }
+          constructedFile = new File([u8arr], isVideo ? "draft_video.mp4" : "draft_image.jpg", { type: mime });
+        } catch (e) {
+          console.warn("Upload: reconstructed file error", e);
+        }
+      }
+
+      setItems([
+        {
+          file: constructedFile,
+          preview: previewUrl,
+          type: isVideo ? "video" : "image",
+          mediaType: isVideo ? "video" : "image",
+          altText: draft.altText || "",
+        },
+      ]);
+      setActiveIndex(0);
+    }
+    snackbar.success("Draft loaded! You can continue editing ✏️");
+  };
+
+  // Resume Draft from route navigation if provided
+  useEffect(() => {
+    if (location.state?.resumedDraft) {
+      handleResumeDraft(location.state.resumedDraft);
+    }
+  }, [location.state]);
 
   // Autocomplete Suggestions
   const [locationSuggestions, setLocationSuggestions] = useState([]);
@@ -173,7 +267,7 @@ export const Upload = () => {
       if (!next[activeIndex]) return prev;
       const currentTags = next[activeIndex].tags || [];
       if (currentTags.some((t) => t.user._id === user._id)) {
-        toast.error("User already tagged on this slide");
+        snackbar.error("User already tagged on this slide");
         return prev;
       }
       next[activeIndex].tags = [
@@ -209,6 +303,17 @@ export const Upload = () => {
   const [likesHidden, setLikesHidden] = useState(false);
   const [commentsDisabled, setCommentsDisabled] = useState(false);
   const [scheduledPublishTime, setScheduledPublishTime] = useState("");
+  const [highQualityUpload, setHighQualityUpload] = useState(getHighQualityUploads());
+
+  // Video Duration & VYBE TV Long-Form States
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [isVybeTv, setIsVybeTv] = useState(false);
+
+  // AI Content Disclosure ("Made with AI") State
+  const [isAIGenerated, setIsAIGenerated] = useState(false);
+  const [aiTool, setAiTool] = useState("");
+  const [aiContentType, setAiContentType] = useState("image");
+  const [showAIInfoDisclosureModal, setShowAIInfoDisclosureModal] = useState(false);
 
   // Modals & Loaders
   const [showAIModal, setShowAIModal] = useState(false);
@@ -218,24 +323,48 @@ export const Upload = () => {
 
   const mediaInput = useRef(null);
   const { postData } = useSelector((state) => state.post);
-  const { loopData } = useSelector((state) => state.loop);
+  const reelState = useSelector((state) => state.reel);
+  const reelData = reelState?.reelData || [];
+
+  // Helper to extract duration and auto-detect VYBE TV
+  const checkVideoMetadata = (file) => {
+    try {
+      const vid = document.createElement("video");
+      vid.preload = "metadata";
+      vid.src = URL.createObjectURL(file);
+      vid.onloadedmetadata = () => {
+        const dur = Math.round(vid.duration || 0);
+        setVideoDuration(dur);
+        if (dur > 180) {
+          setIsVybeTv(true);
+          snackbar.info(`Video duration is ${Math.floor(dur / 60)}m ${dur % 60}s (> 3 mins). Auto-configured as VYBE TV long-form video! 📺`);
+        }
+        URL.revokeObjectURL(vid.src);
+      };
+    } catch {
+      // Fallback
+    }
+  };
 
   // Handle Multi-file or single file select
   const handleMediaSelect = (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    if (uploadType === "loop") {
-      // Loop only accepts 1 video under 10 minutes
+    const MAX_SIZE = 1024 * 1024 * 1024; // 1GB (1024MB) for full 4K and long-form video
+
+    if (uploadType === "reel") {
+      // Reel only accepts 1 video
       const file = files[0];
       if (!file.type.includes("video")) {
-        toast.error("Reels (Loops) must be video files");
+        snackbar.error("Reels must be video files");
         return;
       }
-      if (file.size > 100 * 1024 * 1024) {
-        toast.error("Reels must be under 100MB");
+      if (file.size > MAX_SIZE) {
+        snackbar.error("Video file must be under 1GB");
         return;
       }
+      checkVideoMetadata(file);
       setItems([{
         file,
         preview: URL.createObjectURL(file),
@@ -249,20 +378,25 @@ export const Upload = () => {
     }
 
     // For posts, map multiple files to the item queue
-    const mapped = files.map((file) => ({
-      file,
-      preview: URL.createObjectURL(file),
-      type: file.type.includes("video") ? "video" : "image",
-      altText: "",
-      aspectRatio: "aspect-square",
-      tags: []
-    }));
+    const mapped = files.map((file) => {
+      if (file.type.includes("video")) {
+        checkVideoMetadata(file);
+      }
+      return {
+        file,
+        preview: URL.createObjectURL(file),
+        type: file.type.includes("video") ? "video" : "image",
+        altText: "",
+        aspectRatio: "aspect-square",
+        tags: []
+      };
+    });
 
     setItems((prev) => {
       const next = [...prev, ...mapped];
       // Limit to max 10 files
       if (next.length > 10) {
-        toast.error("You can select up to 10 media items");
+        snackbar.error("You can select up to 10 media items");
         return next.slice(0, 10);
       }
       return next;
@@ -300,7 +434,7 @@ export const Upload = () => {
     try {
       const res = await api.post("/ai/check-safety", { text: caption, contentType: uploadType });
       if (res.data.isFlagged) {
-        toast.error(`Blocked by Safety AI: ${res.data.reason}`);
+        snackbar.error(`Blocked by Safety AI: ${res.data.reason}`);
         return false;
       }
       return true;
@@ -312,7 +446,7 @@ export const Upload = () => {
   // 1. Upload Carousel or Single Post Controller Trigger
   const uploadPostFlow = async () => {
     if (items.length === 0) {
-      toast.error("Please select at least 1 image or video");
+      snackbar.error("Please select at least 1 image or video");
       return;
     }
 
@@ -349,6 +483,20 @@ export const Upload = () => {
         formData.append("music", JSON.stringify(selectedMusic));
       }
 
+      // Append VYBE TV & Duration
+      formData.append("isVybeTv", String(isVybeTv));
+      formData.append("duration", String(videoDuration));
+
+      // Append AI disclosure
+      formData.append(
+        "aiLabel",
+        JSON.stringify({
+          isAIGenerated,
+          tool: isAIGenerated ? aiTool : "",
+          contentType: aiContentType,
+        })
+      );
+
       let result;
       if (items.length === 1) {
         // Single file upload
@@ -372,22 +520,31 @@ export const Upload = () => {
         });
       }
 
-      toast.success(result.data.message || "Post published successfully!");
+      snackbar.success(result.data.message || "Post published successfully!");
       if (result.data.post) {
         dispatch(setPostData([result.data.post, ...(postData || [])]));
+      }
+      if (currentDraftId) {
+        api.delete(`/post/drafts/${currentDraftId}`).catch(() => {});
       }
       setIsLoading(false);
       navigate("/");
     } catch (error) {
-      toast.error(error.response?.data?.message || "Upload failed");
+      snackbar.error(error.response?.data?.message || "Upload failed. Check your connection.", {
+        duration: 7000,
+        action: {
+          label: "RETRY",
+          onClick: uploadPostFlow,
+        },
+      });
       setIsLoading(false);
     }
   };
 
-  // 2. Upload Loops / Reels
-  const uploadLoopFlow = async () => {
+  // 2. Upload Reels
+  const uploadReelFlow = async () => {
     if (items.length === 0) {
-      toast.error("Please select a video file for Reels");
+      snackbar.error("Please select a video file for Reels");
       return;
     }
 
@@ -395,7 +552,7 @@ export const Upload = () => {
     if (!isSafe) return;
 
     setIsLoading(true);
-    setUploadProgressText("Processing loop video...");
+    setUploadProgressText("Processing reel video...");
 
     try {
       const formData = new FormData();
@@ -407,57 +564,118 @@ export const Upload = () => {
         formData.append("music", selectedMusic.title);
       }
 
-      const result = await api.post("/loop/upload", formData, {
+      // Append VYBE TV & Duration
+      formData.append("isVybeTv", String(isVybeTv));
+      formData.append("duration", String(videoDuration));
+
+      // Append AI disclosure for Reels
+      formData.append(
+        "aiLabel",
+        JSON.stringify({
+          isAIGenerated,
+          tool: isAIGenerated ? aiTool : "",
+          contentType: "video",
+        })
+      );
+
+      const result = await api.post("/reel/upload", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
-      if (result.data.loop) {
-        dispatch(setLoopData([result.data.loop, ...(loopData || [])]));
+      const uploadedReel = result.data.reel;
+      if (uploadedReel) {
+        dispatch(setReelData([uploadedReel, ...(reelData || [])]));
       }
-      toast.success("Reel published successfully!");
+      if (currentDraftId) {
+        api.delete(`/post/drafts/${currentDraftId}`).catch(() => {});
+      }
+      snackbar.success("Reel published successfully!");
       setIsLoading(false);
       navigate("/");
     } catch (error) {
-      toast.error(error.response?.data?.message || "Reel upload failed");
+      snackbar.error(error.response?.data?.message || "Reel upload failed. Check your connection.", {
+        duration: 7000,
+        action: {
+          label: "RETRY",
+          onClick: uploadReelFlow,
+        },
+      });
       setIsLoading(false);
     }
   };
 
-  // 3. Save Post as Draft
-  const savePostAsDraft = async () => {
+
+
+  // 3. Save as Draft (Universal: Post & Reel)
+  const saveAsDraft = async () => {
     if (items.length === 0) {
-      toast.error("Draft needs at least one media selected");
+      snackbar.error("Draft needs at least one media selected");
       return;
     }
     setIsLoading(true);
+    setUploadProgressText("Saving draft...");
     try {
       const hashtagsList = caption.match(/#[a-zA-Z0-9_]+/g) || [];
       const cleanHashtags = hashtagsList.map((h) => h.replace("#", ""));
       
-      await api.post("/post/drafts", {
+      let persistentPreview = items[0]?.preview || "";
+      if (items[0]?.file) {
+        persistentPreview = await fileToDataUrl(items[0].file, items[0].preview);
+      }
+
+      const res = await api.post("/post/drafts", {
+        draftId: currentDraftId,
         caption,
         location: locationText,
         hashtags: cleanHashtags,
-        mediaPreview: items[0].preview,
+        mediaPreview: persistentPreview,
+        draftType: uploadType === "reel" ? "reel" : "post",
+        aspectRatio: "4:5",
+        filter: "normal",
+        audioTrack: selectedMusic,
+        mediaItems: items.map((it) => ({
+          preview: it.preview,
+          type: it.type || it.mediaType || "image",
+          altText: it.altText || "",
+        })),
+        altText: items[activeIndex]?.altText || "",
       });
 
-      toast.success("Saved to Drafts! 📝");
-      setIsLoading(false);
-      navigate("/");
-    } catch (err) {
-        console.warn("Failed to save draft:", err);
-        toast.error("Failed to save draft");
-        setIsLoading(false);
+      if (res.data?.draft?._id) {
+        setCurrentDraftId(res.data.draft._id);
       }
+
+      snackbar.success(currentDraftId ? "Draft updated! 📝" : "Saved to Drafts! 📝");
+      setIsLoading(false);
+      setShowDraftsModal(true);
+    } catch (err) {
+      console.warn("Failed to save draft:", err);
+      snackbar.error("Failed to save draft");
+      setIsLoading(false);
+    }
   };
 
   const handleUploadClick = () => {
     if (uploadType === "post") uploadPostFlow();
-    else if (uploadType === "loop") uploadLoopFlow();
+    else if (uploadType === "reel") uploadReelFlow();
   };
 
   if (uploadType === "story") {
-    return <StoryCreator onClose={() => navigate("/")} initialState={location.state} />;
+    return (
+      <StoryCreator
+        onClose={() => {
+          if (queryType === "story") {
+            navigate(-1);
+          } else {
+            setUploadType(previousUploadType || "post");
+          }
+        }}
+        onSwitchMode={(mode) => {
+          handleSwitchType(mode);
+        }}
+        initialState={location.state}
+      />
+    );
   }
 
   const activeItem = items[activeIndex];
@@ -468,40 +686,50 @@ export const Upload = () => {
       <div className="w-full h-16 shrink-0 flex items-center justify-between px-6 border-b border-border bg-surface-inset/80 backdrop-blur-md sticky top-0 z-50">
         <div className="flex items-center gap-4">
           <button 
-            onClick={() => navigate(-1)} 
+            onClick={handleHeaderBack} 
             className="p-2 rounded-full hover:bg-surface text-text-secondary hover:text-text transition cursor-pointer"
           >
             <MdOutlineKeyboardBackspace className="w-6 h-6" />
           </button>
-          <h1 className="text-lg font-black tracking-tight uppercase">Create Post</h1>
+          <h1 className="text-lg font-black tracking-tight uppercase">
+            Create {uploadType === "reel" ? "Reel" : uploadType === "story" ? "Story" : "Post"}
+          </h1>
         </div>
 
-        {items.length > 0 && uploadType === "post" && (
+        <div className="flex items-center gap-2">
+          {/* View Drafts Button */}
           <button
-            onClick={savePostAsDraft}
-            className="flex items-center gap-1.5 px-4 py-2 bg-surface border border-border text-xs font-extrabold hover:text-rose-400 rounded-full transition cursor-pointer"
+            onClick={() => setShowDraftsModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-surface border border-border text-xs font-bold hover:text-primary rounded-full transition cursor-pointer"
+            title="View Saved Drafts"
           >
-            <FolderOpen className="w-4 h-4" />
-            <span>Save Draft</span>
+            <FolderOpen className="w-4 h-4 text-amber-400" />
+            <span>Drafts</span>
           </button>
-        )}
+
+          {/* Save Draft Button */}
+          {items.length > 0 && (uploadType === "post" || uploadType === "reel") && (
+            <button
+              onClick={saveAsDraft}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-surface border border-border text-xs font-extrabold hover:text-rose-400 rounded-full transition cursor-pointer"
+            >
+              <span>Save Draft</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* MODE SELECTOR */}
       <div className="w-[90%] max-w-[500px] mx-auto mt-6 p-1 bg-surface/60 border border-border/80 rounded-full flex justify-around items-center shrink-0">
-        {["post", "story", "loop"].map((t) => (
+        {["post", "story", "reel"].map((t) => (
           <button
             key={t}
-            onClick={() => {
-              setUploadType(t);
-              setItems([]);
-              setActiveIndex(0);
-            }}
+            onClick={() => handleSwitchType(t)}
             className={`w-[32%] py-2 text-xs font-extrabold rounded-full transition capitalize cursor-pointer ${
               uploadType === t ? "bg-rose-600 text-text shadow-lg shadow-rose-600/10" : "text-text-muted hover:text-text"
             }`}
           >
-            {t === "loop" ? "Reels" : t}
+            {t === "reel" ? "Reels" : t}
           </button>
         ))}
       </div>
@@ -520,7 +748,7 @@ export const Upload = () => {
               <input 
                 type="file" 
                 multiple={uploadType === "post"} 
-                accept={uploadType === "loop" ? "video/*" : "image/*,video/*"} 
+                accept={uploadType === "reel" ? "video/*" : "image/*,video/*"} 
                 hidden 
                 ref={mediaInput} 
                 onChange={handleMediaSelect} 
@@ -530,7 +758,7 @@ export const Upload = () => {
               </div>
               <p className="text-sm font-bold text-text">Select Media files</p>
               <p className="text-[10px] text-text-muted font-semibold px-6 text-center">
-                {uploadType === "post" ? "Upload up to 10 images or videos as a carousel" : "Upload a video file for Reels (Loops)"}
+                {uploadType === "post" ? "Upload up to 10 images or videos as a carousel" : "Upload a video file for Reels"}
               </p>
             </div>
           ) : (
@@ -836,6 +1064,184 @@ export const Upload = () => {
             </div>
           )}
 
+          {/* VYBE TV / VIDEO FORMAT CARD */}
+          {(uploadType === "reel" || (items.length > 0 && items.some(i => i.type === "video"))) && (
+            <div className="bg-surface/40 border border-border/80 rounded-3xl p-5 space-y-3.5 shadow-sm backdrop-blur-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-inner border ${
+                    isVybeTv 
+                      ? "bg-gradient-to-tr from-amber-500/20 via-orange-500/20 to-rose-500/20 border-orange-500/30 text-orange-400"
+                      : "bg-gradient-to-tr from-pink-500/20 via-rose-500/20 to-purple-500/20 border-rose-500/30 text-rose-400"
+                  }`}>
+                    {isVybeTv ? <Tv className="w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-bold text-text">
+                        {isVybeTv ? "VYBE TV (Long-form Video)" : "Short-form Reel"}
+                      </p>
+                      <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold ${
+                        isVybeTv ? "bg-orange-500/15 text-orange-300" : "bg-rose-500/15 text-rose-300"
+                      }`}>
+                        {videoDuration > 0 ? `${Math.floor(videoDuration / 60)}:${(videoDuration % 60).toString().padStart(2, '0')}` : "HD Video"}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-text-muted font-medium mt-0.5">
+                      {isVybeTv 
+                        ? "Videos over 3 mins are featured on VYBE TV with widescreen & full scrubber"
+                        : "Short vertical video up to 3 mins with standard feed & reels distribution"}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic("selection");
+                    setIsVybeTv(!isVybeTv);
+                  }}
+                  className={`px-3 py-1 rounded-full text-xs font-bold border transition cursor-pointer ${
+                    isVybeTv 
+                      ? "bg-orange-500/20 border-orange-500/40 text-orange-300" 
+                      : "bg-surface border-border text-text-secondary hover:text-text"
+                  }`}
+                >
+                  {isVybeTv ? "TV Mode" : "Reel Mode"}
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 text-[10px] text-text-secondary bg-surface-inset/40 p-2.5 rounded-xl border border-border/50">
+                <span className="font-semibold text-text">⚡ Specs:</span> Max 1GB size • 4K/1080p 60fps • Auto-upscaling enabled
+              </div>
+            </div>
+          )}
+
+          {/* MADE WITH AI DISCLOSURE CARD */}
+          {(uploadType === "post" || uploadType === "reel") && (
+            <div className="bg-surface/40 border border-border/80 rounded-3xl p-5 space-y-4 shadow-sm backdrop-blur-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-500/20 via-pink-500/20 to-purple-600/20 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0 shadow-inner">
+                    <Sparkles className="w-5 h-5 fill-purple-400/20" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-bold text-text">Add "Made with AI" Label</p>
+                      <span className="px-1.5 py-0.5 rounded-md bg-purple-500/15 text-[9px] font-bold text-purple-300">AI</span>
+                    </div>
+                    <p className="text-[10px] text-text-muted font-medium mt-0.5">
+                      Disclose that your media was created or modified with AI
+                    </p>
+                  </div>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isAIGenerated}
+                    onChange={(e) => {
+                      triggerHaptic("selection");
+                      setIsAIGenerated(e.target.checked);
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-surface-hover peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gradient-to-r peer-checked:from-purple-600 peer-checked:to-pink-600 shadow-sm"></div>
+                </label>
+              </div>
+
+              {/* Expanded AI Settings */}
+              {isAIGenerated && (
+                <div className="pt-3 border-t border-border/60 space-y-3.5 animate-fade-in">
+                  {/* Content Type Selector */}
+                  <div>
+                    <label className="text-[11px] font-bold text-text-secondary uppercase tracking-wider block mb-1.5">
+                      What type of AI media?
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { id: "image", label: "AI Image / Art" },
+                        { id: "video", label: "AI Video / Clip" },
+                        { id: "voice", label: "Voice Clone / Audio" },
+                        { id: "avatar", label: "Photorealistic Face" },
+                        { id: "full", label: "Fully Generated" },
+                      ].map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => {
+                            triggerHaptic("selection");
+                            setAiContentType(t.id);
+                          }}
+                          className={`px-3 py-1 rounded-full text-xs font-semibold border transition cursor-pointer ${
+                            aiContentType === t.id
+                              ? "bg-purple-600 text-white border-purple-600 shadow-sm"
+                              : "bg-surface border-border text-text-secondary hover:text-text hover:bg-surface-hover"
+                          }`}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Tool Selector Chips */}
+                  <div>
+                    <label className="text-[11px] font-bold text-text-secondary uppercase tracking-wider block mb-1.5">
+                      Which AI tool was used?
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        "Midjourney",
+                        "ChatGPT / DALL·E",
+                        "Runway Gen-3",
+                        "Sora",
+                        "Stable Diffusion",
+                        "Flux.1",
+                        "ElevenLabs",
+                        "Luma Dream",
+                      ].map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => {
+                            triggerHaptic("selection");
+                            setAiTool(aiTool === t ? "" : t);
+                          }}
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition cursor-pointer ${
+                            aiTool === t
+                              ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white border-transparent shadow-sm"
+                              : "bg-surface border-border text-text-secondary hover:text-text hover:bg-surface-hover"
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+
+                    <input
+                      type="text"
+                      placeholder="Or specify custom AI tool name..."
+                      value={aiTool}
+                      onChange={(e) => setAiTool(e.target.value)}
+                      className="w-full bg-surface-inset border border-border text-text text-xs rounded-xl px-3.5 py-2.5 mt-2 focus:border-purple-500 outline-none"
+                    />
+                  </div>
+
+                  {/* Policy Info Trigger */}
+                  <button
+                    type="button"
+                    onClick={() => setShowAIInfoDisclosureModal(true)}
+                    className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>What counts as AI content? Learn more about our policies</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ADVANCED SETTINGS ACCORDION */}
           {uploadType === "post" && (
             <div className="bg-surface/35 border border-border rounded-3xl overflow-hidden transition-all duration-300">
@@ -891,6 +1297,29 @@ export const Upload = () => {
                     </label>
                   </div>
 
+                  {/* Highest Quality Uploads */}
+                  <div className="flex items-center justify-between border-t border-border/60 pt-4">
+                    <div>
+                      <p className="text-xs font-bold text-text">Upload at Highest Quality (HD / 4K)</p>
+                      <p className="text-[10px] text-text-muted font-semibold max-w-[220px] mt-0.5">
+                        Always upload highest-resolution photos and videos even if it takes longer.
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={highQualityUpload} 
+                        onChange={(e) => {
+                          setHighQualityUpload(e.target.checked);
+                          setHighQualityUploads(e.target.checked);
+                          triggerHaptic("selection");
+                        }} 
+                        className="sr-only peer" 
+                      />
+                      <div className="w-9 h-5 bg-surface-hover peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-surface-active after:border-border-strong after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-rose-600 peer-checked:after:bg-card peer-checked:after:border-transparent"></div>
+                    </label>
+                  </div>
+
                   {/* Schedule Post Option */}
                   <div className="flex flex-col gap-2 border-t border-border/60 pt-4">
                     <div className="flex items-center justify-between">
@@ -935,7 +1364,7 @@ export const Upload = () => {
                 <span className="text-xs uppercase font-black tracking-widest">{uploadProgressText || "Publishing..."}</span>
               </div>
             ) : (
-              <span>Publish {uploadType === "loop" ? "Reel" : uploadType}</span>
+              <span>Publish {uploadType === "reel" ? "Reel" : uploadType}</span>
             )}
           </button>
         </div>
@@ -968,10 +1397,29 @@ export const Upload = () => {
           }}
           onSelectMusic={(track) => {
             setSelectedMusic(track);
-            toast.success(`Attached Soundtrack: "${track.title}" 🎵`);
+            snackbar.success(`Attached Soundtrack: "${track.title}" 🎵`);
           }}
         />
       )}
+
+      {/* Saved Drafts Manager Modal */}
+      <DraftsModal
+        isOpen={showDraftsModal}
+        onClose={() => setShowDraftsModal(false)}
+        onResumeDraft={handleResumeDraft}
+      />
+
+      {/* AI Transparency Disclosure Policy Modal */}
+      <AIInfoModal
+        isOpen={showAIInfoDisclosureModal}
+        onClose={() => setShowAIInfoDisclosureModal(false)}
+        aiLabel={{
+          isAIGenerated: true,
+          tool: aiTool || "AI Tool",
+          contentType: aiContentType,
+        }}
+        authorName="You"
+      />
     </div>
   );
 };

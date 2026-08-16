@@ -16,6 +16,7 @@ import {
   deleteMessageForEveryone,
   reactMessage,
   searchMessages,
+  getUnreadMessageCount,
 } from "../controllers/message.controller.js";
 import { getUserConversations } from "../controllers/conversation.controller.js";
 
@@ -30,6 +31,7 @@ messageRouter.post("/forward/:messageId", isAuthenticated, forwardMessage);
 messageRouter.post("/pin/:messageId", isAuthenticated, pinMessage);
 
 // Inbox Conversations & Messages
+messageRouter.get("/unread-count", isAuthenticated, getUnreadMessageCount);
 messageRouter.get("/conversations", isAuthenticated, getUserConversations);
 messageRouter.get("/pinned/:conversationId", isAuthenticated, getPinnedMessages);
 messageRouter.get("/shared-media/:conversationId", isAuthenticated, getSharedMedia);

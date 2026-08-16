@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Vote, CheckCircle2, XCircle, Send, ExternalLink, Clock, HelpCircle, AtSign, Hash, Flame, MapPin, Music, PlusCircle, Link2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
 const LyricPlayer = ({ title }) => {
@@ -108,7 +108,7 @@ export const StoryStickers = ({ stickers = [], storyId, currentUserId, pollVotes
         setLocalPollVotes(res.data.pollVotes);
       }
     } catch {
-      toast.error("Failed to submit poll vote.");
+      snackbar.error("Failed to submit poll vote.");
     }
   };
 
@@ -121,12 +121,12 @@ export const StoryStickers = ({ stickers = [], storyId, currentUserId, pollVotes
     try {
       const res = await api.post(`/story/question/${storyId}/submit`, { responseText: questionText.trim() });
       if (res.data.success) {
-        toast.success("Question response sent!");
+        snackbar.success("Question response sent!");
         setQuestionSubmitted(true);
         setQuestionText("");
       }
     } catch {
-      toast.error("Failed to send response.");
+      snackbar.error("Failed to send response.");
     }
   };
 

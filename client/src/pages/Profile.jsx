@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import { MdOutlineKeyboardBackspace } from "react-icons/md";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate, useParams } from "react-router-dom";
@@ -9,7 +9,9 @@ import {
   Bookmark,
   Camera,
   ChevronRight,
+  ChevronDown,
   Film,
+  FolderOpen,
   Grid,
   Heart,
   Link2,
@@ -23,6 +25,9 @@ import {
   CheckCircle2,
   Lock,
   X,
+  Info,
+  Mail,
+  Phone,
 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import ProfileQRModal from "../components/ProfileQRModal";
@@ -30,15 +35,20 @@ import FollowButton from "../components/FollowButton";
 import ProfileInsightsModal from "../components/ProfileInsightsModal";
 import CloseFriendsModal from "../components/CloseFriendsModal";
 import StoryHighlighterModal from "../components/StoryHighlighterModal";
+import AccountSwitcherModal from "../components/AccountSwitcherModal";
+import FollowListModal from "../components/FollowListModal";
+import AboutAccountModal from "../components/AboutAccountModal";
+import DraftsModal from "../components/DraftsModal";
 import VerifiedBadge from "../components/VerifiedBadge";
 import dp from "../assets/dp3.png";
 import { setProfileData, setUserData } from "../redux/features/userSlice";
 import { setSelectedChatUser } from "../redux/features/messageSlice";
+import { useGetUserFullProfileQuery, useGetUserHighlightsQuery } from "../redux/api/apiSlice";
 import api from "../lib/axios";
 
 const PROFILE_TABS = [
   { id: "posts", label: "Posts", icon: Grid },
-  { id: "loops", label: "Reels", icon: Film },
+  { id: "reels", label: "Reels", icon: Film },
   { id: "saved", label: "Saved", icon: Bookmark },
 ];
 
@@ -57,7 +67,7 @@ const resolveMediaUrl = (item) => {
 };
 
 const getPreviewKind = (item, kind) => {
-  if (kind === "loop") return "loop";
+  if (kind === "reel") return "reel";
   if (item?.mediaType === "video") return "video";
   if ((item?.carouselMedia?.length || item?.carousel?.length || 0) > 1) return "carousel";
   return "post";
@@ -79,7 +89,7 @@ const ProfileTile = ({ item, kind, onClick }) => {
       className="group relative aspect-square overflow-hidden rounded-2xl bg-zinc-900 border border-zinc-800/80 text-left shadow-sm transition duration-300 hover:-translate-y-1 hover:border-zinc-700"
     >
       {mediaUrl ? (
-        previewKind === "loop" ? (
+        previewKind === "reel" ? (
           <video src={mediaUrl} className="h-full w-full object-cover" muted playsInline preload="metadata" />
         ) : (
           <img src={mediaUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
@@ -98,16 +108,16 @@ const ProfileTile = ({ item, kind, onClick }) => {
         <div className="min-w-0">
           <p className="truncate text-[11px] font-semibold text-white">{item?.caption || item?.title || item?.name || "Untitled"}</p>
           <p className="mt-0.5 text-[10px] text-zinc-300">
-            {kind === "loop" ? `${viewCount} views` : `${likeCount} likes · ${commentCount} comments`}
+            {kind === "reel" ? `${viewCount} views` : `${likeCount} likes · ${commentCount} comments`}
           </p>
         </div>
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/45 backdrop-blur border border-white/10 text-white">
-          {previewKind === "loop" ? <Play className="h-4 w-4 fill-white" /> : <ChevronRight className="h-4 w-4" />}
+          {previewKind === "reel" ? <Play className="h-4 w-4 fill-white" /> : <ChevronRight className="h-4 w-4" />}
         </div>
       </div>
 
       <div className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-[10px] font-bold text-white backdrop-blur border border-white/10">
-        {previewKind === "loop" ? (
+        {previewKind === "reel" ? (
           <>
             <Play className="h-3 w-3 fill-white" />
             <span>Reel</span>
@@ -219,47 +229,58 @@ const Profile = () => {
   const [showInsightsModal, setShowInsightsModal] = useState(false);
   const [showCloseFriendsModal, setShowCloseFriendsModal] = useState(false);
   const [showHighlighterModal, setShowHighlighterModal] = useState(false);
+  const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
+  const [followModalOpen, setFollowModalOpen] = useState(false);
+  const [followModalTab, setFollowModalTab] = useState("followers");
+  const [showDraftsModal, setShowDraftsModal] = useState(false);
+  const [showAboutModal, setShowAboutModal] = useState(false);
   const [postType, setPostType] = useState("posts");
   const [highlights, setHighlights] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showDpView, setShowDpView] = useState(false);
   const [showDPOptions, setShowDPOptions] = useState(false);
+  const [savedItems, setSavedItems] = useState({ posts: [], reels: [] });
+  const [loadingSaved, setLoadingSaved] = useState(false);
 
-  const handleProfile = useCallback(async () => {
-    try {
-      setLoading(true);
-      const result = await api.get(`/user/getProfile/${userName}`);
-      dispatch(setProfileData(result.data));
-
-      const hlRes = await api.get(`/story/highlight/user/${userName}`).catch(() => null);
-      setHighlights(hlRes?.data?.highlights || []);
-    } catch (error) {
-      toast.error(error?.response?.data?.message || "Failed to load profile.");
-    } finally {
-      setLoading(false);
-    }
-  }, [dispatch, userName]);
+  // RTK Query with instant cache & stale-while-revalidate
+  const { data: fetchedProfile, isLoading: isProfileLoading, refetch: refetchProfile } = useGetUserFullProfileQuery(userName, {
+    skip: !userName,
+  });
+  const { data: fetchedHighlights } = useGetUserHighlightsQuery(userName, {
+    skip: !userName,
+  });
 
   useEffect(() => {
-    let active = true;
+    if (fetchedProfile) {
+      dispatch(setProfileData(fetchedProfile));
+      setLoading(false);
+    }
+  }, [fetchedProfile, dispatch]);
+
+  useEffect(() => {
+    if (fetchedHighlights?.highlights) {
+      setHighlights(fetchedHighlights.highlights);
+    }
+  }, [fetchedHighlights]);
+
+  const handleProfile = useCallback(async () => {
+    if (refetchProfile) {
+      await refetchProfile();
+    }
+  }, [refetchProfile]);
+
+  useEffect(() => {
     window.scrollTo(0, 0);
-    (async () => {
-      if (!active) return;
-      await handleProfile();
-    })();
-    return () => {
-      active = false;
-    };
-  }, [handleProfile]);
+  }, [userName]);
 
   const handleLogOut = async () => {
     try {
       const result = await api.post("/auth/signout");
       dispatch(setUserData(null));
-      toast.success(result.data.message || "Logged out");
+      snackbar.success(result.data.message || "Logged out");
       navigate("/signin");
     } catch {
-      toast.error("Logout failed");
+      snackbar.error("Logout failed");
     }
   };
 
@@ -269,6 +290,31 @@ const Profile = () => {
       (f) => (f._id || f || "").toString() === userData?.user?._id?.toString()
     );
   }, [profileData?.user?.followers, userData?.user?._id]);
+
+  const fetchSavedItems = useCallback(async () => {
+    if (!isOwnProfile) return;
+    try {
+      setLoadingSaved(true);
+      const res = await api.get("/user/saved-items");
+      if (res.data?.success) {
+        const reelsList = res.data.savedReels || [];
+        setSavedItems({
+          posts: res.data.savedPosts || [],
+          reels: reelsList,
+        });
+      }
+    } catch (err) {
+      console.warn("Profile: fetchSavedItems failed", err);
+    } finally {
+      setLoadingSaved(false);
+    }
+  }, [isOwnProfile]);
+
+  useEffect(() => {
+    if (isOwnProfile && postType === "saved") {
+      fetchSavedItems();
+    }
+  }, [isOwnProfile, postType, fetchSavedItems]);
 
   const handleMessage = async () => {
     try {
@@ -281,27 +327,36 @@ const Profile = () => {
       );
       navigate(`/messages/${res.data.conversation._id}`);
     } catch {
-      toast.error("Failed to start message.");
+      snackbar.error("Failed to start message.");
     }
   };
 
-  const tabCounts = useMemo(
-    () => ({
+  const tabCounts = useMemo(() => {
+    const savedCount =
+      (savedItems.posts?.length || profileData?.user?.savedPosts?.length || userData?.user?.savedPosts?.length || 0) +
+      (savedItems.reels?.length || profileData?.user?.savedReels?.length || userData?.user?.savedReels?.length || 0);
+
+    const reelsCount = profileData?.user?.reels?.length || 0;
+
+    return {
       posts: profileData?.user?.posts?.length || 0,
-      loops: profileData?.user?.loops?.length || 0,
-      saved: (userData?.user?.savedPosts?.length || 0) + (userData?.user?.savedLoops?.length || 0),
-    }),
-    [profileData, userData]
-  );
+      reels: reelsCount,
+      saved: savedCount,
+    };
+  }, [profileData, userData, savedItems]);
 
   const savedFeed = useMemo(() => {
-    const savedPosts = (profileData?.user?.posts || []).filter((post) => userData?.user?.savedPosts?.includes(post?._id));
-    const savedLoops = (profileData?.user?.loops || []).filter((loop) => userData?.user?.savedLoops?.includes(loop?._id));
+    const postsList = (savedItems.posts?.length > 0 ? savedItems.posts : profileData?.user?.savedPosts || [])
+      .filter((p) => p && typeof p === "object" && (p._id || p.id));
+
+    const reelsList = (savedItems.reels?.length > 0 ? savedItems.reels : (profileData?.user?.savedReels || []))
+      .filter((l) => l && typeof l === "object" && (l._id || l.id));
+
     return [
-      ...savedPosts.map((item) => ({ ...item, __kind: "post" })),
-      ...savedLoops.map((item) => ({ ...item, __kind: "loop" })),
+      ...postsList.map((item) => ({ ...item, __kind: "post" })),
+      ...reelsList.map((item) => ({ ...item, __kind: "reel" })),
     ];
-  }, [profileData, userData]);
+  }, [savedItems, profileData?.user?.savedPosts, profileData?.user?.savedReels]);
 
   const followerList = useMemo(() => profileData?.user?.followers || [], [profileData]);
   const followingList = useMemo(() => profileData?.user?.following || [], [profileData]);
@@ -309,13 +364,15 @@ const Profile = () => {
   const followingPreview = followingList.slice(0, 6);
 
   const activeFeed = useMemo(() => {
-    if (postType === "loops") return (profileData?.user?.loops || []).map((item) => ({ ...item, __kind: "loop" }));
+    if (postType === "reels") {
+      return (profileData?.user?.reels || []).map((item) => ({ ...item, __kind: "reel" }));
+    }
     if (postType === "saved") return savedFeed;
     return (profileData?.user?.posts || []).map((item) => ({ ...item, __kind: "post" }));
   }, [postType, profileData, savedFeed]);
 
   const feedEmptyState =
-    postType === "loops"
+    postType === "reels"
       ? { title: "No reels yet", copy: isOwnProfile ? "Upload a reel to start building your short-form presence." : "This creator has not shared reels yet." }
       : postType === "saved"
       ? { title: "Nothing saved yet", copy: "Saved posts and reels will appear here for quick access." }
@@ -343,14 +400,19 @@ const Profile = () => {
 
           <div className="text-center">
             <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Profile</p>
-            <div className="mt-1 flex items-center justify-center gap-1.5 text-sm font-bold text-white">
+            <button
+              onClick={() => setShowAccountSwitcher(true)}
+              className="mt-1 flex items-center justify-center gap-1.5 text-sm font-bold text-white hover:text-rose-400 transition cursor-pointer px-3 py-1 rounded-full hover:bg-zinc-900/70 border border-transparent hover:border-zinc-800/80 active:scale-95"
+              title="Switch Account"
+            >
               <span className="text-rose-400">@</span>
-              <span className="truncate">{profileData?.user?.userName || userName}</span>
+              <span className="truncate max-w-[180px] sm:max-w-xs">{profileData?.user?.userName || userName}</span>
               {isVerified && <VerifiedBadge size="xs" />}
               {profileData?.user?.accountType === "private" && (
                 <Lock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
               )}
-            </div>
+              <ChevronDown className="w-3.5 h-3.5 text-zinc-400 shrink-0 group-hover:text-rose-400 transition-transform" />
+            </button>
           </div>
 
           {isOwnProfile ? (
@@ -361,7 +423,13 @@ const Profile = () => {
               Log Out
             </button>
           ) : (
-            <div className="w-[88px]" />
+            <button
+              onClick={() => setShowAboutModal(true)}
+              className="p-2 rounded-full border border-zinc-800 bg-zinc-950/80 text-zinc-400 hover:text-rose-400 hover:border-rose-500/40 transition cursor-pointer"
+              title="About this account"
+            >
+              <Info className="w-4 h-4" />
+            </button>
           )}
         </div>
       </div>
@@ -383,7 +451,7 @@ const Profile = () => {
                       if (!isPrivate || isFollowing) {
                         setShowDpView(true);
                       } else {
-                        toast.error("This account is private. Follow this account to view their profile picture.");
+                        snackbar.error("This account is private. Follow this account to view their profile picture.");
                       }
                     }
                   }}
@@ -404,6 +472,12 @@ const Profile = () => {
                     <div className="flex flex-wrap items-center gap-2">
                       <h1 className="text-2xl font-black tracking-tight text-white sm:text-3xl">{profileData?.user?.name}</h1>
                       {isVerified && <VerifiedBadge size="md" />}
+                      {profileData?.user?.accountType === "private" && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-bold text-amber-300 shadow-xs" title="Private Account">
+                          <Lock className="w-3 h-3 text-amber-400" />
+                          <span>Private</span>
+                        </span>
+                      )}
                       {profileData?.user?.category && (
                         <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-rose-300">
                           {profileData.user.category}
@@ -441,8 +515,12 @@ const Profile = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={() => followerList.length > 0 && setPostType("posts")}
-                    className="rounded-2xl bg-zinc-950/80 p-3 text-left transition hover:border hover:border-zinc-700"
+                    onClick={() => {
+                      setFollowModalTab("followers");
+                      setFollowModalOpen(true);
+                    }}
+                    className="rounded-2xl bg-zinc-950/80 p-3 text-left transition hover:border hover:border-zinc-700 cursor-pointer group"
+                    title="View Followers"
                   >
                     <div className="flex -space-x-2">
                       {followerPreview.length > 0 ? (
@@ -460,13 +538,17 @@ const Profile = () => {
                         </div>
                       )}
                     </div>
-                    <div className="mt-3 text-2xl font-black text-white">{followerList.length}</div>
+                    <div className="mt-3 text-2xl font-black text-white group-hover:text-rose-400 transition">{followerList.length}</div>
                     <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Followers</div>
                   </button>
                   <button
                     type="button"
-                    onClick={() => followingList.length > 0 && setPostType("posts")}
-                    className="rounded-2xl bg-zinc-950/80 p-3 text-left transition hover:border hover:border-zinc-700"
+                    onClick={() => {
+                      setFollowModalTab("following");
+                      setFollowModalOpen(true);
+                    }}
+                    className="rounded-2xl bg-zinc-950/80 p-3 text-left transition hover:border hover:border-zinc-700 cursor-pointer group"
+                    title="View Following"
                   >
                     <div className="flex -space-x-2">
                       {followingPreview.length > 0 ? (
@@ -484,20 +566,36 @@ const Profile = () => {
                         </div>
                       )}
                     </div>
-                    <div className="mt-3 text-2xl font-black text-white">{followingList.length}</div>
+                    <div className="mt-3 text-2xl font-black text-white group-hover:text-rose-400 transition">{followingList.length}</div>
                     <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Following</div>
                   </button>
                 </div>
 
                 <div className="mt-3 grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl border border-zinc-900 bg-zinc-950/60 px-3 py-2">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Mutual vibes</div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFollowModalTab("mutuals");
+                      setFollowModalOpen(true);
+                    }}
+                    className="rounded-2xl border border-zinc-900 bg-zinc-950/60 px-3 py-2 text-left hover:border-zinc-700 transition cursor-pointer group"
+                    title="View Mutual Connections"
+                  >
+                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500 group-hover:text-rose-400 transition">Mutual vibes</div>
                     <div className="mt-1 text-sm font-semibold text-white">{Math.min(followerList.length, followingList.length)} connections</div>
-                  </div>
-                  <div className="rounded-2xl border border-zinc-900 bg-zinc-950/60 px-3 py-2">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Network</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFollowModalTab("followers");
+                      setFollowModalOpen(true);
+                    }}
+                    className="rounded-2xl border border-zinc-900 bg-zinc-950/60 px-3 py-2 text-left hover:border-zinc-700 transition cursor-pointer group"
+                    title="View Network"
+                  >
+                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500 group-hover:text-rose-400 transition">Network</div>
                     <div className="mt-1 text-sm font-semibold text-white">{followerList.length + followingList.length} total</div>
-                  </div>
+                  </button>
                 </div>
               </div>
             </div>
@@ -506,7 +604,7 @@ const Profile = () => {
               {isOwnProfile ? (
                 <>
                   <button
-                    className="rounded-full bg-white px-4 py-2 text-xs font-bold text-black transition hover:bg-zinc-200"
+                    className="rounded-full bg-white px-4 py-2 text-xs font-bold text-black transition hover:bg-zinc-200 cursor-pointer"
                     onClick={() => navigate("/edit-profile")}
                   >
                     Edit Profile
@@ -518,22 +616,30 @@ const Profile = () => {
                     Share Profile
                   </button>
                   <button
-                    className="inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-500/10 px-4 py-2 text-xs font-bold text-purple-300 transition hover:border-purple-400 hover:text-white"
+                    className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs font-bold text-amber-300 transition hover:border-amber-400 hover:text-white cursor-pointer"
+                    onClick={() => setShowDraftsModal(true)}
+                    title="Saved Drafts"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    Drafts
+                  </button>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-500/10 px-4 py-2 text-xs font-bold text-purple-300 transition hover:border-purple-400 hover:text-white cursor-pointer"
                     onClick={() => setShowInsightsModal(true)}
                   >
                     <BarChart2 className="h-3.5 w-3.5" />
                     Insights
                   </button>
                   <button
-                    className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-300 transition hover:border-emerald-400 hover:text-white"
+                    className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-300 transition hover:border-emerald-400 hover:text-white cursor-pointer"
                     onClick={() => setShowCloseFriendsModal(true)}
                   >
                     <Star className="h-3.5 w-3.5 fill-current" />
                     Close Friends
                   </button>
                   <button
-                    className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-bold text-zinc-300 transition hover:border-zinc-700 hover:text-white"
-                    onClick={() => navigate("/post/archive")}
+                    className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-bold text-zinc-300 transition hover:border-zinc-700 hover:text-white cursor-pointer"
+                    onClick={() => navigate("/story/archive")}
                   >
                     <Archive className="h-3.5 w-3.5" />
                     Archive
@@ -561,11 +667,19 @@ const Profile = () => {
                     Message
                   </button>
                   <button
-                    className="inline-flex items-center gap-2 rounded-full border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs font-bold text-rose-300 transition hover:border-rose-500 hover:text-white cursor-pointer"
+                    className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-bold text-zinc-300 transition hover:border-zinc-700 hover:text-white cursor-pointer"
+                    onClick={() => setShowAboutModal(true)}
+                    title="About This Account"
+                  >
+                    <Info className="h-3.5 w-3.5 text-rose-400" />
+                    About
+                  </button>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-bold text-zinc-300 transition hover:border-zinc-700 hover:text-white cursor-pointer"
                     onClick={() => setShowQRModal(true)}
                   >
                     <QrCode className="h-3.5 w-3.5" />
-                    View QR Code
+                    QR
                   </button>
                 </>
               )}
@@ -653,7 +767,7 @@ const Profile = () => {
             </section>
 
             <section className="rounded-[2rem] border border-zinc-900 bg-zinc-950/70 p-4 sm:p-5">
-              {loading ? (
+              {(loading || (postType === "saved" && loadingSaved && activeFeed.length === 0)) ? (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                     {Array.from({ length: 8 }).map((_, idx) => (
@@ -664,7 +778,7 @@ const Profile = () => {
               ) : activeFeed.length === 0 ? (
                 <div className="flex min-h-[40vh] flex-col items-center justify-center text-center">
                   <div className="rounded-full border border-zinc-800 bg-zinc-900 p-4">
-                    {postType === "loops" ? <Play className="h-7 w-7 text-rose-400" /> : <Grid className="h-7 w-7 text-rose-400" />}
+                    {postType === "reels" ? <Play className="h-7 w-7 text-rose-400" /> : <Grid className="h-7 w-7 text-rose-400" />}
                   </div>
                   <h3 className="mt-4 text-lg font-bold text-white">{feedEmptyState.title}</h3>
                   <p className="mt-2 max-w-sm text-sm leading-6 text-zinc-400">{feedEmptyState.copy}</p>
@@ -680,7 +794,7 @@ const Profile = () => {
               ) : (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                   {activeFeed.map((item) => {
-                    const itemKind = item.__kind || (postType === "loops" ? "loop" : "post");
+                    const itemKind = item.__kind || (postType === "reels" ? "reel" : "post");
 
                     return (
                       <ProfileTile
@@ -688,7 +802,7 @@ const Profile = () => {
                         item={item}
                         kind={itemKind}
                         onClick={() => {
-                          if (itemKind === "loop") {
+                          if (itemKind === "reel") {
                             navigate(`/reels?reelId=${item._id}`);
                           } else {
                             navigate(`/?postId=${item._id}`);
@@ -727,6 +841,27 @@ const Profile = () => {
         />
       )}
 
+      {/* Account Switcher Modal */}
+      <AccountSwitcherModal
+        isOpen={showAccountSwitcher}
+        onClose={() => setShowAccountSwitcher(false)}
+      />
+
+      {/* Followers / Following / Mutual Connections Modal */}
+      <FollowListModal
+        isOpen={followModalOpen}
+        onClose={() => setFollowModalOpen(false)}
+        initialTab={followModalTab}
+        userName={profileData?.user?.userName || userName}
+        profileUser={profileData?.user}
+      />
+
+      {/* Saved Drafts Manager Modal */}
+      <DraftsModal
+        isOpen={showDraftsModal}
+        onClose={() => setShowDraftsModal(false)}
+      />
+
       {/* Own Profile DP Options Bottom Sheet / Drawer */}
       {showDPOptions && (
         <DPOptionsModal
@@ -739,6 +874,16 @@ const Profile = () => {
             setShowDPOptions(false);
             setShowQRModal(true);
           }}
+        />
+      )}
+
+      {/* About Account Modal */}
+      {showAboutModal && (
+        <AboutAccountModal
+          isOpen={showAboutModal}
+          onClose={() => setShowAboutModal(false)}
+          user={profileData?.user}
+          isOwnProfile={isOwnProfile}
         />
       )}
 
@@ -892,7 +1037,7 @@ const FullScreenDPViewer = ({ imageUrl, userName, onClose }) => {
         </button>
       </div>
 
-      {/* Security Toast Warning Banner */}
+      {/* Security Warning Banner */}
       {screenshotAlert && (
         <div className="absolute top-20 z-30 flex items-center gap-2 bg-rose-600 text-white text-xs font-black px-6 py-2.5 rounded-full shadow-2xl animate-bounce border border-rose-400">
           <ShieldAlert className="w-4 h-4" />

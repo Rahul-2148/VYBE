@@ -33,7 +33,7 @@ import {
   ToggleLeft,
   ToggleRight,
 } from "lucide-react";
-import toast from "../lib/toast";
+import { snackbar } from "../lib/snackbar";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/axios";
 import TwoFactorModal from "../components/TwoFactorModal";
@@ -83,7 +83,7 @@ export const SecurityDashboard = () => {
   const [showNewPass, setShowNewPass] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
 
-  // Instagram Privacy & DM Controls
+  // VYBE Privacy & DM Controls
   const [savedLoginInfo, setSavedLoginInfo] = useState(true);
   const [isPrivateAccount, setIsPrivateAccount] = useState(false);
   const [hideLikes, setHideLikes] = useState(false);
@@ -129,11 +129,11 @@ export const SecurityDashboard = () => {
       if (logsRes?.data?.logs) setSecurityLogs(logsRes.data.logs);
 
       if (isManual) {
-        toast.success("Security status refreshed! 🛡️");
+        snackbar.success("Security status refreshed! 🛡️");
       }
     } catch (err) {
       console.warn("Failed to load security center data:", err);
-      toast.error("Failed to load security center data.");
+      snackbar.error("Failed to load security center data.");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -146,10 +146,10 @@ export const SecurityDashboard = () => {
     try {
       const res = await api.patch("/user/privacy-settings", { [key]: value });
       if (res.data.success) {
-        toast.success("Privacy setting updated! ✨");
+        snackbar.success("Privacy setting updated! ✨");
       }
     } catch {
-      toast.error("Failed to update privacy setting.");
+      snackbar.error("Failed to update privacy setting.");
     }
   };
 
@@ -172,7 +172,7 @@ export const SecurityDashboard = () => {
         setIs2FaModalOpen(true);
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to initiate 2FA setup.");
+      snackbar.error(err.response?.data?.message || "Failed to initiate 2FA setup.");
     }
   };
 
@@ -193,25 +193,25 @@ export const SecurityDashboard = () => {
       });
 
       if (res.data.success) {
-        toast.success("2FA Disabled Successfully");
+        snackbar.success("2FA Disabled Successfully");
         setShowDisableModal(false);
         setDisablePassword("");
         setDisableCode("");
         fetchData();
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to disable 2FA.");
+      snackbar.error(err.response?.data?.message || "Failed to disable 2FA.");
     }
   };
 
   const handleChangePasswordSubmit = async (e) => {
     e.preventDefault();
     if (newPassword !== confirmPassword) {
-      toast.error("New passwords do not match!");
+      snackbar.error("New passwords do not match!");
       return;
     }
     if (newPassword.length < 6) {
-      toast.error("New password must be at least 6 characters.");
+      snackbar.error("New password must be at least 6 characters.");
       return;
     }
 
@@ -223,7 +223,7 @@ export const SecurityDashboard = () => {
       });
 
       if (res.data.success) {
-        toast.success("Password updated successfully! ✨");
+        snackbar.success("Password updated successfully! ✨");
         setShowChangePasswordModal(false);
         setCurrentPassword("");
         setNewPassword("");
@@ -231,7 +231,7 @@ export const SecurityDashboard = () => {
         fetchData();
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to update password.");
+      snackbar.error(err.response?.data?.message || "Failed to update password.");
     } finally {
       setChangingPassword(false);
     }
@@ -241,24 +241,23 @@ export const SecurityDashboard = () => {
     try {
       const res = await api.delete(`/auth/sessions/${sessionId}`);
       if (res.data.success) {
-        toast.success("Remote device logged out successfully.");
+        snackbar.success("Remote device logged out successfully.");
         setSessions(sessions.filter((s) => s.id !== sessionId));
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to revoke session.");
+      snackbar.error(err.response?.data?.message || "Failed to revoke session.");
     }
   };
 
   const handleRevokeAllOthers = async () => {
-    if (!window.confirm("Are you sure you want to log out of all other devices?")) return;
     try {
       const res = await api.delete("/auth/sessions/revoke-others");
       if (res.data.success) {
-        toast.success("Logged out from all other devices!");
+        snackbar.success("Logged out from all other devices! 🔒");
         fetchData();
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to revoke all sessions.");
+      snackbar.error(err.response?.data?.message || "Failed to revoke all sessions.");
     }
   };
 
@@ -267,16 +266,16 @@ export const SecurityDashboard = () => {
       const nextVal = !isPrivateAccount;
       setIsPrivateAccount(nextVal);
       await api.post("/user/edit-profile", { isPrivate: nextVal });
-      toast.success(nextVal ? "Account set to Private" : "Account set to Public");
+      snackbar.success(nextVal ? "Account set to Private" : "Account set to Public");
     } catch {
       setIsPrivateAccount(!isPrivateAccount);
-      toast.error("Failed to update privacy setting");
+      snackbar.error("Failed to update privacy setting");
     }
   };
 
   const copyRecoveryCodes = () => {
     navigator.clipboard.writeText(recoveryCodes.join("\n"));
-    toast.success("Recovery codes copied to clipboard!");
+    snackbar.success("Recovery codes copied to clipboard!");
   };
 
   const formatEventName = (eventType) => {
@@ -344,7 +343,7 @@ export const SecurityDashboard = () => {
       </div>
 
       <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
-        {/* Instagram Meta Accounts Banner */}
+        {/* VYBE Accounts Center Banner */}
         <div className="p-4 bg-surface/40 border border-border/60 rounded-2xl flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-500 via-purple-600 to-amber-500 flex items-center justify-center shrink-0 shadow-lg">
             <ShieldCheck className="w-6 h-6 text-text" />
@@ -386,7 +385,7 @@ export const SecurityDashboard = () => {
           </div>
         </div>
 
-        {/* SECTION 1: Instagram Security Checkup Checklist */}
+        {/* SECTION 1: VYBE Security Checkup Checklist */}
         <div className="rounded-2xl bg-surface/60 border border-border/60 overflow-hidden">
           <button
             onClick={() => toggleSection("checkup")}
@@ -557,7 +556,7 @@ export const SecurityDashboard = () => {
                     <button
                       onClick={() => {
                         setSavedLoginInfo(!savedLoginInfo);
-                        toast.success(savedLoginInfo ? "Saved login info turned off" : "Saved login info turned on");
+                        snackbar.success(savedLoginInfo ? "Saved login info turned off" : "Saved login info turned on");
                       }}
                       className="cursor-pointer"
                     >
@@ -616,9 +615,9 @@ export const SecurityDashboard = () => {
                         setIsPrivateAccount(!isPrivateAccount);
                         try {
                           await api.patch("/user/privacy-settings", { accountType: newType });
-                          toast.success(`Account set to ${newType}!`);
+                          snackbar.success(`Account set to ${newType}!`);
                         } catch {
-                          toast.error("Failed to update account type.");
+                          snackbar.error("Failed to update account type.");
                         }
                       }}
                       className="cursor-pointer"

@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Radio, Eye, Heart, Send, X, Users, MessageSquare } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import { getSocket } from "../lib/socket";
 
-export const InstagramLiveModal = ({ isOpen, onClose }) => {
+export const VybeLiveModal = ({ isOpen, onClose }) => {
   const [streamTitle, setStreamTitle] = useState("");
   const [isLive, setIsLive] = useState(false);
   const [streamId, setStreamId] = useState(null);
@@ -129,10 +129,10 @@ export const InstagramLiveModal = ({ isOpen, onClose }) => {
         localStreamRef.current = stream;
         if (videoRef.current) videoRef.current.srcObject = stream;
 
-        toast.success("🔴 YOU ARE NOW LIVE!");
+        snackbar.success("🔴 YOU ARE NOW LIVE!");
       }
     } catch {
-      toast.error("Failed to start live broadcast.");
+      snackbar.error("Failed to start live broadcast.");
     }
   };
 
@@ -175,7 +175,7 @@ export const InstagramLiveModal = ({ isOpen, onClose }) => {
         const socket = getSocket();
         socket?.emit("end-live-stream", { streamId });
       } catch (e) {
-        console.warn("InstagramLiveModal: handleEndLive API call failed", e);
+        console.warn("VybeLiveModal: handleEndLive API call failed", e);
       }
     }
     setIsLive(false);
@@ -224,7 +224,7 @@ export const InstagramLiveModal = ({ isOpen, onClose }) => {
                 <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-pink-500 via-rose-500 to-purple-600 flex items-center justify-center text-text shadow-2xl">
                   <Radio className="w-8 h-8 animate-pulse" />
                 </div>
-                <h3 className="text-xl font-extrabold text-text">Start Instagram Broadcast</h3>
+                <h3 className="text-xl font-extrabold text-text">Start Live Broadcast</h3>
                 <input
                   type="text"
                   placeholder="Enter stream title (e.g. Q&A Session)..."
@@ -298,4 +298,4 @@ export const InstagramLiveModal = ({ isOpen, onClose }) => {
   );
 };
 
-export default InstagramLiveModal;
+export default VybeLiveModal;

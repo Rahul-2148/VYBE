@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FiVolume2, FiVolumeX } from "react-icons/fi";
+import { getOptimizedMediaUrl } from "../lib/mediaQualitySettings";
 
 const VideoPlayer = ({ media }) => {
   const videoTag = useRef(null);
@@ -48,9 +49,9 @@ const VideoPlayer = ({ media }) => {
     <div className="h-[100%] relative cursor-pointer max-w-full rounded-2xl overflow-hidden">
       <video
         ref={videoTag}
-        src={media}
+        src={getOptimizedMediaUrl(media, "video")}
         preload="metadata"
-        loop
+        onEnded={(e) => { e.target.currentTime = 0; e.target.play().catch(() => null); }}
         muted={mute}
         className="h-[100%] cursor-pointer w-full rounded-2xl object-cover"
         onClick={handleClick}

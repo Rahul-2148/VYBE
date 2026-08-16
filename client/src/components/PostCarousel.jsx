@@ -2,6 +2,14 @@ import React, { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import VideoPlayer from "./VideoPlayer";
 
+// Ensure Cloudinary image URLs have f_auto,q_auto for browser compatibility (HEIF/WebP)
+const ensureCloudinaryAutoFormat = (url) => {
+  if (!url || typeof url !== "string") return url;
+  if (!url.includes("cloudinary.com") || !url.includes("/upload/")) return url;
+  if (url.includes("f_auto")) return url;
+  return url.replace("/upload/", "/upload/f_auto,q_auto/");
+};
+
 export const PostCarousel = ({ mediaList = [] }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
 
@@ -27,7 +35,7 @@ export const PostCarousel = ({ mediaList = [] }) => {
       {mediaList[currentIndex]?.type === "video" ? (
         <VideoPlayer media={mediaList[currentIndex].url} />
       ) : (
-        <img src={mediaList[currentIndex]?.url} alt="" loading="lazy" className="w-full h-full object-cover" />
+        <img src={ensureCloudinaryAutoFormat(mediaList[currentIndex]?.url)} alt="" loading="lazy" className="w-full h-full object-cover" />
       )}
 
       {/* Item Counter Badge top right */}

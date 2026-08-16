@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import { RxCross2 } from "react-icons/rx";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -96,12 +96,12 @@ const SignIn = () => {
       addLinkedAccount(loggedInUser);
       setActiveAccountId(loggedInUser._id);
 
-      toast.success(res.data.message || `Welcome back ${loggedInUser?.name || loggedInUser?.userName}`);
+      snackbar.success(res.data.message || `Welcome back ${loggedInUser?.name || loggedInUser?.userName}`);
       setTimeout(() => navigate("/", { replace: true }), 400);
     } catch (err) {
       const msg = err.response?.data?.message || "Sign in failed. Check your credentials.";
       setError(msg);
-      toast.error(msg);
+      snackbar.error(msg);
     } finally {
       setIsLoading(false);
     }
@@ -119,17 +119,17 @@ const SignIn = () => {
   const handleRequestMagicLink = async (e) => {
     e.preventDefault();
     if (!magicEmail) {
-      toast.error("Please enter your email address.");
+      snackbar.error("Please enter your email address.");
       return;
     }
 
     setIsLoading(true);
     try {
       const res = await api.post("/auth/magic-link/request", { email: magicEmail });
-      toast.success(res.data.message || "Magic Link sent to your inbox!");
+      snackbar.success(res.data.message || "Magic Link sent to your inbox!");
       setMagicSubmitted(true);
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to send Magic Link.");
+      snackbar.error(err.response?.data?.message || "Failed to send Magic Link.");
     } finally {
       setIsLoading(false);
     }
@@ -149,15 +149,15 @@ const SignIn = () => {
       dispatch(setUserData(res.data.user || res.data));
       addLinkedAccount(res.data.user || res.data);
       setActiveAccountId((res.data.user || res.data)?._id);
-      toast.success(`Welcome back ${res.data.user?.name || res.data?.user?.userName}`);
+      snackbar.success(`Welcome back ${res.data.user?.name || res.data?.user?.userName}`);
       navigate("/", { replace: true });
     } catch (err) {
-      toast.error(err.response?.data?.message || "Google login failed");
+      snackbar.error(err.response?.data?.message || "Google login failed");
     }
   };
 
   const handleGoogleUsernameSubmit = async () => {
-    if (!googleUsername) return toast.error("Username is required");
+    if (!googleUsername) return snackbar.error("Username is required");
     setGoogleLoading(true);
 
     try {
@@ -169,26 +169,33 @@ const SignIn = () => {
       dispatch(setUserData(res.data.user || res.data));
       addLinkedAccount(res.data.user || res.data);
       setActiveAccountId((res.data.user || res.data)?._id);
-      toast.success("Welcome to VYBE!");
+      snackbar.success("Welcome to VYBE!");
       setShowUsernameModal(false);
       navigate("/", { replace: true });
     } catch (err) {
-      toast.error(err.response?.data?.message || "Error completing signup");
+      snackbar.error(err.response?.data?.message || "Error completing signup");
     } finally {
       setGoogleLoading(false);
     }
   };
 
   return (
-    <div className="w-full min-h-screen bg-bg text-text flex flex-col justify-center items-center p-4 selection:bg-rose-500 selection:text-text">
-      {/* Outer Card Container */}
-      <div className="w-full max-w-4xl bg-surface-inset/90 border border-border/80 rounded-3xl overflow-hidden shadow-2xl flex flex-col lg:flex-row my-auto">
+    <div className="relative w-full min-h-screen bg-bg text-text flex flex-col justify-center items-center p-4 sm:p-6 overflow-x-hidden selection:bg-rose-500 selection:text-white">
+      {/* Dynamic Ambient Background Glow */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-40 -left-40 w-96 h-96 bg-rose-500/10 rounded-full blur-3xl" />
+        <div className="absolute top-1/2 -right-40 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 left-1/3 w-96 h-96 bg-pink-500/10 rounded-full blur-3xl" />
+      </div>
+
+      {/* Main Glassmorphic Card Container */}
+      <div className="relative z-10 w-full max-w-4xl bg-surface/90 border border-border rounded-3xl overflow-hidden shadow-2xl backdrop-blur-2xl flex flex-col lg:flex-row my-auto">
         
-        {/* Left Side: Form */}
-        <div className="w-full lg:w-[50%] p-8 sm:p-10 flex flex-col justify-center items-center space-y-6">
+        {/* Left Side: Form Container */}
+        <div className="w-full lg:w-[50%] p-6 sm:p-10 flex flex-col justify-center items-center space-y-6">
           
-          {/* Logo Header */}
-          <div className="flex flex-col items-center gap-2">
+          {/* Logo & Header */}
+          <div className="w-full flex flex-col items-center gap-2 text-center">
             {isAddAccountMode && currentUserName && (
               <button
                 onClick={() => navigate("/", { replace: true })}
@@ -198,16 +205,20 @@ const SignIn = () => {
                 Back to @{currentUserName}
               </button>
             )}
-            <img src={logo2} alt="VYBE" className="h-10 object-contain" style={{ filter: themeCtx.resolvedTheme === "dark" ? "none" : "invert(1)" }} />
+            <img
+              src={logo}
+              alt="VYBE"
+              className="h-9 w-auto object-contain transition-transform hover:scale-105 theme-logo-adaptive"
+            />
             <p className="text-xs text-text-secondary font-medium tracking-tight">
-              {isAddAccountMode ? "Add another account" : "Sign in to your account"}
+              {isAddAccountMode ? "Add another account to your session" : "Sign in to connect, share & explore"}
             </p>
           </div>
 
           {!isMagicLinkMode ? (
             <form onSubmit={handleSignIn} className="w-full space-y-4">
               
-              {/* Instagram Floating Inputs */}
+              {/* Spacious Floating-Label Inputs */}
               <VybeInput
                 id="userName"
                 label="Phone number, username, or email"
@@ -229,21 +240,21 @@ const SignIn = () => {
                 required
               />
 
-              {/* Remember me & Forgot Password */}
+              {/* Remember Me & Forgot Password */}
               <div className="flex items-center justify-between text-xs px-1 text-text-secondary">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
+                <label className="flex items-center gap-2 cursor-pointer select-none group">
                   <input
                     type="checkbox"
                     checked={rememberMe}
                     onChange={(e) => setRememberMe(e.target.checked)}
-                    className="rounded border-border-strong bg-surface text-rose-600 focus:ring-rose-500 cursor-pointer"
+                    className="w-4 h-4 rounded border-border-strong bg-surface text-primary focus:ring-primary accent-primary cursor-pointer"
                   />
-                  <span>Remember login info</span>
+                  <span className="group-hover:text-text transition">Remember login info</span>
                 </label>
 
                 <span
                   onClick={() => navigate(isAddAccountMode ? "/forgot-password?addAccount=true" : "/forgot-password")}
-                  className="text-xs font-semibold text-rose-500 hover:text-rose-400 hover:underline cursor-pointer"
+                  className="font-semibold text-rose-500 hover:text-rose-400 hover:underline cursor-pointer transition"
                 >
                   Forgot password?
                 </span>
@@ -251,55 +262,55 @@ const SignIn = () => {
 
               {/* Error Alert */}
               {error && (
-                <div className="w-full flex items-center justify-between p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs">
-                  <span>{error}</span>
-                  <RxCross2 className="cursor-pointer hover:text-text" size={16} onClick={() => setError("")} />
+                <div className="w-full flex items-center justify-between p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs animate-in fade-in duration-200">
+                  <span className="font-medium">{error}</span>
+                  <RxCross2 className="cursor-pointer hover:text-rose-600 transition" size={16} onClick={() => setError("")} />
                 </div>
               )}
 
-              {/* Submit Button */}
+              {/* Primary Submit Button */}
               <button
                 type="submit"
                 disabled={isLoading || !userName.trim() || !password.trim()}
-                className="w-full h-11 bg-gradient-to-r from-rose-600 via-pink-600 to-purple-600 hover:opacity-95 text-text font-semibold text-sm rounded-xl transition shadow-lg flex items-center justify-center disabled:opacity-50 cursor-pointer"
+                className="w-full h-12 bg-gradient-to-r from-rose-500 via-pink-500 to-purple-600 hover:from-rose-600 hover:to-purple-700 text-white font-bold text-sm rounded-xl shadow-md hover:shadow-lg transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center disabled:opacity-50 cursor-pointer"
               >
-                {isLoading ? <ClipLoader color="white" size={20} /> : "Log In"}
+                {isLoading ? <ClipLoader color="#ffffff" size={20} /> : "Log In"}
               </button>
 
               {/* Magic Link Switcher */}
               <button
                 type="button"
                 onClick={() => setIsMagicLinkMode(true)}
-                className="w-full py-2.5 bg-surface/80 hover:bg-surface text-text hover:text-text border border-border font-medium rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer"
+                className="w-full h-11 bg-surface hover:bg-surface-hover text-text border border-border font-semibold rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-xs"
               >
                 <Sparkles className="w-4 h-4 text-rose-500" />
                 <span>Log in with Magic Link 🪄</span>
               </button>
 
               {/* Divider */}
-              <div className="flex items-center gap-3 text-xs text-text-muted my-2">
-                <div className="h-[1px] bg-surface-hover flex-1" />
-                <span className="font-semibold uppercase tracking-widest text-[10px]">OR</span>
-                <div className="h-[1px] bg-surface-hover flex-1" />
+              <div className="flex items-center gap-3 text-xs text-text-muted my-3">
+                <div className="h-[1px] bg-border flex-1" />
+                <span className="font-bold uppercase tracking-widest text-[10px] text-text-muted">OR</span>
+                <div className="h-[1px] bg-border flex-1" />
               </div>
 
               {/* Google Button Wrapper */}
               <div className="w-full flex justify-center">
                 <GoogleLogin
                   onSuccess={handleGoogleLoginSuccess}
-                  onError={() => toast.error("Google login failed")}
-                  theme="filled_black"
+                  onError={() => snackbar.error("Google login failed")}
+                  theme={themeCtx.resolvedTheme === "dark" ? "filled_black" : "outline"}
                   shape="pill"
                   width="320"
                 />
               </div>
 
-              {/* Sign Up Redirect */}
+              {/* Sign Up Switcher */}
               <div className="pt-2 text-center text-xs text-text-secondary">
                 <span>Don't have an account? </span>
                 <span
                   onClick={() => navigate(isAddAccountMode ? "/signup?addAccount=true" : "/signup")}
-                  className="font-bold text-rose-500 hover:text-rose-400 cursor-pointer hover:underline"
+                  className="font-bold text-rose-500 hover:text-rose-400 cursor-pointer hover:underline transition"
                 >
                   Sign up
                 </span>
@@ -317,9 +328,9 @@ const SignIn = () => {
 
               {!magicSubmitted ? (
                 <form onSubmit={handleRequestMagicLink} className="space-y-4">
-                  <div className="text-center space-y-1">
-                    <div className="w-10 h-10 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-500 mx-auto">
-                      <Sparkles className="w-5 h-5" />
+                  <div className="text-center space-y-1.5">
+                    <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-500 mx-auto shadow-xs">
+                      <Sparkles className="w-6 h-6" />
                     </div>
                     <h3 className="text-base font-bold text-text">Passwordless Login</h3>
                     <p className="text-xs text-text-secondary">
@@ -339,14 +350,14 @@ const SignIn = () => {
                   <button
                     type="submit"
                     disabled={isLoading || !magicEmail.trim()}
-                    className="w-full h-11 bg-gradient-to-r from-rose-600 to-pink-600 hover:opacity-95 text-text font-semibold text-sm rounded-xl transition shadow-lg flex items-center justify-center disabled:opacity-50 cursor-pointer"
+                    className="w-full h-12 bg-gradient-to-r from-rose-500 via-pink-500 to-purple-600 hover:from-rose-600 hover:to-purple-700 text-white font-bold text-sm rounded-xl shadow-md hover:shadow-lg transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center disabled:opacity-50 cursor-pointer"
                   >
-                    {isLoading ? <ClipLoader color="white" size={20} /> : "Send Magic Link 🪄"}
+                    {isLoading ? <ClipLoader color="#ffffff" size={20} /> : "Send Magic Link 🪄"}
                   </button>
                 </form>
               ) : (
-                <div className="text-center space-y-3 py-4">
-                  <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto">
+                <div className="text-center space-y-3 py-4 animate-in fade-in duration-200">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 flex items-center justify-center mx-auto shadow-xs">
                     <Mail className="w-6 h-6" />
                   </div>
                   <h3 className="text-base font-bold text-text">Check your email</h3>
@@ -355,7 +366,7 @@ const SignIn = () => {
                   </p>
                   <button
                     onClick={() => setMagicSubmitted(false)}
-                    className="text-xs text-rose-500 font-semibold hover:underline cursor-pointer"
+                    className="text-xs text-rose-500 font-semibold hover:underline cursor-pointer transition"
                   >
                     Resend link or use another email
                   </button>
@@ -365,27 +376,43 @@ const SignIn = () => {
           )}
         </div>
 
-        {/* Right Side: Feature Showcase Panel */}
-        <div className="w-[50%] bg-gradient-to-br from-card via-background-secondary to-background hidden lg:flex flex-col items-center justify-center p-10 text-center border-l border-border/80 space-y-6 relative overflow-hidden">
-          <div className="absolute inset-0 bg-rose-500/5 blur-3xl rounded-full" />
+        {/* Right Side: Feature Showcase Hero Panel (Desktop) */}
+        <div className="w-[50%] bg-surface-inset hidden lg:flex flex-col items-center justify-center p-10 text-center border-l border-border space-y-6 relative overflow-hidden">
+          {/* Subtle Ambient Radial Glow */}
+          <div className="absolute inset-0 bg-gradient-to-br from-rose-500/5 via-pink-500/5 to-purple-500/5" />
           
-          <img src={logo} alt="VYBE" className="w-32 object-contain relative z-10" style={{ filter: themeCtx.resolvedTheme === "dark" ? "none" : "invert(1)" }} />
+          <img
+            src={logo}
+            alt="VYBE"
+            className="w-36 object-contain relative z-10 drop-shadow-md theme-logo-adaptive"
+          />
           
           <div className="space-y-2 relative z-10">
             <h2 className="text-xl font-bold tracking-tight text-text">Welcome back to VYBE</h2>
             <p className="text-xs text-text-secondary max-w-xs leading-relaxed">
-              Experience 60 FPS real-time feeds, Instagram-parity Stories & DMs, and end-to-end account security.
+              Experience 60 FPS real-time feeds, ultra-smooth Stories & DMs, and end-to-end account security.
             </p>
           </div>
 
-          <div className="flex flex-col gap-2.5 w-full max-w-xs relative z-10 text-left">
-            <div className="flex items-center gap-3 p-3 rounded-2xl bg-surface/60 border border-border">
-              <Zap className="w-4 h-4 text-rose-500" />
-              <span className="text-xs text-text font-medium">Instant Socket.IO Messaging</span>
+          <div className="flex flex-col gap-3 w-full max-w-xs relative z-10 text-left">
+            <div className="flex items-center gap-3.5 p-3.5 rounded-2xl bg-surface border border-border shadow-xs hover:border-primary/40 transition">
+              <div className="w-8 h-8 rounded-xl bg-rose-500/10 flex items-center justify-center text-rose-500 shrink-0">
+                <Zap className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-text">Real-Time Messaging</h4>
+                <p className="text-[11px] text-text-secondary">Instant delivery with WebSockets</p>
+              </div>
             </div>
-            <div className="flex items-center gap-3 p-3 rounded-2xl bg-surface/60 border border-border">
-              <ShieldCheck className="w-4 h-4 text-pink-500" />
-              <span className="text-xs text-text font-medium">Meta-Grade 2FA Security</span>
+
+            <div className="flex items-center gap-3.5 p-3.5 rounded-2xl bg-surface border border-border shadow-xs hover:border-pink-500/40 transition">
+              <div className="w-8 h-8 rounded-xl bg-pink-500/10 flex items-center justify-center text-pink-500 shrink-0">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-text">Two-Factor Authentication</h4>
+                <p className="text-[11px] text-text-secondary">Hardware & app-based protection</p>
+              </div>
             </div>
           </div>
         </div>

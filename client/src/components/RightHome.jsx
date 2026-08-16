@@ -1,14 +1,15 @@
 import React, { useState } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import { BadgeCheck } from "lucide-react";
-import { toast } from "sonner";
+import { BadgeCheck, Lock } from "lucide-react";
+import { snackbar } from "../lib/snackbar";
 import dp from "../assets/dp3.png";
 import OtherUsers from "./OtherUsers";
 import { setUserData } from "../redux/features/userSlice";
 import api from "../lib/axios";
 import GetSuggestedUsers from "../hooks/GetSuggestedUsers";
 import AccountSwitcherModal from "./AccountSwitcherModal";
+import VerifiedBadge from "./VerifiedBadge";
 
 const RightHome = () => {
   GetSuggestedUsers();
@@ -37,7 +38,10 @@ const RightHome = () => {
             <span className="text-xs font-bold text-text group-hover:underline truncate max-w-[130px] flex items-center gap-0.5">
               {userData?.user?.userName}
               {userData?.user?.isVerified && (
-                <BadgeCheck className="h-4 w-4 fill-[#0095f6] text-white shrink-0" />
+                <VerifiedBadge size="xs" />
+              )}
+              {userData?.user?.accountType === "private" && (
+                <Lock className="w-3 h-3 text-text-muted ml-0.5 shrink-0" />
               )}
             </span>
             <span className="text-[11px] text-text-secondary truncate max-w-[130px]">
@@ -78,16 +82,16 @@ const RightHome = () => {
         </div>
       </div>
 
-      {/* Instagram Footer Links */}
+      {/* Enterprise Footer Links */}
       <footer className="pt-6 border-t border-border/80 space-y-3 text-[11px] text-text-muted">
-        <div className="flex flex-wrap gap-x-2 gap-y-1">
-          <a href="#" className="hover:underline">About</a> • 
-          <a href="#" className="hover:underline">Help</a> • 
-          <a href="#" className="hover:underline">Press</a> • 
-          <a href="#" className="hover:underline">API</a> • 
-          <a href="#" className="hover:underline">Jobs</a> • 
-          <a href="#" className="hover:underline">Privacy</a> • 
-          <a href="#" className="hover:underline">Terms</a>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 font-medium">
+          <button onClick={() => navigate("/about")} className="hover:text-text hover:underline transition cursor-pointer">About</button> • 
+          <button onClick={() => navigate("/help")} className="hover:text-text hover:underline transition cursor-pointer">Help</button> • 
+          <button onClick={() => navigate("/press")} className="hover:text-text hover:underline transition cursor-pointer">Press</button> • 
+          <button onClick={() => navigate("/api")} className="hover:text-text hover:underline transition cursor-pointer">API</button> • 
+          <button onClick={() => navigate("/jobs")} className="hover:text-text hover:underline transition cursor-pointer">Jobs</button> • 
+          <button onClick={() => navigate("/privacy")} className="hover:text-text hover:underline transition cursor-pointer">Privacy</button> • 
+          <button onClick={() => navigate("/terms")} className="hover:text-text hover:underline transition cursor-pointer">Terms</button>
         </div>
         <p className="font-semibold text-text-muted uppercase tracking-wider text-[10px]">
           © 2026 VYBE FROM CREATORS

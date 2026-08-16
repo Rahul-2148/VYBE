@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Gift, Heart, Sparkles, X, Check } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
 export const GiftCreatorModal = ({ isOpen, onClose, creator }) => {
@@ -19,11 +19,11 @@ export const GiftCreatorModal = ({ isOpen, onClose, creator }) => {
       });
 
       if (res.data.success) {
-        toast.success(res.data.message);
+        snackbar.success(res.data.message);
         onClose();
       }
     } catch {
-      toast.error("Failed to send gift tip.");
+      snackbar.error("Failed to send gift tip.");
     } finally {
       setLoading(false);
     }

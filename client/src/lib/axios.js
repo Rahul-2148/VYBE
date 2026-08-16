@@ -80,6 +80,13 @@ api.interceptors.response.use(
       }
     }
 
+    // Network / Offline Error Detection (Client Disconnected)
+    if (!error.response && (error.code === "ERR_NETWORK" || !navigator.onLine)) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("vybe:network_error", { detail: { error } }));
+      }
+    }
+
     return Promise.reject(error);
   }
 );

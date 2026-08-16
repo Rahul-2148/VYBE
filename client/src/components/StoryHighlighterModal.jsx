@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, X, Check, Image as ImageIcon } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
 export const StoryHighlighterModal = ({ isOpen, onClose, onSuccess }) => {
@@ -22,7 +22,7 @@ export const StoryHighlighterModal = ({ isOpen, onClose, onSuccess }) => {
           setArchivedStories(res.data.stories);
         }
       } catch (err) {
-        toast.error("Failed to load archived stories.");
+        snackbar.error("Failed to load archived stories.");
       } finally {
         setLoading(false);
       }
@@ -44,12 +44,12 @@ export const StoryHighlighterModal = ({ isOpen, onClose, onSuccess }) => {
   const handleCreateHighlight = async (e) => {
     e.preventDefault();
     if (!title.trim()) {
-      toast.error("Please enter a Highlight title.");
+      snackbar.error("Please enter a Highlight title.");
       return;
     }
 
     if (selectedStoryIds.length === 0) {
-      toast.error("Please select at least one story for your Highlight.");
+      snackbar.error("Please select at least one story for your Highlight.");
       return;
     }
 
@@ -61,12 +61,12 @@ export const StoryHighlighterModal = ({ isOpen, onClose, onSuccess }) => {
       });
 
       if (res.data.success) {
-        toast.success("New Highlight added to your Profile! ✨");
+        snackbar.success("New Highlight added to your Profile! ✨");
         if (onSuccess) onSuccess(res.data.highlight);
         onClose();
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to create Highlight.");
+      snackbar.error(err.response?.data?.message || "Failed to create Highlight.");
     } finally {
       setSubmitting(false);
     }

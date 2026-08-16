@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, TrendingUp, Eye, Users, Heart, MessageCircle, Sparkles, BarChart2, Briefcase } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import { useDispatch } from "react-redux";
 import { setUserData } from "../redux/features/userSlice";
@@ -34,7 +34,7 @@ export const ProfileInsightsModal = ({ isOpen, onClose, user, onAccountSwitched 
         setInsights(res.data.insights);
       }
     } catch {
-      toast.error("Failed to load account insights.");
+      snackbar.error("Failed to load account insights.");
     } finally {
       setLoading(false);
     }
@@ -50,7 +50,7 @@ export const ProfileInsightsModal = ({ isOpen, onClose, user, onAccountSwitched 
         showCategory: type !== "personal"
       });
       if (res.data.success) {
-        toast.success(res.data.message);
+        snackbar.success(res.data.message);
         setCurrentType(type);
         
         // Update Redux state with updated user data
@@ -64,7 +64,7 @@ export const ProfileInsightsModal = ({ isOpen, onClose, user, onAccountSwitched 
         fetchInsights();
       }
     } catch {
-      toast.error("Failed to switch account mode.");
+      snackbar.error("Failed to switch account mode.");
     } finally {
       setSwitching(false);
     }

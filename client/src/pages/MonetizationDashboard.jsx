@@ -16,7 +16,7 @@ import {
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import moment from "moment";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import AdManagerModal from "../components/AdManagerModal";
 import api from "../lib/axios";
 import { setUserData } from "../redux/features/userSlice";
@@ -56,11 +56,11 @@ const MonetizationDashboard = () => {
       setWithdrawing(true);
       const res = await api.post("/monetization/payout");
       if (res.data.success) {
-        toast.success(res.data.message || "Payout processed successfully!");
+        snackbar.success(res.data.message || "Payout processed successfully!");
         setMonetization(res.data.monetization);
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to process withdrawal.");
+      snackbar.error(err.response?.data?.message || "Failed to process withdrawal.");
     } finally {
       setWithdrawing(false);
     }
@@ -71,11 +71,11 @@ const MonetizationDashboard = () => {
       setSimulating(true);
       const res = await api.post("/monetization/test/simulate-earning", { type, amount });
       if (res.data.success) {
-        toast.success(res.data.message || "Earning simulated!");
+        snackbar.success(res.data.message || "Earning simulated!");
         setMonetization(res.data.monetization);
       }
     } catch {
-      toast.error("Failed to simulate earning.");
+      snackbar.error("Failed to simulate earning.");
     } finally {
       setSimulating(false);
     }
@@ -89,7 +89,7 @@ const MonetizationDashboard = () => {
         setCampaigns(res.data.campaigns || []);
       }
     } catch {
-      toast.error("Failed to load monetization status.");
+      snackbar.error("Failed to load monetization status.");
     } finally {
       setLoading(false);
     }
@@ -102,7 +102,7 @@ const MonetizationDashboard = () => {
         setPlans(res.data.plans || []);
       }
     } catch {
-      toast.error("Failed to load premium plans.");
+      snackbar.error("Failed to load premium plans.");
     }
   };
 
@@ -124,7 +124,7 @@ const MonetizationDashboard = () => {
 
       const orderRes = await api.post("/monetization/premium/order", { planId: plan.id });
       if (!orderRes.data?.success) {
-        toast.error(orderRes.data?.message || "Could not create payment order.");
+        snackbar.error(orderRes.data?.message || "Could not create payment order.");
         return;
       }
 
@@ -132,7 +132,7 @@ const MonetizationDashboard = () => {
       const user = userData?.user || userData;
 
       if (isMock || keyId === "mock_key_id") {
-        toast.success("Development Mode: Simulating secure checkout...");
+        snackbar.success("Development Mode: Simulating secure checkout...");
         // Directly call verification after a brief delay
         setTimeout(async () => {
           try {
@@ -144,7 +144,7 @@ const MonetizationDashboard = () => {
             });
 
             if (verifyRes.data?.success) {
-              toast.success("Premium membership activated successfully!");
+              snackbar.success("Premium membership activated successfully!");
               if (verifyRes.data.user) {
                 dispatch(setUserData(verifyRes.data.user));
               }
@@ -152,7 +152,7 @@ const MonetizationDashboard = () => {
             }
           } catch (err) {
             console.warn("Simulated payment verification failed:", err);
-            toast.error("Simulated payment verification failed.");
+            snackbar.error("Simulated payment verification failed.");
           } finally {
             setBuyingPlanId(null);
           }
@@ -162,7 +162,7 @@ const MonetizationDashboard = () => {
 
       const scriptReady = await loadRazorpayScript();
       if (!scriptReady) {
-        toast.error("Razorpay checkout failed to load.");
+        snackbar.error("Razorpay checkout failed to load.");
         return;
       }
 
@@ -189,14 +189,14 @@ const MonetizationDashboard = () => {
             });
 
             if (verifyRes.data?.success) {
-              toast.success("Premium activated successfully.");
+              snackbar.success("Premium activated successfully.");
               if (verifyRes.data.user) {
                 dispatch(setUserData(verifyRes.data.user));
               }
               await fetchMonetizationData();
             }
           } catch {
-            toast.error("Payment verification failed.");
+            snackbar.error("Payment verification failed.");
           }
         },
         modal: {
@@ -205,12 +205,12 @@ const MonetizationDashboard = () => {
       });
 
       razorpay.on("payment.failed", () => {
-        toast.error("Payment failed. Try again.");
+        snackbar.error("Payment failed. Try again.");
       });
 
       razorpay.open();
     } catch (error) {
-      toast.error(error?.response?.data?.message || "Unable to start checkout.");
+      snackbar.error(error?.response?.data?.message || "Unable to start checkout.");
     } finally {
       setBuyingPlanId(null);
     }
@@ -236,7 +236,7 @@ const MonetizationDashboard = () => {
 
   const verificationCopy = activePremium.isVerified
     ? "Your blue tick is active and the badge state is synced from the backend source of truth."
-    : "Get the exact Instagram-style verified badge with a secure Razorpay checkout and server-side verification.";
+    : "Get the official Vybe verified badge with a secure Razorpay checkout and server-side verification.";
   const verificationBadgeClass = activePremium.isVerified
     ? "border-blue-500/35 bg-blue-500/15 text-blue-300"
     : "border-border-strong bg-surface-hover text-text";
@@ -302,7 +302,7 @@ const MonetizationDashboard = () => {
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <h2 className="text-lg font-black tracking-tight text-text sm:text-2xl">Meta Verified</h2>
+                            <h2 className="text-lg font-black tracking-tight text-text sm:text-2xl">VYBE Verified</h2>
                             <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${verificationBadgeClass}`}>
                               <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-500 text-text shadow-sm shadow-blue-500/20">
                                 <CheckCircle2 className="h-2.5 w-2.5 fill-current" />
@@ -343,7 +343,7 @@ const MonetizationDashboard = () => {
                       <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-bold text-blue-300">Badge</span>
                     </div>
                     <p className="mt-4 text-3xl font-black text-text">Blue</p>
-                    <p className="mt-1 text-xs text-text-secondary">Exact badge-style presentation users expect from Instagram.</p>
+                    <p className="mt-1 text-xs text-text-secondary">Official verified creator badge presentation.</p>
                   </div>
 
                   <div className="rounded-3xl border border-border bg-surface p-4">
@@ -441,7 +441,7 @@ const MonetizationDashboard = () => {
                         <strong className="text-text">Creator Subscriptions</strong>: You receive <span className="text-purple-400 font-bold">70%</span> of monthly payments from your subscribers.
                       </li>
                       <li>
-                        <strong className="text-text">Gifts & Tips</strong>: Creators keep <span className="text-pink-500 font-bold">80%</span> of digital tips sent to their posts or loop cards.
+                        <strong className="text-text">Gifts & Tips</strong>: Creators keep <span className="text-pink-500 font-bold">80%</span> of digital tips sent to their posts or reels.
                       </li>
                       <li>
                         <strong className="text-text">Sponsored Ad Shares</strong>: Earning share is credited per click (₹0.17) and view (₹0.05) on ads served under your creator feed.
@@ -478,7 +478,7 @@ const MonetizationDashboard = () => {
                               <h4 className="text-base font-bold text-text">{plan.name}</h4>
                               {plan.verified && <span className="rounded-full border border-blue-500/25 bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-300">Blue tick</span>}
                             </div>
-                            <p className="mt-1 text-xs text-text-secondary">Instagram-style verified account package</p>
+                            <p className="mt-1 text-xs text-text-secondary">Official Vybe verified creator package</p>
                           </div>
                           <div className="text-right">
                             <div className="text-2xl font-black text-text">₹{plan.amount}</div>

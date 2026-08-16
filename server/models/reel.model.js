@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-const loopSchema = new mongoose.Schema(
+const reelSchema = new mongoose.Schema(
   {
     author: {
       type: mongoose.Schema.Types.ObjectId,
@@ -27,11 +27,12 @@ const loopSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    originalLoop: {
+    originalReel: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Loop",
+      ref: "Reel",
       default: null,
     },
+
     // Audio Track details
     audioTrack: {
       id: { type: String, default: "original_audio" },
@@ -118,12 +119,60 @@ const loopSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    commentsDisabled: {
+      type: Boolean,
+      default: false,
+    },
+    aiLabel: {
+      isAIGenerated: { type: Boolean, default: false },
+      tool: { type: String, default: "" },
+      contentType: { type: String, default: "video" },
+      disclosedAt: { type: Date, default: null },
+    },
+    // VYBE TV Long-form video support (> 3 minutes or tagged)
+    isVybeTv: {
+      type: Boolean,
+      default: false,
+    },
+    duration: {
+      type: Number,
+      default: 0,
+    },
+    hiddenBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+    reports: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+        reason: {
+          type: String,
+          default: "other",
+        },
+        details: {
+          type: String,
+          default: "",
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
   },
   {
     timestamps: true,
   }
 );
 
-loopSchema.index({ score: -1, createdAt: -1 });
+reelSchema.index({ score: -1, createdAt: -1 });
 
-export const Loop = mongoose.model("Loop", loopSchema);
+export const Reel = mongoose.models.Reel || mongoose.model("Reel", reelSchema);
+
+
+export default Reel;

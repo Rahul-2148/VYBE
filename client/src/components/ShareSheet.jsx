@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Search, Check, Send, Link2, Share2, PlusCircle, CheckCircle2, Users, Loader2 } from "lucide-react";
 import { FaWhatsapp } from "react-icons/fa";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import { useNavigate } from "react-router-dom";
 import dp from "../assets/dp3.png";
 import api from "../lib/axios";
@@ -124,7 +124,7 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
       let successCount = 0;
       let errorMessages = [];
 
-      const normType = (entityType === "loop" || entityType === "reels") ? "reel" : (entityType === "user") ? "profile" : entityType;
+      const normType = (entityType === "reels") ? "reel" : (entityType === "user") ? "profile" : entityType;
       const entityId = entity?._id || entity?.id;
 
       // Send to 1-to-1 users
@@ -195,7 +195,7 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
 
       if (successCount > 0) {
         setSentSuccess(true);
-        toast.success(`Shared with ${successCount} target${successCount > 1 ? "s" : ""}! ✨`);
+        snackbar.success(`Shared with ${successCount} target${successCount > 1 ? "s" : ""}! ✨`);
         setTimeout(() => {
           setSentSuccess(false);
           onClose();
@@ -203,10 +203,10 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
       }
 
       if (errorMessages.length > 0) {
-        errorMessages.forEach((msg) => toast.error(msg, { duration: 4000 }));
+        errorMessages.forEach((msg) => snackbar.error(msg, { duration: 4000 }));
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to share content.");
+      snackbar.error(err.response?.data?.message || "Failed to share content.");
     } finally {
       setSending(false);
     }
@@ -214,7 +214,7 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
 
   const handleCopyLink = async () => {
     await navigator.clipboard.writeText(getShareUrl());
-    toast.success("Link copied to clipboard!");
+    snackbar.success("Link copied to clipboard!");
   };
 
   const handleWhatsAppShare = () => {
@@ -259,7 +259,7 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
         initialMediaUrl: mediaUrl,
         sharedEntity: {
           entityId: entity?._id || entity?.id,
-          entityType: (entityType === "loop" || entityType === "reels") ? "reel" : entityType,
+          entityType: (entityType === "reels") ? "reel" : entityType,
           authorName: authorData?.userName || authorData?.name || "user",
           authorAvatar: typeof authorData?.profileImage === "object" ? authorData?.profileImage?.url : authorData?.profileImage || "",
           mediaUrl: mediaUrl,

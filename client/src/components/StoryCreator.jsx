@@ -34,15 +34,18 @@ import {
   MapPin,
   AtSign,
   Hash,
-  PlusCircle
+  PlusCircle,
+  FolderOpen,
+  Users,
 } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import { setStoryFeed } from "../redux/features/storySlice";
 import StoryMusicPickerModal from "./StoryMusicPickerModal";
 import StoryStickersDrawer from "./StoryStickersDrawer";
+import CloseFriendsModal from "./CloseFriendsModal";
 import dp from "../assets/dp3.png";
 import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
 
@@ -56,7 +59,7 @@ const FONTS = [
   { id: "serif", name: "Editorial", className: "font-serif font-bold tracking-normal" },
 ];
 
-// Rich Instagram-Style Text Story Theme Templates
+// Rich Text Story Theme Templates
 const TEXT_THEMES = [
   {
     id: "sunset_aura",
@@ -157,7 +160,7 @@ const COLORS = [
   "#f97316",
 ];
 
-// 11 Instagram Photo/Video Filters
+// 11 Photo/Video Filters
 const FILTERS = [
   { id: "none", name: "Normal", class: "", canvasFilter: "none" },
   { id: "clarendon", name: "Clarendon", class: "contrast-[1.20] saturate-[1.25] hue-rotate-[-5deg]", canvasFilter: "contrast(120%) saturate(125%) hue-rotate(-5deg)" },
@@ -172,7 +175,7 @@ const FILTERS = [
   { id: "moon", name: "Moon", class: "grayscale-[1.0] contrast-[1.10] brightness-[1.10]", canvasFilter: "grayscale(100%) contrast(110%) brightness(110%)" },
 ];
 
-export const StoryCreator = ({ onClose, initialState }) => {
+export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { userData } = useSelector((state) => state.user);
@@ -185,8 +188,47 @@ export const StoryCreator = ({ onClose, initialState }) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [sharedEntityData, setSharedEntityData] = useState(initialState?.sharedEntity || null);
 
+  // Helper to convert File to persistent base64 Data URL
+  const fileToDataUrl = (file, fallback = "") => {
+    return new Promise((resolve) => {
+      if (!file) return resolve(fallback);
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => resolve(fallback);
+      reader.readAsDataURL(file);
+    });
+  };
+
   useEffect(() => {
-    if (initialState?.initialMediaUrl) {
+    if (initialState?.resumedDraft) {
+      const draft = initialState.resumedDraft;
+      if (draft.caption) {
+        setTextContent(draft.caption);
+        setCustomOverlayText(draft.caption);
+      }
+      if (draft.audioTrack) setSelectedMusic(draft.audioTrack);
+      if (draft.filter) handleSetFilter(draft.filter);
+      if (draft.mediaPreview) {
+        const isVid =
+          draft.mediaPreview.startsWith("data:video") ||
+          draft.mediaPreview.includes(".mp4") ||
+          draft.mediaPreview.includes("/video/");
+        setItems([
+          {
+            preview: draft.mediaPreview,
+            mediaType: isVid ? "video" : "image",
+            file: null,
+            stickers: [],
+            filter: draft.filter || "none",
+            isShared: false,
+          },
+        ]);
+        setMode("media");
+      } else if (draft.caption) {
+        setMode("text");
+      }
+      snackbar.success("Story draft loaded! ✏️");
+    } else if (initialState?.initialMediaUrl) {
       const isVid = initialState.initialMediaUrl.endsWith(".mp4") || initialState.initialMediaUrl.includes("/video/");
       setItems([
         {
@@ -232,6 +274,9 @@ export const StoryCreator = ({ onClose, initialState }) => {
   const [showTextModal, setShowTextModal] = useState(false);
   const [showThemesDrawer, setShowThemesDrawer] = useState(false);
   const [customOverlayText, setCustomOverlayText] = useState("");
+  const [showExitPrompt, setShowExitPrompt] = useState(false);
+  const [showCloseFriendsModal, setShowCloseFriendsModal] = useState(false);
+  const [currentDraftId, setCurrentDraftId] = useState(() => initialState?.resumedDraft?._id || null);
 
   // Music Data
   const [selectedMusic, setSelectedMusic] = useState(null);
@@ -254,6 +299,55 @@ export const StoryCreator = ({ onClose, initialState }) => {
   const [brushColor, setBrushColor] = useState("#f43f5e");
   const [brushSize, setBrushSize] = useState(6);
 
+  // Save Story to Drafts
+  const handleSaveStoryDraft = async () => {
+    if (!mediaPreview && !textContent.trim()) {
+      snackbar.error("Story needs media or text to save as draft");
+      return;
+    }
+    setIsLoading(true);
+    try {
+      let persistentPreview = mediaPreview || "";
+      if (activeItem?.file) {
+        persistentPreview = await fileToDataUrl(activeItem.file, mediaPreview);
+      }
+
+      const res = await api.post("/post/drafts", {
+        draftId: currentDraftId,
+        draftType: "story",
+        caption: mode === "text" ? textContent : customOverlayText || "",
+        mediaPreview: persistentPreview,
+        filter: filter || "normal",
+        audioTrack: selectedMusic,
+      });
+
+      if (res.data?.draft?._id) {
+        setCurrentDraftId(res.data.draft._id);
+      }
+
+      snackbar.success(currentDraftId ? "Story draft updated! 📝" : "Story saved to Drafts! 📝");
+      stopCamera();
+      if (onClose) onClose();
+      else navigate(-1);
+    } catch (err) {
+      console.warn("Failed to save story draft:", err);
+      snackbar.error("Failed to save story draft");
+    } finally {
+      setIsLoading(false);
+      setShowExitPrompt(false);
+    }
+  };
+
+  const handleCloseClick = () => {
+    if (mediaPreview || textContent.trim()) {
+      setShowExitPrompt(true);
+    } else {
+      stopCamera();
+      if (onClose) onClose();
+      else navigate(-1);
+    }
+  };
+
   // 1. Live Camera Handlers
   const startCamera = async () => {
     try {
@@ -272,7 +366,7 @@ export const StoryCreator = ({ onClose, initialState }) => {
       setItems([]);
       setActiveIndex(0);
     } catch (err) {
-      toast.error("Could not access camera. Please check permissions.");
+      snackbar.error("Could not access camera. Please check permissions.");
     }
   };
 
@@ -412,7 +506,7 @@ export const StoryCreator = ({ onClose, initialState }) => {
             if (isTrashDrop) {
               triggerHaptic("medium");
               microAudio.playPop();
-              toast.success("Sticker removed");
+              snackbar.success("Sticker removed");
               const next = [...prev];
               next[activeIndex] = {
                 ...next[activeIndex],
@@ -479,7 +573,7 @@ export const StoryCreator = ({ onClose, initialState }) => {
     setTextColor(theme.textColor);
     setHighlightStyle(theme.highlightStyle);
     setShowThemesDrawer(false);
-    toast(`Applied Theme: ${theme.name}`, { icon: theme.icon });
+    snackbar(`Applied Theme: ${theme.name}`, { icon: theme.icon });
   };
 
   // 3. File Input Select (Initial & Multi-Slide Addition)
@@ -579,7 +673,7 @@ export const StoryCreator = ({ onClose, initialState }) => {
       }
 
       if (!next[activeIndex]) {
-        toast.error("Please add a photo or video first");
+        snackbar.error("Please add a photo or video first");
         return prev;
       }
       const currentStickers = next[activeIndex].stickers || [];
@@ -593,7 +687,7 @@ export const StoryCreator = ({ onClose, initialState }) => {
       return next;
     });
     setShowStickersDrawer(false);
-    toast.success("Sticker added! Drag to position.");
+    snackbar.success("Sticker added! Drag to position.");
   };
 
   // 7. Download Crafted Story
@@ -605,23 +699,27 @@ export const StoryCreator = ({ onClose, initialState }) => {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    toast.success("Story downloaded to device!");
+    snackbar.success("Story downloaded to device!");
   };
 
   // 8. Publish Stories Batch
-  const handlePublishStory = async () => {
+  const handlePublishStory = async (targetVisibility) => {
+    const finalVisibleTo = targetVisibility || visibleTo || "public";
+
     if (mode === "text" && !textContent.trim()) {
-      toast.error("Please write something in your text story");
+      snackbar.error("Please write something in your text story");
       return;
     }
 
     if (mode === "media" && items.length === 0 && !useCamera) {
-      toast.error("Please select a photo or video");
+      snackbar.error("Please select a photo or video");
       return;
     }
 
     setIsLoading(true);
-    setUploadProgressText("Sharing story...");
+    setUploadProgressText(
+      finalVisibleTo === "closeFriends" ? "Sharing to Close Friends ⭐️..." : "Sharing story..."
+    );
 
     try {
       if (mode === "text") {
@@ -631,18 +729,25 @@ export const StoryCreator = ({ onClose, initialState }) => {
           caption: textContent.trim(),
           mediaUrl: `text_theme_${activeTheme.id}`,
           stickers: JSON.stringify(textStickers),
-          visibleTo,
+          visibleTo: finalVisibleTo,
           music: selectedMusic ? JSON.stringify(selectedMusic) : null,
         });
 
         if (res.data?.success) {
-          toast.success("Story published! ✨");
+          snackbar.success(
+            finalVisibleTo === "closeFriends"
+              ? "Story shared to Close Friends! ⭐️"
+              : "Story published! ✨"
+          );
           api.get("/story/feed").then((feedRes) => {
             if (feedRes.data?.success) dispatch(setStoryFeed(feedRes.data.feed));
           });
+          if (currentDraftId) {
+            api.delete(`/post/drafts/${currentDraftId}`).catch(() => {});
+          }
           setIsLoading(false);
           if (onClose) onClose();
-          else navigate("/");
+          else navigate(-1);
         }
         return;
       }
@@ -661,7 +766,7 @@ export const StoryCreator = ({ onClose, initialState }) => {
 
         formData.append("mediaType", item.mediaType);
         formData.append("filter", item.filter || "none");
-        formData.append("visibleTo", visibleTo);
+        formData.append("visibleTo", finalVisibleTo);
         formData.append("stickers", JSON.stringify(item.stickers || []));
 
         if (selectedMusic) {
@@ -677,16 +782,24 @@ export const StoryCreator = ({ onClose, initialState }) => {
         });
       }
 
-      toast.success("Stories published successfully! 🚀");
+      snackbar.success(
+        finalVisibleTo === "closeFriends"
+          ? "Stories shared to Close Friends! ⭐️"
+          : "Stories published successfully! 🚀"
+      );
       api.get("/story/feed").then((feedRes) => {
         if (feedRes.data?.success) dispatch(setStoryFeed(feedRes.data.feed));
       });
 
+      if (currentDraftId) {
+        api.delete(`/post/drafts/${currentDraftId}`).catch(() => {});
+      }
+
       setIsLoading(false);
       if (onClose) onClose();
-      else navigate("/");
+      else navigate(-1);
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to publish story.");
+      snackbar.error(err.response?.data?.message || "Failed to publish story.");
       setIsLoading(false);
     }
   };
@@ -717,7 +830,7 @@ export const StoryCreator = ({ onClose, initialState }) => {
       return next;
     });
     setSelectedStickerIdx(null);
-    toast.success("Sticker removed");
+    snackbar.success("Sticker removed");
   };
 
   // Render stickers overlay inside editor
@@ -1068,44 +1181,82 @@ export const StoryCreator = ({ onClose, initialState }) => {
 
   return (
     <div className="fixed inset-0 z-[500] bg-black text-white flex flex-col justify-between select-none overflow-hidden font-sans">
-      {/* TOP HEADER TOOLBAR (Instagram Studio Layout) */}
+      {/* TOP HEADER TOOLBAR (Studio Layout) */}
       <div className="h-14 shrink-0 px-4 flex items-center justify-between z-50 bg-gradient-to-b from-black/90 to-transparent">
-        {/* Close */}
+        {/* Close / Back to Workspace */}
         <button
-          onClick={() => {
-            stopCamera();
-            if (onClose) onClose();
-            else navigate(-1);
-          }}
+          onClick={handleCloseClick}
           className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+          title="Back to Create"
         >
           <X className="w-5 h-5" />
         </button>
 
-        {/* Mode Selector (Media, Text Story, Theme Templates) */}
-        <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-full text-xs font-bold border border-white/10">
-          <button
-            onClick={() => {
-              setMode("media");
-              stopCamera();
-            }}
-            className={`px-3.5 py-1 rounded-full transition ${mode === "media" ? "bg-white text-black shadow" : "text-zinc-400 hover:text-white"}`}
-          >
-            Media
-          </button>
-          <button
-            onClick={() => {
-              setMode("text");
-              stopCamera();
-            }}
-            className={`px-3.5 py-1 rounded-full transition ${mode === "text" ? "bg-white text-black shadow" : "text-zinc-400 hover:text-white"}`}
-          >
-            Text Story
-          </button>
-        </div>
+        {/* Global Create Mode Selector (Post, Story, Reels) or Sub-mode */}
+        {onSwitchMode ? (
+          <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-full text-xs font-bold border border-white/10 shadow-lg">
+            <button
+              onClick={() => {
+                triggerHaptic("light");
+                stopCamera();
+                onSwitchMode("post");
+              }}
+              className="px-3 py-1 rounded-full transition text-zinc-400 hover:text-white cursor-pointer"
+            >
+              Post
+            </button>
+            <button
+              className="px-3.5 py-1 rounded-full transition bg-white text-black shadow font-extrabold"
+            >
+              Story
+            </button>
+            <button
+              onClick={() => {
+                triggerHaptic("light");
+                stopCamera();
+                onSwitchMode("reel");
+              }}
+              className="px-3 py-1 rounded-full transition text-zinc-400 hover:text-white cursor-pointer"
+            >
+              Reels
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-full text-xs font-bold border border-white/10">
+            <button
+              onClick={() => {
+                setMode("media");
+                stopCamera();
+              }}
+              className={`px-3.5 py-1 rounded-full transition ${mode === "media" ? "bg-white text-black shadow" : "text-zinc-400 hover:text-white"}`}
+            >
+              Media
+            </button>
+            <button
+              onClick={() => {
+                setMode("text");
+                stopCamera();
+              }}
+              className={`px-3.5 py-1 rounded-full transition ${mode === "text" ? "bg-white text-black shadow" : "text-zinc-400 hover:text-white"}`}
+            >
+              Text Story
+            </button>
+          </div>
+        )}
 
         {/* Studio Tools */}
         <div className="flex items-center gap-2">
+          {/* Save Story Draft */}
+          {(mediaPreview || textContent.trim()) && (
+            <button
+              onClick={handleSaveStoryDraft}
+              className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-amber-400 transition cursor-pointer"
+              title="Save Story Draft"
+            >
+              <FolderOpen className="w-5 h-5" />
+            </button>
+          )}
+
           {/* Themes Drawer Toggle (in Text mode) */}
           {mode === "text" && (
             <button
@@ -1321,7 +1472,7 @@ export const StoryCreator = ({ onClose, initialState }) => {
                   className={`w-full h-full object-cover pointer-events-none transition-all duration-200 ${resolvedFilterClass}`}
                 />
               ) : (
-                <video src={mediaPreview} controls autoPlay loop className="w-full h-full object-cover" />
+                <video src={mediaPreview} controls autoPlay onEnded={(e) => { e.target.currentTime = 0; e.target.play().catch(() => null); }} className="w-full h-full object-cover" />
               )
             ) : (
               /* Media Import Box */
@@ -1410,7 +1561,7 @@ export const StoryCreator = ({ onClose, initialState }) => {
               <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[1.5px] bg-cyan-400 z-30 pointer-events-none shadow-[0_0_10px_#22d3ee]" />
             )}
 
-            {/* Reactive Instagram Trash Bin for Drag Deletion */}
+            {/* Reactive Trash Bin for Drag Deletion */}
             {activeDragIdx !== null && (
               <div
                 className={`absolute bottom-6 left-1/2 -translate-x-1/2 z-40 rounded-full flex items-center justify-center transition-all duration-200 pointer-events-none ${
@@ -1442,7 +1593,7 @@ export const StoryCreator = ({ onClose, initialState }) => {
           </div>
         )}
 
-        {/* Instagram-Grade On-Canvas Sticker Transform & Style HUD */}
+        {/* On-Canvas Sticker Transform & Style HUD */}
         {selectedStickerIdx !== null && stickers[selectedStickerIdx] && (
           <div
             onClick={(e) => e.stopPropagation()}
@@ -1555,7 +1706,7 @@ export const StoryCreator = ({ onClose, initialState }) => {
                   return next;
                 });
                 setSelectedStickerIdx(null);
-                toast.success("Sticker removed");
+                snackbar.success("Sticker removed");
               }}
               className="p-1.5 rounded-full bg-red-500/20 hover:bg-red-500/40 text-red-400 transition active:scale-90"
               title="Delete Sticker"
@@ -1614,7 +1765,6 @@ export const StoryCreator = ({ onClose, initialState }) => {
         </div>
       )}
 
-      {/* FILTERS CAROUSEL ROW */}
       {mediaPreview && mode === "media" && (
         <div className="w-full shrink-0 flex items-center justify-start overflow-x-auto gap-3 px-6 bg-black/90 border-t border-zinc-900 hide-scrollbar py-2 z-40">
           {FILTERS.map((f) => (
@@ -1642,42 +1792,108 @@ export const StoryCreator = ({ onClose, initialState }) => {
         </div>
       )}
 
-      {/* BOTTOM 1-TAP PUBLISHING DOCK (Instagram Style) */}
-      <div className="h-18 shrink-0 px-6 bg-black border-t border-zinc-900 flex items-center justify-between z-50">
-        {/* Your Story */}
-        <button
-          onClick={() => {
-            setVisibleTo("public");
-            handlePublishStory();
-          }}
-          disabled={isLoading || (items.length === 0 && mode === "media" && !useCamera)}
-          className="flex items-center gap-2 px-4 py-2 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-white text-xs font-bold transition cursor-pointer disabled:opacity-50"
-        >
-          <img src={userData?.user?.profileImage?.url || dp} className="w-5 h-5 rounded-full object-cover" alt="" />
-          <span>Your Story</span>
-        </button>
+      {/* BOTTOM AUDIENCE SELECTION & PUBLISHING DOCK */}
+      <div className="h-20 shrink-0 px-3 sm:px-6 bg-black/95 backdrop-blur-xl border-t border-zinc-900 flex items-center justify-between z-50 gap-2">
+        {/* Audience Selector Group */}
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          {/* Your Story (Public) Toggle Button */}
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic("light");
+              microAudio.playPop();
+              setVisibleTo("public");
+              snackbar.success("Audience: Your Story (Public) 🌐");
+            }}
+            className={`flex items-center gap-2 px-3 py-2 rounded-full transition-all cursor-pointer select-none shrink-0 ${
+              visibleTo === "public"
+                ? "bg-gradient-to-r from-amber-400 via-rose-500 to-purple-600 text-white font-extrabold shadow-lg shadow-rose-500/20 ring-2 ring-white/60 scale-[1.02]"
+                : "bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-semibold opacity-70 hover:opacity-100"
+            }`}
+          >
+            <div className="relative shrink-0">
+              <img
+                src={userData?.user?.profileImage?.url || dp}
+                className="w-5 h-5 rounded-full object-cover border border-white/40"
+                alt=""
+              />
+              {visibleTo === "public" && (
+                <div className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full bg-white text-black flex items-center justify-center shadow">
+                  <Check className="w-2 h-2 stroke-[3]" />
+                </div>
+              )}
+            </div>
+            <span className="text-xs truncate">Your Story</span>
+          </button>
 
-        {/* Close Friends */}
-        <button
-          onClick={() => {
-            setVisibleTo("closeFriends");
-            handlePublishStory();
-          }}
-          disabled={isLoading || (items.length === 0 && mode === "media" && !useCamera)}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-emerald-950/80 hover:bg-emerald-900/80 border border-emerald-500/40 text-emerald-400 text-xs font-bold transition cursor-pointer disabled:opacity-50"
-        >
-          <Star className="w-3.5 h-3.5 fill-current text-emerald-400" />
-          <span>Close Friends</span>
-        </button>
+          {/* Close Friends Toggle Button + Manager */}
+          <div
+            className={`flex items-center rounded-full p-0.5 transition-all select-none shrink-0 ${
+              visibleTo === "closeFriends"
+                ? "bg-emerald-950/90 border-2 border-emerald-400 shadow-lg shadow-emerald-500/30 scale-[1.02]"
+                : "bg-zinc-900/90 border border-zinc-800 opacity-70 hover:opacity-100"
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic("light");
+                microAudio.playPop();
+                setVisibleTo("closeFriends");
+                snackbar.success("Audience: Close Friends Only ⭐️");
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-all cursor-pointer ${
+                visibleTo === "closeFriends"
+                  ? "bg-emerald-500 text-black font-black"
+                  : "text-emerald-400 hover:text-emerald-300 font-bold"
+              }`}
+            >
+              <Star
+                className={`w-3.5 h-3.5 ${
+                  visibleTo === "closeFriends" ? "fill-black text-black" : "fill-emerald-400 text-emerald-400"
+                }`}
+              />
+              <span className="truncate">Close Friends</span>
+            </button>
 
-        {/* Send / Share button */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                triggerHaptic("light");
+                setShowCloseFriendsModal(true);
+              }}
+              className="p-1.5 text-emerald-400 hover:text-white rounded-full hover:bg-emerald-900/50 transition cursor-pointer"
+              title="Edit Close Friends List"
+            >
+              <Users className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Share / Publish Action Button */}
         <button
-          onClick={handlePublishStory}
+          type="button"
+          onClick={() => handlePublishStory(visibleTo)}
           disabled={isLoading || (items.length === 0 && mode === "media" && !useCamera)}
-          className="w-10 h-10 rounded-full bg-white hover:bg-zinc-200 text-black flex items-center justify-center shadow-lg transition cursor-pointer disabled:opacity-50"
-          title="Share Story"
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-full font-black text-xs uppercase tracking-wider transition-all cursor-pointer disabled:opacity-40 shadow-xl active:scale-95 shrink-0 ${
+            visibleTo === "closeFriends"
+              ? "bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/30"
+              : "bg-white hover:bg-zinc-200 text-black shadow-white/20"
+          }`}
+          title={`Publish Story to ${visibleTo === "closeFriends" ? "Close Friends" : "Your Story"}`}
         >
-          {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 text-black" />}
+          {isLoading ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-black" />
+              <span className="text-[11px] normal-case">{uploadProgressText || "Sharing..."}</span>
+            </div>
+          ) : (
+            <>
+              <span>Share</span>
+              <Send className="w-3.5 h-3.5 text-black" />
+            </>
+          )}
         </button>
       </div>
 
@@ -1747,7 +1963,7 @@ export const StoryCreator = ({ onClose, initialState }) => {
           }}
           onSelectMusic={(song) => {
             setSelectedMusic(song);
-            toast.success(`Music Selected: ${song.title}`);
+            snackbar.success(`Music Selected: ${song.title}`);
             handleAddSticker({
               type: "music_sticker",
               music_sticker: {
@@ -1793,6 +2009,63 @@ export const StoryCreator = ({ onClose, initialState }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Exit & Save Draft Confirmation Prompt */}
+      {showExitPrompt && (
+        <div 
+          className="fixed inset-0 z-[700] bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={() => setShowExitPrompt(false)}
+        >
+          <div 
+            className="bg-zinc-950 border border-zinc-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-sm w-full shadow-2xl text-center space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto">
+              <FolderOpen className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">Save Story Draft?</h3>
+              <p className="text-xs text-zinc-400 mt-1">
+                If you save as draft, you can finish and publish your story anytime later.
+              </p>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                onClick={handleSaveStoryDraft}
+                className="w-full py-3 bg-gradient-to-tr from-pink-500 to-rose-600 text-white rounded-2xl text-xs font-bold shadow-lg hover:opacity-95 transition cursor-pointer"
+              >
+                Save Draft 📝
+              </button>
+              <button
+                onClick={() => {
+                  setShowExitPrompt(false);
+                  stopCamera();
+                  if (onClose) onClose();
+                  else navigate(-1);
+                }}
+                className="w-full py-3 bg-zinc-900 hover:bg-zinc-800 text-red-400 rounded-2xl text-xs font-bold transition cursor-pointer"
+              >
+                Discard Story 🗑️
+              </button>
+              <button
+                onClick={() => setShowExitPrompt(false)}
+                className="w-full py-2.5 text-zinc-400 hover:text-white text-xs font-semibold transition cursor-pointer"
+              >
+                Keep Editing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Close Friends Management Modal */}
+      {showCloseFriendsModal && (
+        <CloseFriendsModal
+          isOpen={showCloseFriendsModal}
+          onClose={() => setShowCloseFriendsModal(false)}
+        />
       )}
     </div>
   );

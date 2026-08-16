@@ -19,7 +19,8 @@ cron.schedule("*/5 * * * *", cleanupExpiredPremiumPayments); // every 5 min
 import authRouter from "./routes/auth.route.js";
 import userRouter from "./routes/user.route.js";
 import postRouter from "./routes/post.route.js";
-import loopRouter from "./routes/loop.route.js";
+import reelRouter from "./routes/reel.route.js";
+
 import storyRouter from "./routes/story.route.js";
 import messageRouter from "./routes/message.route.js";
 import conversationRouter from "./routes/conversation.route.js";
@@ -74,7 +75,9 @@ import noteRouter from "./routes/note.route.js";
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/user", userRouter);
 app.use("/api/v1/post", postRouter);
-app.use("/api/v1/loop", loopRouter);
+app.use("/api/v1/reel", reelRouter);
+app.use("/api/v1/reels", reelRouter);
+
 app.use("/api/v1/story", storyRouter);
 app.use("/api/v1/message", messageRouter);
 app.use("/api/v1/conversation", conversationRouter);

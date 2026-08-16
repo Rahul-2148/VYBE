@@ -1,7 +1,8 @@
 import { User } from "../models/user.model.js";
 import { Post } from "../models/post.model.js";
-import { Loop } from "../models/loop.model.js";
+import { Reel } from "../models/reel.model.js";
 import { getBlockedUserIds } from "../utils/blockHelper.js";
+import { getExcludedAuthorIdsForFeed } from "../utils/feedPrivacyHelper.js";
 
 const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -77,19 +78,19 @@ export const CATEGORY_KEYWORDS = {
 export const getExploreFeed = async (req, res) => {
   try {
     const { category } = req.query;
-    const blockedUserIds = await getBlockedUserIds(req.userId);
+    const excludedAuthorIds = await getExcludedAuthorIdsForFeed(req.userId);
 
-    let filter = { isArchived: { $ne: true }, author: { $nin: blockedUserIds } };
-    let loopsFilter = { author: { $nin: blockedUserIds } };
+    let filter = { isArchived: { $ne: true }, author: { $nin: excludedAuthorIds } };
+    let reelsFilter = { author: { $nin: excludedAuthorIds } };
 
     if (category && category !== "all") {
       const keywords = CATEGORY_KEYWORDS[category.toLowerCase()];
       if (keywords && keywords.length > 0) {
         const keywordRegex = new RegExp(keywords.join("|"), "i");
 
-        // Find matching creators (excluding blocked)
+        // Find matching creators (excluding blocked & private un-followed)
         const matchingUserIds = await User.find({
-          _id: { $nin: blockedUserIds },
+          _id: { $nin: excludedAuthorIds },
           $or: [
             { category: { $regex: keywordRegex } },
             { profession: { $regex: keywordRegex } },
@@ -104,7 +105,7 @@ export const getExploreFeed = async (req, res) => {
           { author: { $in: matchingUserIds } }
         ];
 
-        loopsFilter.$or = [
+        reelsFilter.$or = [
           { hashtags: { $in: keywords.map(kw => new RegExp(kw, "i")) } },
           { caption: { $regex: keywordRegex } },
           { author: { $in: matchingUserIds } }
@@ -112,20 +113,25 @@ export const getExploreFeed = async (req, res) => {
       }
     }
 
-    const posts = await Post.find(filter)
+    const rawPosts = await Post.find(filter)
       .sort({ createdAt: -1 })
-      .populate("author", "name userName profileImage isVerified")
-      .limit(30);
+      .populate("author", "name userName profileImage isVerified accountType professionalType")
+      .limit(30)
+      .lean();
 
-    const loops = await Loop.find(loopsFilter)
+    const rawReels = await Reel.find(reelsFilter)
       .sort({ score: -1, createdAt: -1 })
-      .populate("author", "name userName profileImage isVerified")
-      .limit(20);
+      .populate("author", "name userName profileImage isVerified accountType professionalType")
+      .limit(20)
+      .lean();
+
+    const posts = rawPosts.filter(p => p && p.author);
+    const reels = rawReels.filter(r => r && r.author);
 
     return res.status(200).json({
       success: true,
       posts,
-      loops,
+      reels,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: `getExploreFeed error: ${error.message}` });
@@ -219,7 +225,7 @@ export const addSearchHistory = async (req, res) => {
           }
         }
       },
-      { new: true }
+      { returnDocument: 'after' }
     ).populate("searchHistory.targetUser", "name userName profileImage isVerified");
 
     if (!updatedUser) return res.status(404).json({ message: "User not found" });
@@ -262,7 +268,7 @@ export const removeSearchHistoryItem = async (req, res) => {
   }
 };
 
-// 7. Get location posts/loops details
+// 7. Get location posts/reels details
 export const getLocationDetails = async (req, res) => {
   try {
     const { locationName } = req.params;
@@ -282,7 +288,7 @@ export const getLocationDetails = async (req, res) => {
       .sort({ createdAt: -1 })
       .populate("author", "name userName profileImage isVerified");
 
-    const loops = await Loop.find({
+    const reels = await Reel.find({
       author: { $nin: blockedUserIds },
       location: regex,
     })
@@ -293,9 +299,9 @@ export const getLocationDetails = async (req, res) => {
       success: true,
       location: cleanLocation,
       postCount: posts.length,
-      loopCount: loops.length,
+      reelCount: reels.length,
       posts,
-      loops,
+      reels,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: `getLocationDetails error: ${error.message}` });

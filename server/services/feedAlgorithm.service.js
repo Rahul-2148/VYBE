@@ -2,9 +2,11 @@
 // Computes engagement score, relationship affinity, and time decay
 
 export const calculatePostScore = (post, currentUser) => {
-  const likesCount = post.likes?.length || 0;
-  const commentsCount = post.comments?.length || 0;
-  const savesCount = post.savedCount || 0;
+  if (!post) return 0;
+
+  const likesCount = Array.isArray(post.likes) ? post.likes.length : 0;
+  const commentsCount = Array.isArray(post.comments) ? post.comments.length : 0;
+  const savesCount = typeof post.savedCount === "number" ? post.savedCount : 0;
 
   // Base Engagement Score
   const baseScore = likesCount * 2.0 + commentsCount * 3.5 + savesCount * 5.0 + 1.0;
@@ -13,7 +15,7 @@ export const calculatePostScore = (post, currentUser) => {
   let affinityMultiplier = 1.0;
   const authorId = post.author?._id?.toString() || post.author?.toString();
 
-  if (currentUser) {
+  if (currentUser && authorId) {
     const followingIds = currentUser.following?.map((id) => id.toString()) || [];
     const closeFriendIds = currentUser.closeFriends?.map((id) => id.toString()) || [];
 
@@ -26,7 +28,7 @@ export const calculatePostScore = (post, currentUser) => {
 
   // Time Decay Formula: Gravity = (HoursOld + 2)^1.5
   const createdAt = new Date(post.createdAt || Date.now()).getTime();
-  const hoursOld = (Date.now() - createdAt) / (1000 * 60 * 60);
+  const hoursOld = Math.max(0, (Date.now() - createdAt) / (1000 * 60 * 60));
   const gravity = Math.pow(hoursOld + 2, 1.5);
 
   const finalScore = (baseScore * affinityMultiplier) / gravity;
@@ -38,22 +40,31 @@ export const rankPostsForUser = (posts = [], currentUser = null, mode = "for-you
 
   if (mode === "following" && currentUser) {
     const followingIds = currentUser.following?.map((id) => id.toString()) || [];
-    filteredPosts = filteredPosts.filter((p) => {
+    const filtered = filteredPosts.filter((p) => {
       const authorId = p.author?._id?.toString() || p.author?.toString();
       return followingIds.includes(authorId) || authorId === currentUser._id?.toString();
     });
+    // Fallback: If user follows nobody or no posts from followed users, show discovery posts
+    filteredPosts = filtered.length > 0 ? filtered : [...posts];
   } else if (mode === "favorites" && currentUser) {
     const closeFriendIds = currentUser.closeFriends?.map((id) => id.toString()) || [];
-    filteredPosts = filteredPosts.filter((p) => {
+    const filtered = filteredPosts.filter((p) => {
       const authorId = p.author?._id?.toString() || p.author?.toString();
       return closeFriendIds.includes(authorId);
     });
+    // Fallback if favorites is empty
+    filteredPosts = filtered.length > 0 ? filtered : [...posts];
   }
 
-  // Rank by calculated score
+  // Rank by calculated score and break ties with recency
   return filteredPosts.sort((a, b) => {
     const scoreA = calculatePostScore(a, currentUser);
     const scoreB = calculatePostScore(b, currentUser);
-    return scoreB - scoreA;
+    if (scoreB !== scoreA) {
+      return scoreB - scoreA;
+    }
+    const timeA = new Date(a.createdAt || 0).getTime();
+    const timeB = new Date(b.createdAt || 0).getTime();
+    return timeB - timeA;
   });
 };

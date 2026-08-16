@@ -18,8 +18,8 @@ const messageSchema = new mongoose.Schema(
       type: String,
       enum: [
         "text", "image", "video", "audio", "voice", "file", "gif",
-        "location", "share", "shared_post", "shared_reel", "shared_loop", "shared_story",
-        "shared_profile", "shared_user", "system", "poll", "contact",
+        "location", "share", "shared_post", "shared_reel", "shared_story",
+        "shared_profile", "shared_user", "system", "poll", "contact", "contact_request", "contact_decline",
       ],
       required: true,
     },
@@ -54,7 +54,7 @@ const messageSchema = new mongoose.Schema(
       shared: {
         type: {
           type: String,
-          enum: ["Loop", "Post", "Story", "User", "post", "reel", "loop", "story", "profile"],
+          enum: ["Reel", "Post", "Story", "User", "post", "reel", "story", "profile"],
         },
         refId: {
           type: mongoose.Schema.Types.ObjectId,

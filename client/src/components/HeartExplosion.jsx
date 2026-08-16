@@ -54,11 +54,11 @@ export const HeartExplosion = ({ show, onComplete }) => {
         <GoHeartFill
           className="text-white text-8xl md:text-9xl filter drop-shadow-[0_12px_24px_rgba(244,63,94,0.7)]"
           style={{
-            fill: "url(#instagram-heart-gradient)",
+            fill: "url(#vybe-heart-gradient)",
           }}
         />
         <svg width="0" height="0">
-          <linearGradient id="instagram-heart-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <linearGradient id="vybe-heart-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="#ff007a" />
             <stop offset="50%" stopColor="#ff4d6d" />
             <stop offset="100%" stopColor="#ff758c" />

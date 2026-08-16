@@ -1,29 +1,23 @@
 import { useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { setStoryFeed } from "../redux/features/storySlice";
-import api from "../lib/axios";
+import { useGetStoriesFeedQuery } from "../redux/api/apiSlice";
 
 const GetStoryFeed = () => {
   const dispatch = useDispatch();
   const { userData } = useSelector((state) => state.user);
+  const userId = userData?._id || userData?.user?._id;
+
+  // RTK Query with instant cache & stale-while-revalidate
+  const { data: storyData } = useGetStoriesFeedQuery(undefined, {
+    skip: !userId,
+  });
 
   useEffect(() => {
-    const userId = userData?._id || userData?.user?._id;
-    if (!userId) return;
-
-    const fetchFeed = async () => {
-      try {
-        const res = await api.get("/story/feed");
-        if (res.data?.stories) {
-          dispatch(setStoryFeed(res.data.stories));
-        }
-      } catch (err) {
-        console.error("Story feed error:", err);
-      }
-    };
-
-    fetchFeed();
-  }, [dispatch, userData?._id]);
+    if (storyData?.stories) {
+      dispatch(setStoryFeed(storyData.stories));
+    }
+  }, [storyData, dispatch]);
 
   return null;
 };

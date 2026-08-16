@@ -100,7 +100,6 @@ export const sendMessage = async (req, res) => {
     }
 
     let rawEffectiveType = messageType || type || "text";
-    if (rawEffectiveType === "shared_loop") rawEffectiveType = "shared_reel";
     if (rawEffectiveType === "shared_user") rawEffectiveType = "shared_profile";
     const effectiveType = rawEffectiveType;
     const content = { text: text ? text.trim() : "" };
@@ -184,10 +183,19 @@ export const sendMessage = async (req, res) => {
           mimeType: file.mimetype,
         });
       }
-    } else if (sharedData?.mediaUrl || req.body.mediaUrl || req.body.stickerUrl) {
+    } else if (
+      (rawEffectiveType === "sticker" || effectiveType === "sticker") &&
+      (sharedData?.mediaUrl || req.body.mediaUrl || req.body.stickerUrl)
+    ) {
       const mUrl = sharedData?.mediaUrl || req.body.mediaUrl || req.body.stickerUrl;
-      const mType = effectiveType === "sticker" || rawEffectiveType === "sticker" ? "sticker" : "image";
-      content.media = [{ url: mUrl, type: mType }];
+      content.media = [{ url: mUrl, type: "sticker" }];
+    } else if (
+      !rawEffectiveType.startsWith("shared_") &&
+      !effectiveType.startsWith("shared_") &&
+      effectiveType !== "share" &&
+      (req.body.mediaUrl || req.body.fileUrl)
+    ) {
+      content.media = [{ url: req.body.mediaUrl || req.body.fileUrl, type: "image" }];
     }
 
     // Voice Note
@@ -208,7 +216,7 @@ export const sendMessage = async (req, res) => {
     if (effectiveType === "share" || effectiveType?.startsWith("shared_")) {
       let rawType = (sharedType || effectiveType.replace("shared_", "") || "post").toLowerCase();
       let normalizedModelType = "Post";
-      if (rawType === "reel" || rawType === "loop") normalizedModelType = "Loop";
+      if (rawType === "reel") normalizedModelType = "Reel";
       else if (rawType === "story") normalizedModelType = "Story";
       else if (rawType === "profile" || rawType === "user") normalizedModelType = "User";
 
@@ -230,6 +238,13 @@ export const sendMessage = async (req, res) => {
           };
         }
       }
+    }
+
+    // Contact Card support
+    if (req.body.contactData || req.body.phone || effectiveType === "contact") {
+      content.contactData = typeof req.body.contactData === "string"
+        ? JSON.parse(req.body.contactData)
+        : req.body.contactData || { name: req.body.name || "Contact", phone: req.body.phone || "" };
     }
 
     // Disappearing message / Vanish mode support
@@ -279,7 +294,7 @@ export const sendMessage = async (req, res) => {
         $set: { lastMessage: message._id },
         ...(Object.keys(incFields).length > 0 ? { $inc: incFields } : {}),
       },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     const populatedMessage = await message.populate("sender", "userName profileImage isVerified");
@@ -348,7 +363,7 @@ export const sendVoiceNote = async (req, res) => {
         $set: { lastMessage: message._id },
         ...(Object.keys(incFields).length > 0 ? { $inc: incFields } : {}),
       },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     const populatedMessage = await message.populate("sender", "userName profileImage isVerified");
@@ -426,7 +441,7 @@ export const forwardMessage = async (req, res) => {
           $set: { lastMessage: forwarded._id },
           ...(Object.keys(incFields).length > 0 ? { $inc: incFields } : {}),
         },
-        { new: true }
+        { returnDocument: 'after' }
       );
 
       const populatedForwarded = await forwarded.populate("sender", "userName profileImage isVerified");
@@ -743,15 +758,33 @@ export const deleteMessageForMe = async (req, res) => {
     if (!messageObj) return res.status(404).json({ message: "Message not found" });
 
     const conversation = await Conversation.findById(messageObj.conversation);
-    if (!conversation || !conversation.participants.some(p => p.toString() === userId.toString())) {
+    if (!conversation || !conversation.participants.some((p) => p.toString() === userId.toString())) {
       return res.status(403).json({ message: "Not authorized" });
     }
 
-    await Message.findByIdAndUpdate(messageId, {
-      $addToSet: { deletedFor: userId },
-    });
+    // Add userId to deletedFor array
+    const updatedMessage = await Message.findByIdAndUpdate(
+      messageId,
+      { $addToSet: { deletedFor: userId } },
+      { returnDocument: 'after' }
+    );
 
-    res.status(200).json({ success: true, message: "Message deleted!" });
+    // Smart Cloudinary & Mongo Garbage Collection:
+    // If every participant has deleted this message for themselves, clean up Cloudinary assets & delete doc
+    const allParticipantsDeleted = conversation.participants.every((p) =>
+      updatedMessage.deletedFor.some((d) => d.toString() === p.toString())
+    );
+
+    if (allParticipantsDeleted) {
+      if (updatedMessage.content?.media?.length > 0) {
+        for (const m of updatedMessage.content.media) {
+          if (m.public_id) await deleteFromCloudinary(m.public_id).catch(() => null);
+        }
+      }
+      await Message.findByIdAndDelete(messageId);
+    }
+
+    res.status(200).json({ success: true, message: "Message deleted for you!" });
   } catch (error) {
     res.status(500).json({ message: `deleteMessage error: ${error.message}` });
   }
@@ -767,9 +800,10 @@ export const deleteMessageForEveryone = async (req, res) => {
     if (!message) return res.status(404).json({ message: "Message not found" });
 
     if (message.sender.toString() !== userId.toString()) {
-      return res.status(403).json({ message: "Not allowed" });
+      return res.status(403).json({ message: "You can only unsend/delete messages you sent." });
     }
 
+    // Immediate Cloudinary media cleanup:
     if (message.content?.media?.length > 0) {
       for (const m of message.content.media) {
         if (m.public_id) await deleteFromCloudinary(m.public_id).catch(() => null);
@@ -779,7 +813,7 @@ export const deleteMessageForEveryone = async (req, res) => {
     message.deletedForEveryone = true;
     message.status = "seen";
     message.type = "text";
-    message.content = { text: "This message was deleted" };
+    message.content = { text: "This message was deleted", media: [] };
     message.reactions = [];
     message.isPinned = false;
     await message.save();
@@ -787,12 +821,14 @@ export const deleteMessageForEveryone = async (req, res) => {
     const io = req.app.locals.io;
     if (io) {
       const conversation = await Conversation.findById(message.conversation);
-      conversation.participants.forEach((pid) => {
-        io.to(`user_${pid}`).emit("message-deleted-everyone", {
-          messageId,
-          conversationId: message.conversation.toString(),
+      if (conversation) {
+        conversation.participants.forEach((pid) => {
+          io.to(`user_${pid}`).emit("message-deleted-everyone", {
+            messageId,
+            conversationId: message.conversation.toString(),
+          });
         });
-      });
+      }
     }
 
     res.json({ success: true, message });
@@ -919,5 +955,36 @@ export const getPinnedMessages = async (req, res) => {
     res.json({ success: true, messages });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+/* ================= GET TOTAL UNREAD MESSAGE COUNT ================= */
+export const getUnreadMessageCount = async (req, res) => {
+  try {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const conversations = await Conversation.find({
+      participants: userId,
+    }).select("unreadCount");
+
+    let totalUnread = 0;
+    conversations.forEach((conv) => {
+      const count = conv.unreadCount?.get(userId.toString()) || 0;
+      totalUnread += Math.max(0, count);
+    });
+
+    return res.status(200).json({
+      success: true,
+      unreadCount: totalUnread,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: `getUnreadMessageCount error: ${error.message}`,
+      unreadCount: 0,
+    });
   }
 };

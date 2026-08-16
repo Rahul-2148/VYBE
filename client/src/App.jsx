@@ -1,5 +1,4 @@
 import { lazy, Suspense } from "react";
-import { Toaster } from "./lib/hotToastAdapter";
 import { useSelector, useDispatch } from "react-redux";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useEffect } from "react";
@@ -12,7 +11,8 @@ import useChatSync from "./hooks/useChatSync";
 const EditProfile = lazy(() => import("./pages/EditProfile"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const Home = lazy(() => import("./pages/Home"));
-const Loops = lazy(() => import("./pages/Loops"));
+const Reels = lazy(() => import("./pages/Reels"));
+
 const Profile = lazy(() => import("./pages/Profile"));
 const SignIn = lazy(() => import("./pages/SignIn"));
 const SignUp = lazy(() => import("./pages/SignUp"));
@@ -31,9 +31,11 @@ const LiveRoom = lazy(() => import("./pages/LiveRoom"));
 const MonetizationDashboard = lazy(() => import("./pages/MonetizationDashboard"));
 const LocationPage = lazy(() => import("./pages/LocationPage"));
 const Communities = lazy(() => import("./pages/Communities"));
+const CompanyHub = lazy(() => import("./pages/CompanyHub"));
 import FloatingMessagesDock from "./components/FloatingMessagesDock";
 import CallManager from "./components/CallManager";
 import NotificationLightBar from "./components/NotificationLightBar";
+import NetworkStatusBar from "./components/NetworkStatusBar";
 
 import { initializeSocket, disconnectSocket } from "./lib/socket";
 import { setUserData } from "./redux/features/userSlice";
@@ -115,8 +117,7 @@ function App() {
           <Route path="/edit-profile" element={<ProtectedRoute><EditProfile /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><EditProfile /></ProtectedRoute>} />
           <Route path="/upload" element={<ProtectedRoute><Upload /></ProtectedRoute>} />
-          <Route path="/loops" element={<ProtectedRoute><Loops /></ProtectedRoute>} />
-          <Route path="/reels" element={<ProtectedRoute><Loops /></ProtectedRoute>} />
+          <Route path="/reels" element={<ProtectedRoute><Reels /></ProtectedRoute>} />
           <Route path="/security" element={<ProtectedRoute><SecurityDashboard /></ProtectedRoute>} />
           <Route path="/monetization" element={<ProtectedRoute><MonetizationDashboard /></ProtectedRoute>} />
           <Route path="/live/:streamId" element={<ProtectedRoute><LiveRoom /></ProtectedRoute>} />
@@ -135,6 +136,19 @@ function App() {
           <Route path="/messageArea" element={<Navigate to="/messages" replace />} />
           <Route path="/messageArea/:conversationId" element={<Navigate to="/messages" replace />} />
 
+          {/* Company, Support, Developers & Legal Routes (Accessible to all) */}
+          <Route path="/about" element={<CompanyHub defaultTab="about" />} />
+          <Route path="/help" element={<CompanyHub defaultTab="help" />} />
+          <Route path="/support" element={<CompanyHub defaultTab="help" />} />
+          <Route path="/press" element={<CompanyHub defaultTab="press" />} />
+          <Route path="/api" element={<CompanyHub defaultTab="api" />} />
+          <Route path="/developers" element={<CompanyHub defaultTab="api" />} />
+          <Route path="/jobs" element={<CompanyHub defaultTab="jobs" />} />
+          <Route path="/careers" element={<CompanyHub defaultTab="jobs" />} />
+          <Route path="/privacy" element={<CompanyHub defaultTab="privacy" />} />
+          <Route path="/terms" element={<CompanyHub defaultTab="terms" />} />
+          <Route path="/legal" element={<CompanyHub defaultTab="terms" />} />
+
           {/* Public & Guest Routes */}
           <Route path="/signup" element={<GuestRoute><SignUp /></GuestRoute>} />
           <Route path="/signin" element={<GuestRoute><SignIn /></GuestRoute>} />
@@ -147,14 +161,15 @@ function App() {
         </Routes>
       </Suspense>
 
-      {/* Floating Instagram Messages Dock */}
+      {/* Floating Messages Dock */}
       <FloatingMessagesDock />
 
       <CallManager />
 
       <NotificationLightBar />
 
-      <Toaster />
+      {/* Global Network / Offline Status Engine */}
+      <NetworkStatusBar />
     </>
   );
 }

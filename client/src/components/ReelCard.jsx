@@ -1,8 +1,29 @@
 import axios from "axios";
-import { Eye, Send, Bookmark, BookmarkCheck, Repeat, Disc, Volume2, VolumeX, Sparkles, MessageCircle, X, Play, Pause, Zap, BadgeCheck, Trash2 } from "lucide-react";
+import {
+  Eye,
+  Send,
+  Bookmark,
+  BookmarkCheck,
+  Repeat,
+  Disc,
+  Volume2,
+  VolumeX,
+  Sparkles,
+  MessageCircle,
+  X,
+  Play,
+  Pause,
+  Zap,
+  BadgeCheck,
+  Trash2,
+  MoreVertical,
+  MoreHorizontal,
+  Subtitles,
+  Smartphone,
+} from "lucide-react";
 import moment from "moment";
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import { GoHeart, GoHeartFill } from "react-icons/go";
 import { IoSendSharp } from "react-icons/io5";
 import { MdOutlineComment } from "react-icons/md";
@@ -11,29 +32,56 @@ import { useNavigate } from "react-router-dom";
 import { ClipLoader } from "react-spinners";
 import { SERVER_URL } from "../App";
 import dp from "../assets/dp3.png";
-import { setLoopData } from "../redux/features/loopSlice";
+import { setReelData } from "../redux/features/reelSlice";
+import { setUserData } from "../redux/features/userSlice";
 import FollowButton from "./FollowButton";
 import ShareSheet from "./ShareSheet";
 import RemixReelModal from "./RemixReelModal";
 import HeartExplosion from "./HeartExplosion";
+import ReelOptionsModal from "./ReelOptionsModal";
+import AIInfoModal from "./AIInfoModal";
 import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
+import { getOptimizedMediaUrl } from "../lib/mediaQualitySettings";
 import api from "../lib/axios";
+import VerifiedBadge from "./VerifiedBadge";
 import { getSocket } from "../lib/socket";
 
-export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
+export const ReelCard = ({
+  reel,
+  isActive = true,
+  onNext,
+  onPrev,
+  autoScroll = false,
+  onToggleAutoScroll,
+}) => {
+  const currentItem = reel;
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const commentRef = useRef(null);
   const { userData } = useSelector((state) => state.user);
-  const { loopData } = useSelector((state) => state.loop);
+  const reelState = useSelector((state) => state.reel);
+  const reelData = reelState?.reelData || [];
 
   const videoRef = useRef(null);
   const viewCountedRef = useRef(false);
+  const endedTriggeredRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(() => {
     return window.__vybe_reels_muted !== undefined ? window.__vybe_reels_muted : true;
   });
   const [progress, setProgress] = useState(0);
+
+  // Options & Auto-Scroll & Captions State
+  const [showOptionsModal, setShowOptionsModal] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  const [showCaptions, setShowCaptions] = useState(() => {
+    return typeof localStorage !== "undefined"
+      ? localStorage.getItem("vybe_reel_captions") === "true"
+      : false;
+  });
+  const [commentsDisabled, setCommentsDisabled] = useState(
+    Boolean(currentItem?.commentsDisabled)
+  );
   
   // Heart Burst & Play/Pause Animation State
   const [showHeart, setShowHeart] = useState(false);
@@ -56,37 +104,38 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
   const [showViewers, setShowViewers] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [showRemixModal, setShowRemixModal] = useState(false);
+  const [showAIInfoModal, setShowAIInfoModal] = useState(false);
   const viewersRef = useRef(null);
 
   // Optimistic Like State
   const currentUserId = userData?._id || userData?.user?._id;
-  const isInitiallyLiked = loop?.likes?.some((id) => (id._id || id) === currentUserId);
+  const isInitiallyLiked = currentItem?.likes?.some((id) => (id._id || id) === currentUserId);
   const [isLiked, setIsLiked] = useState(isInitiallyLiked);
-  const [likesCount, setLikesCount] = useState(loop?.likes?.length || 0);
+  const [likesCount, setLikesCount] = useState(currentItem?.likes?.length || 0);
 
   useEffect(() => {
-    setIsLiked(loop?.likes?.some((id) => (id._id || id) === currentUserId));
-    setLikesCount(loop?.likes?.length || 0);
-  }, [loop, currentUserId]);
+    setIsLiked(currentItem?.likes?.some((id) => (id._id || id) === currentUserId));
+    setLikesCount(currentItem?.likes?.length || 0);
+  }, [currentItem, currentUserId]);
 
-  const loopRef = useRef(loop);
-  const loopDataRef = useRef(loopData);
+  const reelRef = useRef(currentItem);
+  const reelDataRef = useRef(reelData);
 
   useEffect(() => {
-    loopRef.current = loop;
-    loopDataRef.current = loopData;
+    reelRef.current = currentItem;
+    reelDataRef.current = reelData;
   });
 
   // Realtime Socket Sync for Likes & Comments
   useEffect(() => {
     const socket = getSocket();
-    if (!socket || !loop?._id) return;
+    if (!socket || !currentItem?._id) return;
 
     const handleSocketLike = (data) => {
-      const currentLoop = loopRef.current;
-      const currentLoopData = loopDataRef.current;
-      if (data.loopId === currentLoop?._id) {
-        let updatedLikes = [...(currentLoop.likes || [])];
+      const activeReel = reelRef.current;
+      const activeReelData = reelDataRef.current;
+      if (data.reelId === activeReel?._id) {
+        let updatedLikes = [...(activeReel.likes || [])];
         const hasUser = updatedLikes.some((id) => (id._id || id) === data.userId);
         if (data.isLiked && !hasUser) {
           updatedLikes.push({ _id: data.userId });
@@ -94,34 +143,35 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
           updatedLikes = updatedLikes.filter((id) => (id._id || id) !== data.userId);
         }
 
-        const updatedLoop = { ...currentLoop, likes: updatedLikes };
-        const updatedLoops = currentLoopData?.map((l) => (l._id === currentLoop._id ? updatedLoop : l));
-        dispatch(setLoopData(updatedLoops));
+        const updatedReel = { ...activeReel, likes: updatedLikes };
+        const updatedReels = activeReelData?.map((r) => (r._id === activeReel._id ? updatedReel : r));
+        dispatch(setReelData(updatedReels));
       }
     };
 
     const handleSocketComment = (data) => {
-      const currentLoop = loopRef.current;
-      const currentLoopData = loopDataRef.current;
-      if (data.loopId === currentLoop?._id && data.comment) {
-        const updatedComments = [...(currentLoop.comments || []), data.comment];
-        const updatedLoop = { ...currentLoop, comments: updatedComments };
-        const updatedLoops = currentLoopData?.map((l) => (l._id === currentLoop._id ? updatedLoop : l));
-        dispatch(setLoopData(updatedLoops));
+      const activeReel = reelRef.current;
+      const activeReelData = reelDataRef.current;
+      if (data.reelId === activeReel?._id && data.comment) {
+        const updatedComments = [...(activeReel.comments || []), data.comment];
+        const updatedReel = { ...activeReel, comments: updatedComments };
+        const updatedReels = activeReelData?.map((r) => (r._id === activeReel._id ? updatedReel : r));
+        dispatch(setReelData(updatedReels));
       }
     };
 
-    socket.on("loop-like-updated", handleSocketLike);
-    socket.on("loop-comment-updated", handleSocketComment);
+    socket.on("reel-like-updated", handleSocketLike);
+    socket.on("reel-comment-updated", handleSocketComment);
 
     return () => {
-      socket.off("loop-like-updated", handleSocketLike);
-      socket.off("loop-comment-updated", handleSocketComment);
+      socket.off("reel-like-updated", handleSocketLike);
+      socket.off("reel-comment-updated", handleSocketComment);
     };
-  }, [loop?._id, dispatch]);
+  }, [currentItem?._id, dispatch]);
 
   useEffect(() => {
     if (isActive) {
+      endedTriggeredRef.current = false;
       const playPromise = videoRef.current?.play();
       if (playPromise !== undefined) {
         playPromise.then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
@@ -130,21 +180,60 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
     } else {
       videoRef.current?.pause();
       setIsPlaying(false);
+      endedTriggeredRef.current = false;
     }
   }, [isActive]);
 
   useEffect(() => {
-    if (loop && userData?.user) {
-      const saved = userData.user.savedLoops?.includes(loop._id) || loop.savedBy?.includes(userData.user._id);
+    if (currentItem && userData?.user) {
+      const saved = (userData.user.savedReels || [])?.includes(currentItem._id) || currentItem.savedBy?.includes(userData.user._id);
       setIsSaved(saved);
     }
-  }, [loop, userData]);
+  }, [currentItem, userData]);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.playbackRate = isFastForwarding ? 2.0 : playbackSpeed;
+    }
+  }, [playbackSpeed, isFastForwarding, isActive]);
+
+  const handleToggleCaptions = () => {
+    setShowCaptions((prev) => {
+      const next = !prev;
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("vybe_reel_captions", String(next));
+      }
+      return next;
+    });
+  };
+
+  const handleToggleComments = async () => {
+    try {
+      const res = await api.patch(`/reel/toggle-comments/${currentItem?._id}`);
+      setCommentsDisabled(res.data.commentsDisabled);
+      snackbar.success(res.data.message);
+    } catch {
+      snackbar.error("Failed to update commenting settings");
+    }
+  };
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;
-    if (video) {
+    if (video && video.duration) {
       const percent = (video.currentTime / video.duration) * 100;
       setProgress(percent);
+
+      // Auto-scroll trigger when video finishes (within 0.25s of end)
+      if (
+        autoScroll &&
+        onNext &&
+        !endedTriggeredRef.current &&
+        video.duration > 1 &&
+        video.currentTime >= video.duration - 0.25
+      ) {
+        endedTriggeredRef.current = true;
+        onNext();
+      }
     }
   };
 
@@ -165,20 +254,20 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
     setLikesCount(nextCount);
 
     // Update Redux immediately
-    const updatedLoop = {
-      ...loop,
+    const updatedReel = {
+      ...currentItem,
       likes: nextLiked
-        ? [...(loop.likes || []), currentUserId]
-        : (loop.likes || []).filter((id) => (id._id || id) !== currentUserId),
+        ? [...(currentItem.likes || []), currentUserId]
+        : (currentItem.likes || []).filter((id) => (id._id || id) !== currentUserId),
     };
-    const updatedLoops = loopData?.map((l) => (l._id === loop._id ? updatedLoop : l));
-    dispatch(setLoopData(updatedLoops));
+    const updatedReels = reelData?.map((r) => (r._id === currentItem._id ? updatedReel : r));
+    dispatch(setReelData(updatedReels));
 
     // Emit Socket.IO event in realtime
     const socket = getSocket();
     if (socket) {
-      socket.emit("loop-like-toggle", {
-        loopId: loop._id,
+      socket.emit("reel-like-toggle", {
+        reelId: currentItem._id,
         userId: currentUserId,
         isLiked: nextLiked,
         likesCount: nextCount,
@@ -186,16 +275,16 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
     }
 
     try {
-      await api.post(`/loop/like/${loop?._id}`);
+      await api.post(`/reel/like/${currentItem?._id}`);
     } catch (error) {
       // Rollback on network failure
       setIsLiked(!nextLiked);
       setLikesCount(likesCount);
-      toast.error("Failed to update like");
+      snackbar.error("Failed to update like");
     }
   };
 
-  // Dedicated Instagram-Style Double Tap Like (Always forces like state + Heart Burst)
+  // Dedicated Double Tap Like (Always forces like state + Heart Burst)
   const forceDoubleTapLike = async () => {
     setShowHeart(true);
 
@@ -204,17 +293,17 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
       setIsLiked(true);
       setLikesCount(nextCount);
 
-      const updatedLoop = {
-        ...loop,
-        likes: [...(loop.likes || []), currentUserId],
+      const updatedReel = {
+        ...currentItem,
+        likes: [...(currentItem.likes || []), currentUserId],
       };
-      const updatedLoops = loopData?.map((l) => (l._id === loop._id ? updatedLoop : l));
-      dispatch(setLoopData(updatedLoops));
+      const updatedReels = reelData?.map((r) => (r._id === currentItem._id ? updatedReel : r));
+      dispatch(setReelData(updatedReels));
 
       const socket = getSocket();
       if (socket) {
-        socket.emit("loop-like-toggle", {
-          loopId: loop._id,
+        socket.emit("reel-like-toggle", {
+          reelId: currentItem._id,
           userId: currentUserId,
           isLiked: true,
           likesCount: nextCount,
@@ -222,7 +311,7 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
       }
 
       try {
-        await api.post(`/loop/like/${loop?._id}`);
+        await api.post(`/reel/like/${currentItem?._id}`);
       } catch (error) {
         setIsLiked(false);
         setLikesCount(likesCount);
@@ -242,7 +331,6 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
       tapCountRef.current = 0;
 
       if (count === 1) {
-        // SINGLE TAP: Toggle Play / Pause with Instagram Circle Animation Overlay!
         if (showComments || showViewers || showShare) {
           setShowComments(false);
           setShowViewers(false);
@@ -265,11 +353,8 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
         }
 
       } else if (count === 2) {
-        // DOUBLE TAP: Trigger Instagram Heart Burst & Force Like!
         forceDoubleTapLike();
-
       } else if (count >= 3) {
-        // TRIPLE TAP: Open Comments Drawer!
         setShowComments(true);
       }
     }, 350);
@@ -298,29 +383,31 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
     }
   };
 
-  const handleDeleteLoop = async () => {
-    if (!window.confirm("Are you sure you want to delete this Reel? This action cannot be undone.")) return;
+  const handleDeleteReel = async () => {
     try {
-      const res = await api.delete(`/loop/delete/${loop?._id}`);
+      const res = await api.delete(`/reel/delete/${currentItem?._id}`);
       if (res.data.success) {
-        toast.success("Reel deleted successfully");
-        const updatedLoops = loopData.filter((l) => l._id !== loop._id);
-        dispatch(setLoopData(updatedLoops));
+        snackbar.success("Reel deleted successfully 🗑️");
+        const updatedReels = reelData.filter((r) => r._id !== currentItem._id);
+        dispatch(setReelData(updatedReels));
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to delete Reel");
+      snackbar.error(err.response?.data?.message || "Failed to delete Reel");
     }
   };
 
   const handleToggleSave = async () => {
     try {
-      const res = await api.post(`/loop/save/${loop?._id}`);
+      const res = await api.post(`/reel/save/${currentItem?._id}`);
       if (res.data.success) {
         setIsSaved(res.data.isSaved);
-        toast.success(res.data.message);
+        if (res.data.user) {
+          dispatch(setUserData(res.data.user));
+        }
+        snackbar.success(res.data.message);
       }
     } catch (err) {
-      toast.error("Failed to update bookmark.");
+      snackbar.error("Failed to update bookmark.");
     }
   };
 
@@ -329,20 +416,20 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
 
     try {
       setCommentLoading(true);
-      const result = await api.post(`/loop/comment/${loop?._id}`, { message });
-      const updatedLoop = result.data.loop;
-      const updatedLoops = loopData.map((l) => (l._id === loop._id ? updatedLoop : l));
+      const result = await api.post(`/reel/comment/${currentItem?._id}`, { message });
+      const updatedReel = result.data.reel;
+      const updatedReels = reelData.map((r) => (r._id === currentItem._id ? updatedReel : r));
 
-      dispatch(setLoopData(updatedLoops));
+      dispatch(setReelData(updatedReels));
 
       const socket = getSocket();
       if (socket && result.data?.comment) {
-        socket.emit("loop-comment-send", { loopId: loop._id, comment: result.data.comment });
+        socket.emit("reel-comment-send", { reelId: currentItem._id, comment: result.data.comment });
       }
 
       setMessage("");
     } catch (error) {
-      toast.error("Failed to add comment");
+      snackbar.error("Failed to add comment");
     } finally {
       setCommentLoading(false);
     }
@@ -352,7 +439,7 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
     if (viewCountedRef.current) return;
     try {
       viewCountedRef.current = true;
-      await api.post(`/loop/view/${loop?._id}`);
+      await api.post(`/reel/view/${currentItem?._id}`);
     } catch (error) {
       console.log("View increment failed");
     }
@@ -368,7 +455,7 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
     if (!watchStartRef.current) return;
     const duration = Math.floor((Date.now() - watchStartRef.current) / 1000);
     watchStartRef.current = null;
-    await api.post(`/loop/watch/${loop._id}`, { duration }).catch(() => null);
+    await api.post(`/reel/watch/${currentItem._id}`, { duration }).catch(() => null);
   };
 
   // Keyboard Shortcuts
@@ -402,8 +489,10 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isPlaying, showComments, showViewers, showShare, onNext, onPrev]);
 
-  const audioId = loop?.audioTrack?.id || (typeof loop?.music === 'object' && loop?.music ? loop.music.id || loop.music.title : loop?.music) || "original";
-  const audioName = loop?.audioTrack?.title || (typeof loop?.music === 'object' && loop?.music ? `${loop.music.title} - ${loop.music.artist}` : loop?.music) || "Original Audio";
+  const audioId = currentItem?.audioTrack?.id || (typeof currentItem?.music === 'object' && currentItem?.music ? currentItem.music.id || currentItem.music.title : currentItem?.music) || "original";
+  const audioName = currentItem?.audioTrack?.title || (typeof currentItem?.music === 'object' && currentItem?.music ? `${currentItem.music.title} - ${currentItem.music.artist}` : currentItem?.music) || "Original Audio";
+
+  if (!currentItem || !currentItem._id) return null;
 
   return (
     <div
@@ -424,7 +513,7 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
         </div>
       )}
 
-      {/* INSTAGRAM PLAY / PAUSE OVERLAY ANIMATION CIRCLE */}
+      {/* PLAY / PAUSE OVERLAY ANIMATION CIRCLE */}
       {showPlayPauseAnim && (
         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none flex items-center justify-center">
           <div className="w-20 h-20 rounded-full bg-surface-overlay backdrop-blur-md border border-white/20 flex items-center justify-center shadow-2xl animate-scale-pulse">
@@ -437,7 +526,7 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
         </div>
       )}
 
-      {/* Instagram Particle Heart Burst on double-tap */}
+      {/* Particle Heart Burst on double-tap */}
       <HeartExplosion show={showHeart} onComplete={() => setShowHeart(false)} />
 
       {/* OVERLAY BACKDROP FOR DRAWERS */}
@@ -447,6 +536,7 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
             e.stopPropagation();
             setShowComments(false);
             setShowViewers(false);
+            setShowShare(false);
           }}
           className="absolute inset-0 bg-bg/40 z-[150] backdrop-blur-[2px] transition-opacity cursor-pointer"
         />
@@ -461,7 +551,7 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
         }`}
       >
         <div className="flex items-center justify-between border-b border-border pb-3">
-          <h1 className="text-text text-sm font-bold">Comments ({loop?.comments?.length || 0})</h1>
+          <h1 className="text-text text-sm font-bold">Comments ({currentItem?.comments?.length || 0})</h1>
           <button
             onClick={() => setShowComments(false)}
             className="text-xs text-text-secondary hover:text-text font-semibold cursor-pointer"
@@ -471,10 +561,10 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
         </div>
 
         <div className="w-full flex-1 overflow-y-auto flex flex-col gap-3 py-3">
-          {loop?.comments?.length === 0 ? (
+          {currentItem?.comments?.length === 0 ? (
             <div className="text-center text-text-muted text-sm font-medium mt-12">No comments yet. Be the first!</div>
           ) : (
-            loop?.comments?.map((comment, index) => (
+            currentItem?.comments?.map((comment, index) => (
               <div key={index} className="flex items-start gap-3 p-2 rounded-xl bg-surface/50">
                 <img
                   src={comment?.author?.profileImage?.url || dp}
@@ -487,7 +577,7 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
                     <span className="font-bold text-text flex items-center gap-0.5">
                       {comment?.author?.userName}
                       {comment?.author?.isVerified && (
-                        <BadgeCheck className="h-3.5 w-3.5 fill-[#0095f6] text-white shrink-0" />
+                        <VerifiedBadge size="xs" />
                       )}
                     </span>
                     <span className="text-[10px] text-text-muted">{moment(comment?.createdAt).fromNow()}</span>
@@ -500,23 +590,29 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
         </div>
 
         {/* Comment input */}
-        <div className="w-full pt-2 flex items-center gap-2 border-t border-border">
-          <input
-            type="text"
-            className="flex-1 px-4 py-2.5 bg-surface border border-border rounded-full text-xs text-text outline-none focus:border-rose-500"
-            placeholder="Add a comment..."
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleComment();
-            }}
-          />
-          {message.trim() && (
-            <button disabled={commentLoading} onClick={handleComment} className="p-2.5 bg-rose-600 hover:bg-rose-500 rounded-full text-text cursor-pointer transition">
-              {commentLoading ? <ClipLoader size={16} color="white" /> : <IoSendSharp className="w-4 h-4" />}
-            </button>
-          )}
-        </div>
+        {commentsDisabled ? (
+          <div className="w-full py-3 text-center text-xs text-text-muted font-semibold border-t border-border">
+            Commenting is turned off for this reel
+          </div>
+        ) : (
+          <div className="w-full pt-2 flex items-center gap-2 border-t border-border">
+            <input
+              type="text"
+              className="flex-1 px-4 py-2.5 bg-surface border border-border rounded-full text-xs text-text outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition shadow-xs"
+              placeholder="Add a comment..."
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleComment();
+              }}
+            />
+            {message.trim() && (
+              <button disabled={commentLoading} onClick={handleComment} className="p-2.5 bg-primary hover:bg-primary-hover rounded-full text-white cursor-pointer transition shadow-xs disabled:opacity-50">
+                {commentLoading ? <ClipLoader size={16} color="white" /> : <IoSendSharp className="w-4 h-4" />}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* VIEWERS DRAWER */}
@@ -530,7 +626,7 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
         <div className="flex items-center justify-between border-b border-border pb-3">
           <h1 className="text-text text-sm font-bold flex items-center gap-2">
             <Eye className="w-4 h-4 text-rose-500" />
-            <span>Reel Views ({loop?.viewedBy?.length || loop?.views || 0})</span>
+            <span>Reel Views ({currentItem?.viewedBy?.length || currentItem?.views || 0})</span>
           </h1>
           <button onClick={() => setShowViewers(false)} className="text-xs text-text-secondary hover:text-text font-semibold cursor-pointer">
             Done
@@ -538,10 +634,10 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
         </div>
 
         <div className="w-full flex-1 overflow-y-auto flex flex-col gap-2 py-3">
-          {!loop?.viewedBy || loop?.viewedBy?.length === 0 ? (
+          {!currentItem?.viewedBy || currentItem?.viewedBy?.length === 0 ? (
             <div className="text-center text-text-muted text-xs font-medium mt-12">No views recorded yet</div>
           ) : (
-            loop.viewedBy.map((viewer, idx) => (
+            currentItem.viewedBy.map((viewer, idx) => (
               <div key={idx} className="flex items-center justify-between p-2 rounded-xl hover:bg-surface/60 transition">
                 <div
                   className="flex items-center gap-2.5 cursor-pointer"
@@ -569,22 +665,40 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
         </div>
       </div>
 
-      {/* VIDEO PLAYER WITH INSTAGRAM-STYLE SMOOTH DRAWER TRANSITION & GESTURES */}
+      {/* VIDEO PLAYER WITH SMOOTH DRAWER TRANSITION & GESTURES */}
       <video
         onPlay={handlePlay}
         onPause={handlePause}
         ref={videoRef}
         autoPlay
-        preload="metadata"
         muted={isMuted}
-        loop
+        onEnded={(e) => {
+          if (autoScroll && onNext) {
+            if (!endedTriggeredRef.current) {
+              endedTriggeredRef.current = true;
+              onNext();
+            }
+          } else {
+            e.target.currentTime = 0;
+            e.target.play().catch(() => null);
+          }
+        }}
         playsInline
-        src={loop?.media?.url}
+        src={getOptimizedMediaUrl(currentItem?.media?.url, "video")}
         className={`w-full h-full object-cover transition-all duration-300 ${
           showComments || showViewers ? "scale-[0.95] translate-y-[-24px] rounded-2xl" : "scale-100 translate-y-0"
         } ${isFastForwarding ? "brightness-110" : ""}`}
         onTimeUpdate={handleTimeUpdate}
       />
+
+      {/* CAPTIONS & SUBTITLES OVERLAY */}
+      {showCaptions && currentItem?.caption && (
+        <div className="absolute bottom-28 left-4 right-16 z-30 pointer-events-none animate-fade-in">
+          <div className="inline-block px-3 py-1.5 rounded-xl bg-black/80 backdrop-blur-md text-white text-xs font-semibold border border-white/15 shadow-xl max-w-full truncate">
+            💬 {currentItem.caption}
+          </div>
+        </div>
+      )}
 
       {/* TOP CONTROLS */}
       {!isFastForwarding && (
@@ -615,54 +729,71 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
             {/* Author */}
             <div className="flex items-center gap-2.5">
               <img
-                src={loop?.author?.profileImage?.url || dp}
+                src={currentItem?.author?.profileImage?.url || dp}
                 alt=""
                 className="w-9 h-9 rounded-full object-cover border border-border-strong cursor-pointer interactive-btn"
                 onClick={(e) => {
                   e.stopPropagation();
-                  navigate(`/profile/${loop?.author?.userName}`);
+                  navigate(`/profile/${currentItem?.author?.userName}`);
                 }}
               />
               <span
                 className="text-white text-xs font-bold cursor-pointer hover:underline interactive-btn flex items-center gap-0.5"
                 onClick={(e) => {
                   e.stopPropagation();
-                  navigate(`/profile/${loop?.author?.userName}`);
+                  navigate(`/profile/${currentItem?.author?.userName}`);
                 }}
               >
-                @{loop?.author?.userName}
-                {loop?.author?.isVerified && (
-                  <BadgeCheck className="h-4 w-4 fill-[#0095f6] text-white shrink-0" />
+                @{currentItem?.author?.userName}
+                {currentItem?.author?.isVerified && (
+                  <VerifiedBadge size="sm" />
                 )}
               </span>
 
-              {loop?.author?._id !== userData?.user?._id && (
+              {currentItem?.author?._id !== userData?.user?._id && (
                 <FollowButton
-                  targetUserId={loop?.author?._id}
+                  targetUserId={currentItem?.author?._id}
                   tailwind="px-3 py-1 bg-rose-600 text-white text-[11px] font-semibold rounded-full shadow interactive-btn"
                 />
               )}
             </div>
 
             {/* Location */}
-            {loop?.location && (
+            {currentItem?.location && (
               <div
                 onClick={(e) => {
                   e.stopPropagation();
-                  navigate(`/explore/location/${encodeURIComponent(loop.location)}`);
+                  navigate(`/explore/location/${encodeURIComponent(currentItem.location)}`);
                 }}
                 className="text-[10px] text-rose-400 font-semibold cursor-pointer hover:underline flex items-center gap-0.5 mt-0.5 interactive-btn"
               >
-                📍 {loop.location}
+                📍 {currentItem.location}
               </div>
             )}
 
             {/* Caption */}
-            {loop?.caption && <p className="text-xs text-white font-normal line-clamp-2 pointer-events-none">{loop.caption}</p>}
+            {currentItem?.caption && <p className="text-xs text-white font-normal line-clamp-2 pointer-events-none">{currentItem.caption}</p>}
+
+            {/* Made with AI Pill Badge */}
+            {currentItem?.aiLabel?.isAIGenerated && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  triggerHaptic("light");
+                  setShowAIInfoModal(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md border border-purple-400/40 text-[10px] font-semibold text-purple-300 active:scale-95 transition-all shadow-md cursor-pointer pointer-events-auto"
+                title="Made with AI • Click for info"
+              >
+                <Sparkles className="w-2.5 h-2.5 text-purple-400 fill-purple-400/20 animate-pulse" />
+                <span>Made with AI</span>
+              </button>
+            )}
 
             {/* Audio Track & Spinning Disc */}
             {(() => {
-              let trackObj = loop?.audioTrack || loop?.music;
+              let trackObj = currentItem?.audioTrack || currentItem?.music;
               if (typeof trackObj === "string") {
                 try {
                   trackObj = JSON.parse(trackObj);
@@ -670,9 +801,9 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
                   trackObj = { title: trackObj };
                 }
               }
-              const title = trackObj?.title || `${loop?.author?.userName || "Original"} • Audio`;
+              const title = trackObj?.title || `${currentItem?.author?.userName || "Original"} • Audio`;
               const artist = trackObj?.artist || "Original Audio";
-              const trackParam = trackObj?.id || trackObj?.title || `${loop?.author?.userName}-original`;
+              const trackParam = trackObj?.id || trackObj?.title || `${currentItem?.author?.userName}-original`;
 
               return (
                 <div
@@ -712,7 +843,7 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
               <div className="p-2.5 rounded-full bg-bg/40 backdrop-blur group-hover:bg-surface-overlay transition">
                 <MdOutlineComment className="w-6 h-6 text-white" />
               </div>
-              <span className="text-[11px] font-semibold">{loop?.comments?.length || 0}</span>
+              <span className="text-[11px] font-semibold">{currentItem?.comments?.length || 0}</span>
             </button>
 
             {/* Share */}
@@ -720,7 +851,7 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
               <div className="p-2.5 rounded-full bg-bg/40 backdrop-blur group-hover:bg-surface-overlay transition">
                 <Send className="w-5 h-5 text-white" />
               </div>
-              <span className="text-[11px] font-semibold">{loop?.forwards || 0}</span>
+              <span className="text-[11px] font-semibold">{currentItem?.forwards || 0}</span>
             </button>
 
             {/* Save Bookmark */}
@@ -742,12 +873,23 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
               <div className="p-2.5 rounded-full bg-bg/40 backdrop-blur group-hover:bg-surface-overlay transition">
                 <Eye className="w-5 h-5 text-white group-hover:text-rose-400 transition" />
               </div>
-              <span className="text-[11px] font-semibold">{loop?.views || 0}</span>
+              <span className="text-[11px] font-semibold">{currentItem?.views || 0}</span>
+            </button>
+
+            {/* 3-Dot Options & Settings */}
+            <button
+              onClick={() => setShowOptionsModal(true)}
+              className="flex flex-col items-center gap-1 group cursor-pointer"
+              title="Reel Options & Auto-Scroll"
+            >
+              <div className="p-2.5 rounded-full bg-bg/40 backdrop-blur group-hover:bg-surface-overlay transition text-white group-hover:text-rose-400">
+                <MoreVertical className="w-5 h-5" />
+              </div>
             </button>
 
             {/* Delete Reel (Owner only) */}
-            {(loop?.author?._id === currentUserId || loop?.author === currentUserId) && (
-              <button onClick={handleDeleteLoop} className="flex flex-col items-center gap-1 group cursor-pointer" title="Delete Reel">
+            {(currentItem?.author?._id === currentUserId || currentItem?.author === currentUserId) && (
+              <button onClick={handleDeleteReel} className="flex flex-col items-center gap-1 group cursor-pointer" title="Delete Reel">
                 <div className="p-2.5 rounded-full bg-bg/40 backdrop-blur hover:bg-rose-950/80 transition text-rose-500 hover:text-rose-400">
                   <Trash2 className="w-5 h-5" />
                 </div>
@@ -758,19 +900,51 @@ export const LoopCard = ({ loop, isActive = true, onNext, onPrev }) => {
       )}
 
       {/* Share Sheet */}
-      <ShareSheet open={showShare} onClose={() => setShowShare(false)} entity={loop} entityType="reel" following={userData?.user?.following} />
+      <ShareSheet open={showShare} onClose={() => setShowShare(false)} entity={currentItem} entityType="reel" following={userData?.user?.following} />
 
       {/* Remix Modal */}
       {showRemixModal && (
         <RemixReelModal
           isOpen={showRemixModal}
           onClose={() => setShowRemixModal(false)}
-          originalLoop={loop}
-          onSuccess={() => toast.success("Remix created!")}
+          originalReel={currentItem}
+          onSuccess={() => snackbar.success("Remix created!")}
         />
       )}
+
+      {/* Reel 3-Dot Options & Auto-Scroll Modal */}
+      <ReelOptionsModal
+        isOpen={showOptionsModal}
+        onClose={() => setShowOptionsModal(false)}
+        reel={currentItem}
+        isAuthor={currentItem?.author?._id === currentUserId || currentItem?.author === currentUserId}
+        isSaved={isSaved}
+        onToggleSave={handleToggleSave}
+        onOpenRemix={() => setShowRemixModal(true)}
+        onOpenShare={() => setShowShare(true)}
+        playbackSpeed={playbackSpeed}
+        onChangePlaybackSpeed={setPlaybackSpeed}
+        autoScroll={autoScroll}
+        onToggleAutoScroll={onToggleAutoScroll}
+        showCaptions={showCaptions}
+        onToggleCaptions={handleToggleCaptions}
+        onDeleteReel={handleDeleteReel}
+        onNotInterested={() => {
+          if (onNext) onNext();
+        }}
+        onToggleComments={handleToggleComments}
+        commentsDisabled={commentsDisabled}
+      />
+
+      {/* AI Transparency Disclosure Modal */}
+      <AIInfoModal
+        isOpen={showAIInfoModal}
+        onClose={() => setShowAIInfoModal(false)}
+        aiLabel={currentItem?.aiLabel}
+        authorName={currentItem?.author?.name || `@${currentItem?.author?.userName}` || "The creator"}
+      />
     </div>
   );
 };
 
-export default LoopCard;
+export default ReelCard;

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Hash, ArrowLeft, Heart, MessageCircle, UserPlus, UserCheck } from "lucide-react";
 import { motion } from "framer-motion";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
 export const HashtagPage = () => {
@@ -27,7 +27,7 @@ export const HashtagPage = () => {
           setIsFollowing(res.data.isFollowing);
         }
       } catch {
-        if (mounted) toast.error("Failed to load hashtag details.");
+        if (mounted) snackbar.error("Failed to load hashtag details.");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -43,10 +43,10 @@ export const HashtagPage = () => {
       const res = await api.post(`/search/follow-tag/${hashtag}`);
       if (res.data.success) {
         setIsFollowing(res.data.isFollowing);
-        toast.success(res.data.message);
+        snackbar.success(res.data.message);
       }
     } catch {
-      toast.error("Failed to update hashtag follow.");
+      snackbar.error("Failed to update hashtag follow.");
     }
   };
 

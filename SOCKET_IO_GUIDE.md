@@ -63,8 +63,8 @@ useEffect(() => {
     // Update your Redux store or state
     dispatch(addMessage(message));
     
-    // Show toast notification
-    toast.success(`New message from ${message.sender.userName}`);
+    // Show snackbar notification
+    snackbar.success(`New message from ${message.sender.userName}`);
   });
 
   return () => unsubscribe?.();
@@ -243,11 +243,11 @@ import { onUserJoinedConversation, onUserLeftConversation } from '../lib/socket'
 
 useEffect(() => {
   const unsubJoined = onUserJoinedConversation((data) => {
-    toast.info(`${data.userId} joined the conversation`);
+    snackbar.info(`${data.userId} joined the conversation`);
   });
 
   const unsubLeft = onUserLeftConversation((data) => {
-    toast.info(`${data.userId} left the conversation`);
+    snackbar.info(`${data.userId} left the conversation`);
   });
 
   return () => {
@@ -283,11 +283,11 @@ useEffect(() => {
     const { type, from, payload } = data;
 
     if (type === 'new-post') {
-      toast.success(`${payload.posterName} posted something!`);
+      snackbar.success(`${payload.posterName} posted something!`);
     } else if (type === 'new-like') {
-      toast.success(`${payload.userName} liked your post`);
+      snackbar.success(`${payload.userName} liked your post`);
     } else if (type === 'new-follow') {
-      toast.success(`${payload.userName} started following you`);
+      snackbar.success(`${payload.userName} started following you`);
     }
   });
 
@@ -425,7 +425,7 @@ useEffect(() => {
 
   const handleError = (error) => {
     console.error('Socket error:', error);
-    toast.error('Connection error');
+    snackbar.error('Connection error');
   };
 
   socket.on('error', handleError);

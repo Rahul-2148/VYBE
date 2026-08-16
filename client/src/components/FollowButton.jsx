@@ -1,6 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import { useDispatch, useSelector } from "react-redux";
 import { setUserData } from "../redux/features/userSlice";
 import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
@@ -53,10 +53,10 @@ export const FollowButton = ({ targetUserId, targetUser = null, tailwind, onFoll
         })
       );
 
-      toast.success(result.data.message);
+      snackbar.success(result.data.message);
       if (onFollowChange) onFollowChange();
     } catch (error) {
-      toast.error(error.response?.data?.message || "Follow toggle failed");
+      snackbar.error(error.response?.data?.message || "Follow toggle failed");
     }
   };
 

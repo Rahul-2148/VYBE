@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, X, Hash, User, Trash2, Clock, ArrowRight, BadgeCheck } from "lucide-react";
+import { Search, X, Hash, User, Trash2, Clock, ArrowRight, BadgeCheck, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import dp from "../assets/dp3.png";
 import api from "../lib/axios";
+import VerifiedBadge from "./VerifiedBadge";
 
 export const SearchModal = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
@@ -41,10 +42,10 @@ export const SearchModal = ({ isOpen, onClose }) => {
       const res = await api.delete(`/search/history/${itemId}`);
       if (res.data.success) {
         setSearchHistory((prev) => prev.filter((item) => item._id !== itemId));
-        toast.success("Removed from history");
+        snackbar.success("Removed from history");
       }
     } catch {
-      toast.error("Failed to remove item.");
+      snackbar.error("Failed to remove item.");
     }
   };
 
@@ -57,10 +58,10 @@ export const SearchModal = ({ isOpen, onClose }) => {
       const res = await api.delete("/search/history");
       if (res.data.success) {
         setSearchHistory([]);
-        toast.success("History cleared");
+        snackbar.success("History cleared");
       }
     } catch {
-      toast.error("Failed to clear history.");
+      snackbar.error("Failed to clear history.");
     }
   };
 
@@ -80,7 +81,7 @@ export const SearchModal = ({ isOpen, onClose }) => {
           setHashtags(res.data.hashtags || []);
         }
       } catch {
-        toast.error("Search query failed.");
+        snackbar.error("Search query failed.");
       } finally {
         setLoading(false);
       }
@@ -121,36 +122,24 @@ export const SearchModal = ({ isOpen, onClose }) => {
           className="relative w-full max-w-xl bg-surface-inset border border-border rounded-3xl p-6 text-text shadow-2xl space-y-6"
         >
           {/* Top Search Input */}
-          <div className="vybe-search-bar" style={{ height: 40, borderRadius: 10 }}>
-            <Search className="search-icon" style={{ width: 18, height: 18 }} />
+          <div className="flex items-center gap-3 bg-surface border border-border rounded-2xl px-4 py-2.5 focus-within:border-primary focus-within:ring-3 focus-within:ring-primary/10 transition shadow-xs">
+            <Search className="w-4.5 h-4.5 text-text-muted shrink-0" />
             <input
               autoFocus
               type="text"
               placeholder="Search users, @usernames, or #hashtags..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              className="flex-1 bg-transparent text-sm text-text placeholder:text-text-muted outline-none border-none ring-0 shadow-none focus:outline-none focus:ring-0 min-w-0"
             />
             {query && (
-              <button onClick={() => setQuery("")} className="clear-btn">
-                <X />
+              <button onClick={() => setQuery("")} className="p-1 text-text-muted hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer shrink-0">
+                <X className="w-4 h-4" />
               </button>
             )}
             <button
               onClick={onClose}
-              style={{
-                background: "none",
-                border: "none",
-                outline: "none",
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--text-secondary)",
-                cursor: "pointer",
-                paddingLeft: 8,
-                borderLeft: "1px solid var(--border)",
-                marginLeft: 4,
-                lineHeight: 1,
-                fontFamily: "inherit",
-              }}
+              className="px-2.5 py-1 text-xs font-semibold text-text-secondary hover:text-text border-l border-border transition cursor-pointer shrink-0"
             >
               Esc
             </button>
@@ -214,7 +203,10 @@ export const SearchModal = ({ isOpen, onClose }) => {
                                 <p className="text-xs font-bold text-text flex items-center gap-0.5">
                                   @{item.targetUser.userName}
                                   {item.targetUser.isVerified && (
-                                    <BadgeCheck className="h-4 w-4 fill-[#0095f6] text-white shrink-0" />
+                                    <VerifiedBadge size="xs" />
+                                  )}
+                                  {item.targetUser.accountType === "private" && (
+                                    <Lock className="w-3 h-3 text-text-muted ml-0.5 shrink-0" />
                                   )}
                                 </p>
                                 <p className="text-[11px] text-text-secondary truncate">{item.targetUser.name}</p>
@@ -288,7 +280,10 @@ export const SearchModal = ({ isOpen, onClose }) => {
                             <p className="text-xs font-bold text-text flex items-center gap-0.5">
                               @{u.userName}
                               {u.isVerified && (
-                                <BadgeCheck className="h-4 w-4 fill-[#0095f6] text-white shrink-0" />
+                                <VerifiedBadge size="xs" />
+                              )}
+                              {u.accountType === "private" && (
+                                <Lock className="w-3 h-3 text-text-muted ml-0.5 shrink-0" />
                               )}
                             </p>
                             <p className="text-[11px] text-text-secondary">{u.name}</p>

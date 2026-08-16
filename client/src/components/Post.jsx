@@ -1,7 +1,7 @@
 import { Check, Archive, FolderPlus, Tag, VolumeX, Volume2, BadgeCheck, Sparkles, Info, Bot, X, Music } from "lucide-react";
 import moment from "moment";
 import { useState, useEffect, useRef, useMemo } from "react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import { GoBookmark, GoBookmarkFill, GoHeart, GoHeartFill } from "react-icons/go";
 import { IoSendSharp } from "react-icons/io5";
 import { MdDeleteOutline, MdEdit, MdOutlineComment } from "react-icons/md";
@@ -18,12 +18,23 @@ import VideoPlayer from "./VideoPlayer";
 import PostCarousel from "./PostCarousel";
 import TaggedUsersOverlay from "./TaggedUsersOverlay";
 import CollectionsModal from "./CollectionsModal";
+import VerifiedBadge from "./VerifiedBadge";
 import AITranslateButton from "./AITranslateButton";
 import ShareSheet from "./ShareSheet";
 import EditPostModal from "./EditPostModal";
 import HeartExplosion from "./HeartExplosion";
+import AIInfoModal from "./AIInfoModal";
 import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
 import api from "../lib/axios";
+import { useToggleArchivePostMutation, useDeletePostMutation } from "../redux/api/apiSlice";
+
+// Ensure Cloudinary image URLs have f_auto,q_auto for browser compatibility (HEIF/WebP)
+const ensureCloudinaryAutoFormat = (url) => {
+  if (!url || typeof url !== "string") return url;
+  if (!url.includes("cloudinary.com") || !url.includes("/upload/")) return url;
+  if (url.includes("f_auto")) return url;
+  return url.replace("/upload/", "/upload/f_auto,q_auto/");
+};
 
 // Render interactive caption with clickable @mentions and #hashtags
 const RenderParsedCaption = ({ caption, onNavigate }) => {
@@ -69,6 +80,9 @@ const Post = ({ post }) => {
   const { userData } = useSelector((state) => state.user);
   const { postData } = useSelector((state) => state.post);
 
+  const [toggleArchivePost] = useToggleArchivePostMutation();
+  const [deletePostMutation] = useDeletePostMutation();
+
   const [showComments, setShowComments] = useState(false);
   const [message, setMessage] = useState("");
   const [commentLoading, setCommentLoading] = useState(false);
@@ -80,7 +94,7 @@ const Post = ({ post }) => {
   const [showHeartAnim, setShowHeartAnim] = useState(false);
   const [showTags, setShowTags] = useState(false);
 
-  // Background Looping Music State
+  // Background Audio State
   const [musicMuted, setMusicMuted] = useState(true);
   const audioRef = useRef(null);
 
@@ -104,7 +118,10 @@ const Post = ({ post }) => {
 
     if (parsedMusic?.audioUrl) {
       const a = new Audio(parsedMusic.audioUrl);
-      a.loop = true;
+      a.onended = () => {
+        a.currentTime = 0;
+        a.play().catch(() => null);
+      };
       audioRef.current = a;
 
       if (!musicMuted) {
@@ -156,7 +173,7 @@ const Post = ({ post }) => {
       const updatedPosts = postData?.map((p) => (p._id === post._id ? updatedPost : p));
       dispatch(setPostData(updatedPosts));
     } catch (error) {
-      toast.error(error.response?.data?.message || "Like failed");
+      snackbar.error(error.response?.data?.message || "Like failed");
     }
   };
 
@@ -173,7 +190,7 @@ const Post = ({ post }) => {
       dispatch(setPostData(updatedPosts));
       setMessage("");
     } catch (error) {
-      toast.error("Failed to add comment");
+      snackbar.error("Failed to add comment");
     } finally {
       setCommentLoading(false);
     }
@@ -184,21 +201,21 @@ const Post = ({ post }) => {
       triggerHaptic("medium");
       const result = await api.post(`/post/saved/${post?._id}`);
       dispatch(setUserData(result.data.user));
-      toast.success(result.data.message);
+      snackbar.success(result.data.message);
     } catch (error) {
-      toast.error(error.response?.data?.message || "Bookmark failed");
+      snackbar.error(error.response?.data?.message || "Bookmark failed");
     }
   };
 
   const handleDeletePost = async () => {
     try {
       setDeletePostLoading(true);
-      const result = await api.delete(`/post/delete/${post?._id}`);
-      toast.success(result.data.message);
+      const result = await deletePostMutation(post?._id).unwrap();
+      snackbar.success(result.message || "Post deleted");
       const updatedPosts = postData.filter((p) => p._id !== post._id);
       dispatch(setPostData(updatedPosts));
     } catch (error) {
-      toast.error(error.response?.data?.message || "Delete failed");
+      snackbar.error(error?.data?.message || "Delete failed");
     } finally {
       setDeletePostLoading(false);
     }
@@ -206,17 +223,17 @@ const Post = ({ post }) => {
 
   const handleToggleArchive = async () => {
     try {
-      const res = await api.post(`/post/archive/${post?._id}`);
-      if (res.data.success) {
-        toast.success(res.data.message);
-        // Only remove from feed if the post was archived (not unarchived)
-        if (res.data.isArchived) {
+      const res = await toggleArchivePost(post?._id).unwrap();
+      if (res.success) {
+        snackbar.success(res.message);
+        // Remove from feed state immediately
+        if (res.isArchived) {
           const updatedPosts = postData.filter((p) => p._id !== post._id);
           dispatch(setPostData(updatedPosts));
         }
       }
-    } catch {
-      toast.error("Archive failed");
+    } catch (error) {
+      snackbar.error(error?.data?.message || "Archive failed");
     }
   };
 
@@ -225,9 +242,9 @@ const Post = ({ post }) => {
       setDeleteCommentId(commentId);
       const res = await api.delete(`/post/comment/${post._id}/${commentId}`);
       dispatch(deleteCommentFromPost({ postId: post._id, commentId }));
-      toast.success(res.data.message);
+      snackbar.success(res.data.message);
     } catch (error) {
-      toast.error("Failed to delete comment");
+      snackbar.error("Failed to delete comment");
     } finally {
       setDeleteCommentId(null);
     }
@@ -248,9 +265,9 @@ const Post = ({ post }) => {
       );
       setEditingCommentId(null);
       setEditingMessage("");
-      toast.success(res.data.message);
+      snackbar.success(res.data.message);
     } catch (error) {
-      toast.error("Failed to edit comment");
+      snackbar.error("Failed to edit comment");
     } finally {
       setEditLoadingId(null);
     }
@@ -275,7 +292,7 @@ const Post = ({ post }) => {
             >
               {post?.author?.userName}
               {post?.author?.isVerified && (
-                <BadgeCheck className="h-4 w-4 fill-[#0095f6] text-white shrink-0" />
+                <VerifiedBadge size="sm" />
               )}
             </span>
             <div className="flex items-center gap-1.5 text-[10px] text-text-muted font-medium flex-wrap">
@@ -288,13 +305,14 @@ const Post = ({ post }) => {
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
+                    triggerHaptic("light");
                     setShowAIInfoModal(true);
                   }}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-500/10 border border-purple-500/30 text-[9px] font-bold text-purple-300 hover:bg-purple-500/20 hover:text-purple-200 transition cursor-pointer"
-                  title="Content made or edited with AI"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-purple-500/15 via-pink-500/10 to-purple-500/15 border border-purple-500/30 text-[10px] font-semibold text-purple-300 hover:bg-purple-500/25 active:scale-95 transition-all shadow-sm cursor-pointer"
+                  title="Content made or modified with AI • Click for info"
                 >
-                  <Sparkles className="w-2.5 h-2.5 text-purple-400" />
-                  <span>AI info</span>
+                  <Sparkles className="w-2.5 h-2.5 text-purple-400 fill-purple-400/20 animate-pulse" />
+                  <span>Made with AI</span>
                 </button>
               )}
             </div>
@@ -377,16 +395,16 @@ const Post = ({ post }) => {
         ) : post?.mediaType === "video" ? (
           <VideoPlayer media={post?.media?.url} />
         ) : (
-          <img src={post?.media?.url} alt={post?.altText || "Post Media"} loading="lazy" className="w-full object-cover max-h-[620px]" />
+          <img src={ensureCloudinaryAutoFormat(post?.media?.url)} alt={post?.altText || "Post Media"} loading="lazy" className="w-full object-cover max-h-[620px]" />
         )}
 
         {/* Tagged Users Interactive Overlay */}
         <TaggedUsersOverlay taggedUsers={post?.taggedUsers || []} showTags={showTags} setShowTags={setShowTags} />
 
-        {/* Instagram Particle Heart Burst on double tap */}
+        {/* Particle Heart Burst on double tap */}
         <HeartExplosion show={showHeartAnim} onComplete={() => setShowHeartAnim(false)} />
 
-        {/* Instagram-Style Floating Soundtrack Pill */}
+        {/* Floating Soundtrack Pill */}
         {post?.music && (
           <div
             className="absolute bottom-3 left-3 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/75 hover:bg-black/90 backdrop-blur-md text-white border border-white/20 shadow-xl transition cursor-pointer group select-none interactive-tap"
@@ -523,7 +541,7 @@ const Post = ({ post }) => {
             <span className="font-bold text-text cursor-pointer hover:underline flex items-center gap-0.5" onClick={() => navigate(`/profile/${post?.author?.userName}`)}>
               @{post?.author?.userName}
               {post?.author?.isVerified && (
-                <BadgeCheck className="h-3.5 w-3.5 fill-[#0095f6] text-white shrink-0" />
+                <VerifiedBadge size="xs" />
               )}
             </span>
             <RenderParsedCaption caption={post.caption} onNavigate={navigate} />
@@ -538,7 +556,7 @@ const Post = ({ post }) => {
           <div className="flex items-center gap-2">
             <input
               type="text"
-              className="flex-1 bg-surface border border-border rounded-full px-4 py-2 text-xs text-text outline-none focus:border-rose-500"
+              className="flex-1 bg-surface border border-border rounded-full px-4 py-2 text-xs text-text outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition shadow-xs"
               placeholder="Add a comment..."
               value={message}
               onChange={(e) => setMessage(e.target.value)}
@@ -546,7 +564,7 @@ const Post = ({ post }) => {
                 if (e.key === "Enter") handleComment();
               }}
             />
-            <button disabled={commentLoading} onClick={handleComment} className="p-2.5 bg-rose-600 hover:bg-rose-500 text-text rounded-full transition cursor-pointer">
+            <button disabled={commentLoading} onClick={handleComment} className="p-2.5 bg-primary hover:bg-primary-hover text-white rounded-full transition cursor-pointer shadow-xs disabled:opacity-50">
               {commentLoading ? <ClipLoader size={14} color="white" /> : <IoSendSharp className="w-3.5 h-3.5" />}
             </button>
           </div>
@@ -558,7 +576,7 @@ const Post = ({ post }) => {
                   <span className="font-bold text-text cursor-pointer hover:underline flex items-center gap-0.5" onClick={() => navigate(`/profile/${comment.author?.userName}`)}>
                     @{comment.author?.userName}
                     {comment.author?.isVerified && (
-                      <BadgeCheck className="h-3.5 w-3.5 fill-[#0095f6] text-white shrink-0" />
+                      <VerifiedBadge size="xs" />
                     )}
                   </span>
                   <span className="text-text">{comment.message}</span>
@@ -574,7 +592,7 @@ const Post = ({ post }) => {
         <CollectionsModal isOpen={showCollectionsModal} onClose={() => setShowCollectionsModal(false)} postId={post?._id} />
       )}
 
-      {/* Instagram Share Sheet */}
+      {/* Share Sheet */}
       {showShareSheet && (
         <ShareSheet
           open={showShareSheet}
@@ -585,7 +603,7 @@ const Post = ({ post }) => {
         />
       )}
 
-      {/* Edit Post Modal (Instagram-style) */}
+      {/* Edit Post Modal */}
       {showEditModal && (
         <EditPostModal
           post={post}
@@ -595,50 +613,13 @@ const Post = ({ post }) => {
         />
       )}
 
-      {/* AI Information Modal */}
-      {showAIInfoModal && (
-        <div
-          className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setShowAIInfoModal(false)}
-        >
-          <div
-            className="bg-bg border border-border rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 animate-scale-up"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-purple-400">
-                <Sparkles className="w-5 h-5" />
-                <h3 className="font-bold text-sm text-text">AI Info</h3>
-              </div>
-              <button
-                onClick={() => setShowAIInfoModal(false)}
-                className="p-1 rounded-full text-text-muted hover:text-text hover:bg-surface transition"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-2 text-xs text-text-secondary leading-relaxed">
-              <p>
-                The creator of this post or VYBE's detection systems indicated that this media was created or modified using Generative AI tools.
-              </p>
-              {post?.aiLabel?.tool && (
-                <div className="p-3 bg-surface rounded-xl border border-border flex items-center gap-2 mt-2">
-                  <Bot className="w-4 h-4 text-purple-400 shrink-0" />
-                  <span className="font-medium text-text">Tool used: {post.aiLabel.tool}</span>
-                </div>
-              )}
-            </div>
-
-            <button
-              onClick={() => setShowAIInfoModal(false)}
-              className="w-full py-2 bg-surface hover:bg-surface-hover text-text font-semibold text-xs rounded-xl border border-border transition"
-            >
-              Got it
-            </button>
-          </div>
-        </div>
-      )}
+      {/* AI Transparency Disclosure Modal */}
+      <AIInfoModal
+        isOpen={showAIInfoModal}
+        onClose={() => setShowAIInfoModal(false)}
+        aiLabel={post?.aiLabel}
+        authorName={post?.author?.name || `@${post?.author?.userName}` || "The creator"}
+      />
     </div>
   );
 };

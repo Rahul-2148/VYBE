@@ -6,9 +6,11 @@ import ChatListItem from "../components/ChatListItem";
 import CreateGroupModal from "../components/CreateGroupModal";
 import NotesBar from "../components/NotesBar";
 import MessageArea from "./MessageArea";
+import Navbar from "../components/Navbar";
 import api from "../lib/axios";
 import { setConversations, setSelectedChatUser, togglePinInRedux, toggleMuteInRedux, toggleArchiveInRedux, removeConversationInRedux, minimizeToFloatingDock } from "../redux/features/messageSlice";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
+import VerifiedBadge from "../components/VerifiedBadge";
 
 const INBOX_TABS = [
   { id: "primary", label: "Primary", icon: "💬" },
@@ -128,7 +130,7 @@ export const Messages = () => {
       }
     } catch (err) {
       console.warn(err);
-      toast.error("Failed to load conversations.");
+      snackbar.error("Failed to load conversations.");
     } finally {
       setLoading(false);
     }
@@ -287,31 +289,30 @@ export const Messages = () => {
         const res = await api.patch(`/conversation/pin/${chat._id}`);
         if (res.data.success) {
           dispatch(togglePinInRedux({ conversationId: chat._id, pinned: res.data.pinned }));
-          toast.success(res.data.pinned ? "Chat pinned" : "Chat unpinned");
+          snackbar.success(res.data.pinned ? "Chat pinned" : "Chat unpinned");
         }
       } else if (actionId === "mute") {
         const res = await api.patch(`/conversation/mute/${chat._id}`);
         if (res.data.success) {
           dispatch(toggleMuteInRedux({ conversationId: chat._id, muted: res.data.muted }));
-          toast.success(res.data.muted ? "Chat muted" : "Chat unmuted");
+          snackbar.success(res.data.muted ? "Chat muted" : "Chat unmuted");
         }
       } else if (actionId === "archive") {
         const res = await api.patch(`/conversation/archive/${chat._id}`);
         if (res.data.success) {
           dispatch(toggleArchiveInRedux({ conversationId: chat._id, archived: res.data.archived }));
-          toast.success(res.data.archived ? "Chat archived" : "Chat unarchived");
+          snackbar.success(res.data.archived ? "Chat archived" : "Chat unarchived");
         }
       } else if (actionId === "delete") {
-        if (!window.confirm("Are you sure you want to delete this conversation?")) return;
         const res = await api.delete(`/conversation/delete/${chat._id}`);
         if (res.data.success) {
           dispatch(removeConversationInRedux(chat._id));
-          toast.success("Conversation deleted");
+          snackbar.success("Conversation deleted 🗑️");
         }
       }
     } catch (err) {
       console.warn("Conversation action failed:", err);
-      toast.error("Action failed");
+      snackbar.error("Action failed");
     }
   }, [dispatch]);
 
@@ -322,45 +323,49 @@ export const Messages = () => {
   }, []);
 
   return (
-    <div className="w-full h-screen bg-bg text-text flex overflow-hidden">
+    <div className="w-full h-screen bg-bg text-text flex overflow-hidden select-none">
       {/* LEFT INBOX SIDEBAR */}
-      <div className={`w-full md:w-96 lg:w-[420px] h-full flex flex-col border-r border-border/80 bg-bg shrink-0 ${
+      <div className={`w-full md:w-80 lg:w-[350px] xl:w-[380px] h-full flex flex-col border-r border-border bg-bg shrink-0 ${
         isChatActive ? "hidden md:flex" : "flex"
       }`}>
         {/* Sticky Header */}
-        <div className="px-5 pt-4 pb-3 flex items-center justify-between bg-bg/95 backdrop-blur-xl z-10 border-b border-border/50">
-          <div className="flex items-center gap-3">
+        <div className="px-4 pt-3.5 pb-2.5 flex items-center justify-between bg-bg/95 backdrop-blur-xl z-10 border-b border-border select-none">
+          <div className="flex items-center gap-2.5 min-w-0">
             <button
-              onClick={() => navigate("/")}
-              className="p-1.5 rounded-full hover:bg-surface-hover/80 transition cursor-pointer md:hidden"
+              onClick={() => {
+                if (window.history.length > 1) navigate(-1);
+                else navigate("/");
+              }}
+              className="p-1.5 rounded-full hover:bg-surface-hover transition cursor-pointer md:hidden text-text-secondary hover:text-text shrink-0"
+              title="Go back"
             >
-              <ArrowLeft className="w-5 h-5 text-text" />
+              <ArrowLeft className="w-5 h-5" />
             </button>
-            <h1 className="text-xl font-extrabold tracking-tight text-text flex items-center gap-2">
-              <span>{userData?.user?.userName || "Messages"}</span>
-              <svg className="w-4 h-4 text-blue-400" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-              </svg>
+            <h1 className="text-lg font-extrabold tracking-tight text-text flex items-center gap-1.5 truncate">
+              <span className="truncate">{userData?.user?.userName || "Messages"}</span>
+              {userData?.user?.isVerified && (
+                <VerifiedBadge size="sm" />
+              )}
             </h1>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={() => {
                 dispatch(minimizeToFloatingDock(null));
                 navigate("/");
               }}
-              className="p-2.5 text-text-secondary hover:text-text rounded-xl hover:bg-surface-hover/80 transition cursor-pointer hidden md:flex"
+              className="p-2 text-text-secondary hover:text-text rounded-xl hover:bg-surface-hover transition cursor-pointer hidden md:flex"
               title="Minimize to Mini Window"
             >
-              <Minimize2 className="w-5 h-5" />
+              <Minimize2 className="w-4.5 h-4.5" />
             </button>
             <button
               onClick={() => setShowCreateGroupModal(true)}
-              className="p-2.5 text-text-secondary hover:text-text rounded-xl hover:bg-surface-hover/80 transition cursor-pointer"
-              title="New Message"
+              className="p-2 text-text-secondary hover:text-text rounded-xl hover:bg-surface-hover transition cursor-pointer"
+              title="New Message or Group"
             >
-              <Edit className="w-5 h-5" />
+              <Edit className="w-4.5 h-4.5" />
             </button>
           </div>
         </div>
@@ -369,33 +374,33 @@ export const Messages = () => {
         <NotesBar />
 
         {/* Search Bar */}
-        <div className="px-4 py-2">
+        <div className="px-3.5 py-2">
           <div className="relative">
-            <Search className="w-4 h-4 text-text-muted absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search"
+              placeholder="Search messages..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-surface/80 border border-border/50 pl-10 pr-4 py-2.5 rounded-xl text-sm text-text outline-none focus:border-border-strong transition placeholder:text-text-muted"
+              className="w-full bg-surface border border-border pl-9 pr-8 py-2 rounded-xl text-xs text-text outline-none focus:border-primary transition placeholder:text-text-muted shadow-xs"
             />
             {searchQuery && (
-              <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2">
-                <X className="w-4 h-4 text-text-muted" />
+              <button onClick={() => setSearchQuery("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-text">
+                <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
         </div>
 
         {/* Tab Filters with Filter Icon */}
-        <div className="px-4 flex items-center gap-1 pb-2 relative">
-          {/* Filter icon button — Instagram style */}
+        <div className="px-3.5 flex items-center gap-1 pb-2 relative border-b border-border/50">
+          {/* Filter icon button */}
           <button
             onClick={() => setShowFilterDropdown(!showFilterDropdown)}
-            className={`p-2 rounded-xl transition cursor-pointer shrink-0 ${
+            className={`p-1.5 rounded-xl transition cursor-pointer shrink-0 ${
               activeFilter !== "all"
-                ? "text-blue-400 bg-blue-500/10 border border-blue-500/30"
-                : "text-text-muted hover:text-text hover:bg-surface/50"
+                ? "text-primary bg-primary/10 border border-primary/30"
+                : "text-text-muted hover:text-text hover:bg-surface-hover"
             }`}
             title="Filter conversations"
           >
@@ -412,15 +417,15 @@ export const Messages = () => {
             <button
               key={tab.id}
               onClick={() => { setActiveTab(tab.id); setShowArchived(false); }}
-              className={`text-xs font-bold transition px-4 py-2 rounded-xl cursor-pointer relative ${
+              className={`text-xs transition px-3.5 py-1.5 rounded-xl cursor-pointer relative ${
                 activeTab === tab.id && !showArchived
-                  ? "text-text bg-surface-hover shadow-sm"
-                  : "text-text-muted hover:text-text hover:bg-surface/50"
+                  ? "text-text bg-surface-hover font-bold shadow-xs"
+                  : "text-text-muted hover:text-text hover:bg-surface-hover/50 font-medium"
               }`}
             >
               {tab.label}
               {tab.id === "requests" && requestCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-[9px] font-bold rounded-full flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-primary text-white text-[9px] font-bold rounded-full flex items-center justify-center shadow-xs">
                   {requestCount}
                 </span>
               )}
@@ -431,7 +436,7 @@ export const Messages = () => {
           {activeFilter !== "all" && (
             <button
               onClick={() => setActiveFilter("all")}
-              className="ml-auto flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold text-blue-400 bg-blue-500/10 rounded-lg hover:bg-blue-500/20 transition cursor-pointer"
+              className="ml-auto flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold text-primary bg-primary/10 rounded-lg hover:bg-primary/20 transition cursor-pointer"
             >
               <span className="capitalize">{activeFilter}</span>
               <X className="w-3 h-3" />
@@ -445,18 +450,18 @@ export const Messages = () => {
           {archivedCount > 0 && !showArchived && activeTab === "primary" && (
             <button
               onClick={() => setShowArchived(true)}
-              className="w-full flex items-center gap-3 px-5 py-3 text-xs font-semibold text-text-secondary hover:text-text hover:bg-surface/50 transition cursor-pointer border-b border-border/50"
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-xs font-semibold text-text-secondary hover:text-text hover:bg-surface-hover transition cursor-pointer border-b border-border/50"
             >
               <Archive className="w-4 h-4 text-purple-400" />
               <span>Archived Chats</span>
-              <span className="ml-auto text-[10px] bg-surface-hover px-2 py-0.5 rounded-full">{archivedCount}</span>
+              <span className="ml-auto text-[10px] bg-surface-hover px-2 py-0.5 rounded-full font-bold">{archivedCount}</span>
             </button>
           )}
 
           {showArchived && (
             <button
               onClick={() => setShowArchived(false)}
-              className="w-full flex items-center gap-3 px-5 py-3 text-xs font-semibold text-text-secondary hover:text-text hover:bg-surface/50 transition cursor-pointer border-b border-border/50"
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-xs font-semibold text-text-secondary hover:text-text hover:bg-surface-hover transition cursor-pointer border-b border-border/50"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>Back to Inbox</span>
@@ -466,7 +471,7 @@ export const Messages = () => {
           {/* Pinned Chats */}
           {pinnedConversations.length > 0 && !showArchived && (
             <div className="mb-1">
-              <div className="flex items-center gap-1.5 text-[10px] font-black text-amber-400 uppercase tracking-widest px-5 py-2">
+              <div className="flex items-center gap-1.5 text-[10px] font-black text-amber-500 uppercase tracking-widest px-4 py-2">
                 <Pin className="w-3 h-3 transform rotate-45" />
                 <span>Pinned</span>
               </div>
@@ -486,21 +491,21 @@ export const Messages = () => {
               Array.from({ length: 8 }).map((_, i) => <ChatSkeleton key={i} />)
             ) : filteredConversations.length === 0 ? (
               <div className="text-center py-20 px-6 space-y-3">
-                <div className="w-16 h-16 rounded-full bg-surface flex items-center justify-center mx-auto">
+                <div className="w-14 h-14 rounded-full bg-surface border border-border flex items-center justify-center mx-auto shadow-sm">
                   {activeTab === "requests" ? (
-                    <Bell className="w-7 h-7 text-text-muted" />
+                    <Bell className="w-6 h-6 text-text-muted" />
                   ) : showArchived ? (
-                    <Archive className="w-7 h-7 text-text-muted" />
+                    <Archive className="w-6 h-6 text-text-muted" />
                   ) : activeFilter !== "all" ? (
-                    <SlidersHorizontal className="w-7 h-7 text-text-muted" />
+                    <SlidersHorizontal className="w-6 h-6 text-text-muted" />
                   ) : (
-                    <MessageSquare className="w-7 h-7 text-text-muted" />
+                    <MessageSquare className="w-6 h-6 text-text-muted" />
                   )}
                 </div>
-                <p className="text-sm font-semibold text-text-secondary">
+                <p className="text-sm font-bold text-text">
                   {activeTab === "requests" ? "No message requests" : showArchived ? "No archived chats" : activeFilter !== "all" ? `No ${activeFilter} messages` : "No messages yet"}
                 </p>
-                <p className="text-xs text-text-muted">
+                <p className="text-xs text-text-muted max-w-xs mx-auto leading-relaxed">
                   {activeTab === "requests"
                     ? "Message requests from people you don't follow will appear here."
                     : showArchived
@@ -524,27 +529,27 @@ export const Messages = () => {
       </div>
 
       {/* RIGHT MAIN CHAT PANE */}
-      <div className={`flex-1 h-full flex-col bg-bg ${
+      <div className={`flex-1 h-full flex flex-col bg-bg overflow-hidden min-w-0 ${
         isChatActive ? "flex" : "hidden md:flex"
       }`}>
         {isChatActive ? (
           <MessageArea />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center space-y-5">
-            <div className="w-24 h-24 rounded-full border-2 border-border flex items-center justify-center">
-              <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-pink-500 via-rose-500 to-purple-600 flex items-center justify-center text-white">
-                <Send className="w-9 h-9 -rotate-12 translate-x-0.5" strokeWidth={1.5} />
+          <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center space-y-4 select-none">
+            <div className="w-24 h-24 rounded-full border-2 border-border flex items-center justify-center mb-1 bg-surface shadow-md">
+              <div className="w-18 h-18 rounded-full bg-gradient-to-tr from-pink-500 via-rose-500 to-purple-600 flex items-center justify-center text-white shadow-sm">
+                <Send className="w-8 h-8 -rotate-12 translate-x-0.5" strokeWidth={2} />
               </div>
             </div>
-            <div className="space-y-2 max-w-sm">
-              <h2 className="text-xl font-bold text-text tracking-tight">Your Messages</h2>
-              <p className="text-sm text-text-muted leading-relaxed">
-                Send a message to start a chat.
+            <div className="space-y-1.5 max-w-sm">
+              <h2 className="text-xl font-extrabold text-text tracking-tight">Your Messages</h2>
+              <p className="text-xs text-text-muted leading-relaxed">
+                Send private photos, messages, voice notes and stickers to friends or start a group.
               </p>
             </div>
             <button
               onClick={() => setShowCreateGroupModal(true)}
-              className="px-6 py-2.5 bg-blue-500 hover:bg-blue-600 font-semibold text-sm rounded-lg transition cursor-pointer"
+              className="px-5 py-2.5 bg-primary hover:bg-primary-hover text-white font-bold text-xs rounded-xl transition cursor-pointer shadow-md hover:scale-105 active:scale-95"
             >
               Send message
             </button>
@@ -570,8 +575,12 @@ export const Messages = () => {
           onGroupCreated={() => fetchConversations()}
         />
       )}
+
+      {/* Mobile Bottom Navigation */}
+      {!selectedChatUser && <Navbar />}
     </div>
   );
 };
 
 export default Messages;
+

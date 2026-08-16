@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, X, Copy, Check, Wand2 } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
 export const AICaptionModal = ({ isOpen, onClose, onApplyCaption }) => {
@@ -26,7 +26,7 @@ export const AICaptionModal = ({ isOpen, onClose, onApplyCaption }) => {
         setGeneratedAltText(res.data.altText || "");
       }
     } catch (err) {
-      toast.error("Failed to generate AI caption.");
+      snackbar.error("Failed to generate AI caption.");
     } finally {
       setLoading(false);
     }
@@ -35,7 +35,7 @@ export const AICaptionModal = ({ isOpen, onClose, onApplyCaption }) => {
   const handleApply = () => {
     const fullCaption = `${generatedCaption}\n\n${generatedHashtags.join(" ")}`;
     onApplyCaption({ caption: fullCaption, hashtags: generatedHashtags, altText: generatedAltText });
-    toast.success("AI Caption inserted!");
+    snackbar.success("AI Caption inserted!");
     onClose();
   };
 

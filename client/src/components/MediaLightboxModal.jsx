@@ -1,7 +1,7 @@
 import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Download, Share2, ZoomIn } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 
 export const MediaLightboxModal = ({ isOpen, onClose, mediaUrl, mediaType = "image" }) => {
   if (!isOpen || !mediaUrl) return null;
@@ -17,7 +17,7 @@ export const MediaLightboxModal = ({ isOpen, onClose, mediaUrl, mediaType = "ima
       document.body.appendChild(a);
       a.click();
       a.remove();
-      toast.success("Media downloaded!");
+      snackbar.success("Media downloaded!");
     } catch {
       window.open(mediaUrl, "_blank");
     }

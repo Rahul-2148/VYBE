@@ -18,16 +18,23 @@ import {
 } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate, useLocation } from "react-router-dom";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import logo from "../assets/logo.png";
 import dp from "../assets/dp3.png";
 import { setUserData } from "../redux/features/userSlice";
-import { clearUnreadNotifications, clearUnreadMessages } from "../redux/features/notificationSlice";
+import {
+  clearUnreadNotifications,
+  clearUnreadMessages,
+  incrementUnreadNotifications,
+  incrementUnreadMessages,
+  setUnreadNotificationsCount,
+  setUnreadMessagesCount,
+} from "../redux/features/notificationSlice";
 import SearchModal from "./SearchModal";
 import api from "../lib/axios";
 import { useTheme } from "../lib/themeContext";
 import { removeLinkedAccount, getNextAccount, setActiveAccountId } from "../lib/accountManager";
-import { disconnectSocket, initializeSocket } from "../lib/socket";
+import { disconnectSocket, initializeSocket, getSocket } from "../lib/socket";
 import { triggerHaptic } from "../lib/interactiveEffects";
 
 const LeftHome = () => {
@@ -39,6 +46,66 @@ const LeftHome = () => {
 
   const [showSearchModal, setShowSearchModal] = useState(false);
   const themeCtx = useTheme();
+
+  const currentUserId = userData?.user?._id || userData?._id;
+
+  // Fetch initial unread counts on mount
+  useEffect(() => {
+    if (!currentUserId) return;
+    const fetchUnreadCounts = async () => {
+      try {
+        const [notifRes, msgRes] = await Promise.allSettled([
+          api.get("/notification/unread-count"),
+          api.get("/message/unread-count"),
+        ]);
+        if (notifRes.status === "fulfilled" && notifRes.value.data?.success) {
+          dispatch(setUnreadNotificationsCount(notifRes.value.data.unreadCount ?? 0));
+        }
+        if (msgRes.status === "fulfilled" && msgRes.value.data?.success) {
+          dispatch(setUnreadMessagesCount(msgRes.value.data.unreadCount ?? 0));
+        }
+      } catch (err) {
+        console.warn("LeftHome: fetchUnreadCounts failed", err);
+      }
+    };
+    fetchUnreadCounts();
+  }, [currentUserId, dispatch]);
+
+  // Real-time socket event listeners for instant left sidebar notification dot
+  useEffect(() => {
+    if (!currentUserId) return;
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleNewNotification = (data) => {
+      const notif = data?.notification || data;
+      if (location.pathname !== "/notifications") {
+        dispatch(incrementUnreadNotifications(notif));
+      }
+    };
+
+    const handleNewMessage = () => {
+      if (!location.pathname.startsWith("/messages")) {
+        dispatch(incrementUnreadMessages());
+      }
+    };
+
+    socket.on("notification-received", handleNewNotification);
+    socket.on("new-notification", handleNewNotification);
+    socket.on("notification:received", handleNewNotification);
+    socket.on("receive-message", handleNewMessage);
+    socket.on("message:received", handleNewMessage);
+    socket.on("new-message", handleNewMessage);
+
+    return () => {
+      socket.off("notification-received", handleNewNotification);
+      socket.off("new-notification", handleNewNotification);
+      socket.off("notification:received", handleNewNotification);
+      socket.off("receive-message", handleNewMessage);
+      socket.off("message:received", handleNewMessage);
+      socket.off("new-message", handleNewMessage);
+    };
+  }, [currentUserId, location.pathname, dispatch]);
 
   const handleLogOut = async () => {
     const currentUserId = userData?.user?._id || userData?._id;
@@ -64,7 +131,7 @@ const LeftHome = () => {
               console.warn("LeftHome: failed to write cached user on switch", e);
             }
             initializeSocket(switchRes.data.user._id);
-            toast.success(`Switched to @${switchRes.data.user.userName}`);
+            snackbar.success(`Switched to @${switchRes.data.user.userName}`);
             navigate("/", { replace: true });
             return;
           }
@@ -81,10 +148,10 @@ const LeftHome = () => {
         console.warn("LeftHome: failed to remove cached user on logout", e);
       }
       disconnectSocket();
-      toast.success("Logged out");
+      snackbar.success("Logged out");
       navigate("/signin");
     } catch (error) {
-      toast.error("Logout failed");
+      snackbar.error("Logout failed");
     }
   };
 
@@ -103,6 +170,14 @@ const LeftHome = () => {
       dispatch(clearUnreadMessages());
     }
   }, [isMessagesActive, unreadMessagesCount, dispatch]);
+
+  const userProfileImage =
+    userData?.user?.profileImage?.url ||
+    userData?.profileImage?.url ||
+    (typeof userData?.user?.profileImage === "string" ? userData.user.profileImage : null) ||
+    (typeof userData?.profileImage === "string" ? userData.profileImage : null) ||
+    dp;
+  const currentUsername = userData?.user?.userName || userData?.userName || "";
 
   const navItems = [
     { label: "Home", icon: HomeIcon, path: "/" },
@@ -127,9 +202,9 @@ const LeftHome = () => {
     { label: "Security Center", icon: ShieldAlert, path: "/security" },
     { 
       label: "Profile", 
-      icon: User, 
-      path: `/profile/${userData?.user?.userName || ""}`,
-      avatar: userData?.user?.profileImage?.url 
+      isProfile: true,
+      path: `/profile/${currentUsername}`,
+      avatar: userProfileImage,
     },
   ];
 
@@ -145,7 +220,7 @@ const LeftHome = () => {
           }} 
           className="px-3 pt-2 cursor-pointer flex items-center gap-3 transition transform active:scale-95"
         >
-          <img src={logo} alt="VYBE" className="h-7 w-auto object-contain hidden xl:block" style={{ filter: themeCtx.resolvedTheme === "dark" ? "none" : "invert(1)" }} />
+          <img src={logo} alt="VYBE" className="h-7 w-auto object-contain hidden xl:block theme-logo-adaptive" />
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-pink-500 to-rose-600 flex items-center justify-center xl:hidden font-black text-white text-sm shadow-lg">
             V
           </div>
@@ -155,7 +230,12 @@ const LeftHome = () => {
         <nav className="space-y-1">
           {navItems.map((item, idx) => {
             const Icon = item.icon;
-            const isActive = item.path && (location.pathname === item.path || (item.path === "/messages" && location.pathname.startsWith("/messages")));
+            const isProfileItem = item.isProfile && location.pathname.startsWith("/profile");
+            const isActive =
+              isProfileItem ||
+              (item.path &&
+                (location.pathname === item.path ||
+                  (item.path === "/messages" && location.pathname.startsWith("/messages"))));
 
             return (
               <div key={idx} className="relative group">
@@ -172,11 +252,22 @@ const LeftHome = () => {
                   }`}
                 >
                   <div className="relative shrink-0 flex items-center justify-center">
-                    {item.avatar ? (
-                      <div className={`w-6 h-6 rounded-full overflow-hidden border-2 transition ${
-                        isActive ? "border-text scale-110" : "border-border-strong group-hover:border-border-strong"
-                      }`}>
-                        <img src={item.avatar || dp} alt="" className="w-full h-full object-cover" />
+                    {item.isProfile ? (
+                      <div
+                        className={`w-6 h-6 rounded-full overflow-hidden transition-all duration-200 shrink-0 ${
+                          isActive
+                            ? "ring-2 ring-text ring-offset-2 ring-offset-bg scale-110 shadow-sm"
+                            : "border border-border/80 group-hover:border-text group-hover:scale-105"
+                        }`}
+                      >
+                        <img
+                          src={userProfileImage}
+                          alt="Profile"
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.src = dp;
+                          }}
+                        />
                       </div>
                     ) : (
                       <Icon className={`w-6 h-6 transition-transform duration-200 group-hover:scale-110 ${
@@ -184,7 +275,7 @@ const LeftHome = () => {
                       }`} />
                     )}
 
-                    {/* Clean Instagram-Style Pink Blinking Dot */}
+                    {/* Clean Pink Blinking Dot */}
                     {item.hasDot && (
                       <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#ff3040] shadow-[0_0_8px_rgba(255,48,64,0.9)] animate-pulse ring-2 ring-bg" />
                     )}
@@ -198,7 +289,7 @@ const LeftHome = () => {
                   )}
                 </button>
 
-                {/* Right-side Instagram Hover Tooltip (Shown on Icon-Only Collapsed View) */}
+                {/* Right-side Hover Tooltip (Shown on Icon-Only Collapsed View) */}
                 <div className="xl:hidden opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-4 transition-all duration-200 absolute left-full top-1/2 -translate-y-1/2 ml-2 px-3 py-1.5 bg-surface border border-border text-text text-xs font-semibold rounded-lg shadow-2xl pointer-events-none whitespace-nowrap z-50 flex items-center gap-1.5">
                   <span>{item.label}</span>
                   {item.hasDot && (

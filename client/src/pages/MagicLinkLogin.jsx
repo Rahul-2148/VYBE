@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-// framer-motion not used directly in this file
+import { motion } from "framer-motion";
 import { Sparkles, CheckCircle2, AlertCircle } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import { useDispatch } from "react-redux";
 import { setUserData } from "../redux/features/userSlice";
+import { addLinkedAccount, setActiveAccountId } from "../lib/accountManager";
 
 export const MagicLinkLogin = () => {
   const { token } = useParams();
@@ -27,11 +28,14 @@ export const MagicLinkLogin = () => {
         const res = await api.post("/auth/magic-link/verify", { token });
         if (res.data.success) {
           setStatus("success");
-          if (res.data.user) {
-            dispatch(setUserData(res.data.user));
+          const loggedInUser = res.data.user;
+          if (loggedInUser) {
+            dispatch(setUserData(loggedInUser));
+            addLinkedAccount(loggedInUser);
+            setActiveAccountId(loggedInUser._id);
           }
-          toast.success(res.data.message || "Magic Link Login Successful!");
-          setTimeout(() => navigate("/"), 1500);
+          snackbar.success(res.data.message || "Magic Link Login Successful!");
+          setTimeout(() => navigate("/", { replace: true }), 1200);
         }
       } catch (err) {
         setStatus("error");

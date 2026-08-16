@@ -1,8 +1,9 @@
 import { useSelector } from "react-redux";
 import dp from "../assets/dp3.png";
 import { useNavigate } from "react-router-dom";
-import { BadgeCheck } from "lucide-react";
+import { Lock } from "lucide-react";
 import FollowButton from "./FollowButton";
+import VerifiedBadge from "./VerifiedBadge";
 
 const OtherUsers = ({ user }) => {
   const navigate = useNavigate();
@@ -28,7 +29,10 @@ const OtherUsers = ({ user }) => {
           <span className="text-xs font-bold text-text group-hover:underline truncate max-w-[120px] flex items-center gap-0.5">
             {user?.userName}
             {user?.isVerified && (
-              <BadgeCheck className="h-4 w-4 fill-[#0095f6] text-white shrink-0" />
+              <VerifiedBadge size="xs" />
+            )}
+            {user?.accountType === "private" && (
+              <Lock className="w-3 h-3 text-text-muted ml-0.5 shrink-0" />
             )}
           </span>
           <span className="text-[11px] text-text-muted truncate max-w-[120px]">

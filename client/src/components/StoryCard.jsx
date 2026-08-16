@@ -27,7 +27,7 @@ import {
   MessageCircle,
   Sparkles,
 } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import {
   removeStoryFromReduxFeed,
@@ -43,7 +43,15 @@ import StoryViewersDrawer from "./StoryViewersDrawer";
 import moment from "moment";
 import { motion, AnimatePresence } from "framer-motion";
 
-const STORY_IMAGE_DURATION = 6500; // 6.5s per image (Instagram Standard)
+const STORY_IMAGE_DURATION = 6500; // 6.5s per image duration
+
+// Ensure Cloudinary image URLs have f_auto,q_auto for browser compatibility (HEIF/WebP)
+const ensureCloudinaryAutoFormat = (url) => {
+  if (!url || typeof url !== "string") return url;
+  if (!url.includes("cloudinary.com") || !url.includes("/upload/")) return url;
+  if (url.includes("f_auto")) return url; // already has it
+  return url.replace("/upload/", "/upload/f_auto,q_auto/");
+};
 
 const isInteractiveTarget = (target) => {
   if (!target) return false;
@@ -93,6 +101,8 @@ export const StoryCard = () => {
   const [showShareSheet, setShowShareSheet] = useState(false);
   const [showHighlightModal, setShowHighlightModal] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [isDeletingStory, setIsDeletingStory] = useState(false);
   const [showBigHeart, setShowBigHeart] = useState(false);
   const [isHoldingState, setIsHoldingState] = useState(false);
 
@@ -204,7 +214,10 @@ export const StoryCard = () => {
 
     if (musicObj?.audioUrl) {
       const audio = new Audio(musicObj.audioUrl);
-      audio.loop = true;
+      audio.onended = () => {
+        audio.currentTime = musicObj.startTime || 0;
+        audio.play().catch(() => null);
+      };
       audio.currentTime = musicObj.startTime || 0;
       audio.muted = isMuted;
       storyAudioRef.current = audio;
@@ -442,7 +455,7 @@ export const StoryCard = () => {
     e?.stopPropagation();
     if (!story?._id) return;
     addFloatingEmoji(emoji);
-    toast(`Reacted ${emoji}`, { duration: 1200 });
+    snackbar(`Reacted ${emoji}`, { duration: 1200 });
 
     try {
       await api.post(`/story/react/${story._id}`, { emoji });
@@ -462,31 +475,50 @@ export const StoryCard = () => {
 
     try {
       await api.post(`/story/reply/${story._id}`, { message });
-      toast.success("Reply sent to Direct Messages! ✈️");
+      snackbar.success("Reply sent to Direct Messages! ✈️");
       addFloatingEmoji("💬");
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to send reply");
+      snackbar.error(err.response?.data?.message || "Failed to send reply");
     }
   };
 
-  // Delete Story
-  const handleDeleteStory = async () => {
+  // Open Delete Story Confirmation Modal
+  const handleDeleteStory = () => {
     if (!story?._id) return;
-    if (!window.confirm("Delete this story?")) return;
+    setShowOptionsMenu(false);
+    setShowViewers(false);
+    setIsPaused(true);
+    setShowDeleteConfirmModal(true);
+  };
+
+  // Perform Actual Story Deletion
+  const confirmDeleteStory = async () => {
+    if (!story?._id) return;
+    setIsDeletingStory(true);
 
     try {
       await api.delete(`/story/${story._id}`);
-      toast.success("Story deleted");
+      snackbar.success("Story deleted successfully 🗑️");
       dispatch(removeStoryFromReduxFeed({ storyId: story._id }));
-      setShowOptionsMenu(false);
+      setShowDeleteConfirmModal(false);
+
+      // Re-fetch stories feed from backend to ensure Redux is 100% synchronized
+      api.get("/story/feed").then((res) => {
+        if (res.data?.success) {
+          dispatch(setStoryFeed(res.data.stories || res.data.feed || []));
+        }
+      }).catch(() => null);
 
       if (storiesList.length > 1) {
         handleNextStory();
       } else {
-        handleNextUser();
+        navigate("/");
       }
-    } catch {
-      toast.error("Failed to delete story");
+    } catch (err) {
+      snackbar.error(err.response?.data?.message || "Failed to delete story");
+    } finally {
+      setIsDeletingStory(false);
+      setIsPaused(false);
     }
   };
 
@@ -504,7 +536,7 @@ export const StoryCard = () => {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      toast.success("Saved to device!");
+      snackbar.success("Saved to device!");
       setShowOptionsMenu(false);
     } catch {
       window.open(url, "_blank");
@@ -644,9 +676,10 @@ export const StoryCard = () => {
           ) : (
             <img
               ref={imgRef}
-              src={story.media?.url}
+              src={ensureCloudinaryAutoFormat(story.media?.url)}
               alt=""
               onLoad={() => setMediaLoading(false)}
+              onError={() => setMediaLoading(false)}
               className={`w-full h-full object-cover transition-opacity duration-200 ${mediaLoading ? "opacity-0" : "opacity-100"}`}
             />
           )}
@@ -889,7 +922,7 @@ export const StoryCard = () => {
                     onChange={(e) => setReplyText(e.target.value)}
                     onFocus={() => setIsPaused(true)}
                     onBlur={() => setIsPaused(false)}
-                    className="w-full pl-4 pr-10 py-2.5 bg-white/10 backdrop-blur-md border border-white/20 rounded-full text-xs text-white placeholder-white/50 outline-none focus:border-white/50"
+                    className="w-full pl-4 pr-10 py-2.5 bg-white/10 backdrop-blur-md border border-white/20 rounded-full text-xs text-white placeholder-white/50 outline-none focus:border-white/50 focus:ring-2 focus:ring-white/20 transition"
                   />
                   {replyText.trim() && (
                     <button
@@ -973,7 +1006,7 @@ export const StoryCard = () => {
               <>
                 <button
                   onClick={() => {
-                    toast.success(`Muted stories from @${story.author?.userName}`);
+                    snackbar.success(`Muted stories from @${story.author?.userName}`);
                     setShowOptionsMenu(false);
                   }}
                   className="w-full flex items-center gap-3 p-3 rounded-2xl hover:bg-white/10 text-white font-semibold text-xs transition"
@@ -983,7 +1016,7 @@ export const StoryCard = () => {
                 </button>
                 <button
                   onClick={() => {
-                    toast.success("Story reported to moderation team.");
+                    snackbar.success("Story reported to moderation team.");
                     setShowOptionsMenu(false);
                   }}
                   className="w-full flex items-center gap-3 p-3 rounded-2xl hover:bg-red-500/10 text-red-400 font-semibold text-xs transition"
@@ -1032,6 +1065,65 @@ export const StoryCard = () => {
           entityType="story"
           following={userData?.user?.following || []}
         />
+      )}
+
+      {/* Sleek Delete Story Confirmation Dialog */}
+      {showDeleteConfirmModal && (
+        <div
+          className="fixed inset-0 z-[600] bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={() => {
+            if (!isDeletingStory) {
+              setShowDeleteConfirmModal(false);
+              setIsPaused(false);
+            }
+          }}
+        >
+          <div
+            className="bg-zinc-950 border border-zinc-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-sm w-full shadow-2xl text-center space-y-4 animate-scale-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-12 rounded-2xl bg-red-500/10 text-red-400 flex items-center justify-center mx-auto border border-red-500/20">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-extrabold text-white">Delete Story?</h3>
+              <p className="text-xs text-zinc-400 mt-1">
+                Are you sure you want to delete this story? It will be permanently removed from your active feed.
+              </p>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                disabled={isDeletingStory}
+                onClick={confirmDeleteStory}
+                className="w-full py-3 bg-red-600 hover:bg-red-500 text-white rounded-2xl text-xs font-black transition cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-red-600/20"
+              >
+                {isDeletingStory ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Deleting Story...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete Story</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                disabled={isDeletingStory}
+                onClick={() => {
+                  setShowDeleteConfirmModal(false);
+                  setIsPaused(false);
+                }}
+                className="w-full py-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded-2xl text-xs font-bold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

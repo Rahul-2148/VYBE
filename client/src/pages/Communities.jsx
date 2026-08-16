@@ -9,7 +9,7 @@ import { useSelector } from "react-redux";
 import api from "../lib/axios";
 import { getSocket } from "../lib/socket";
 import { useWebRTC } from "../hooks/useWebRTC";
-import toast from "../lib/toast";
+import { snackbar } from "../lib/snackbar";
 import { playMessageSound } from "../lib/sounds";
 
 export const Communities = () => {
@@ -74,7 +74,7 @@ export const Communities = () => {
       }
     } catch (err) {
       console.warn("Failed to load community details:", err);
-      toast.error("Failed to load community details");
+      snackbar.error("Failed to load community details");
     }
   };
 
@@ -170,7 +170,7 @@ export const Communities = () => {
         playMessageSound();
       }
     } catch (err) {
-      toast.error("Failed to send message");
+      snackbar.error("Failed to send message");
     }
   };
 
@@ -187,7 +187,7 @@ export const Communities = () => {
       });
 
       if (res.data?.success) {
-        toast.success("Community created!");
+        snackbar.success("Community created!");
         setShowCreateCommunity(false);
         setNewCommName("");
         setNewCommDesc("");
@@ -195,7 +195,7 @@ export const Communities = () => {
         fetchCommunities();
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to create community");
+      snackbar.error(err.response?.data?.message || "Failed to create community");
     }
   };
 
@@ -207,13 +207,13 @@ export const Communities = () => {
     try {
       const res = await api.post("/community/join", { inviteCode: joinInviteCode });
       if (res.data?.success) {
-        toast.success("Successfully joined community!");
+        snackbar.success("Successfully joined community!");
         setShowJoinCommunity(false);
         setJoinInviteCode("");
         fetchCommunities();
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to join community");
+      snackbar.error(err.response?.data?.message || "Failed to join community");
     }
   };
 
@@ -230,21 +230,21 @@ export const Communities = () => {
       });
 
       if (res.data?.success) {
-        toast.success("Channel created!");
+        snackbar.success("Channel created!");
         setShowCreateChannel(false);
         setNewChanName("");
         setNewChanDesc("");
         handleSelectCommunity(selectedCommunity);
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to create channel");
+      snackbar.error(err.response?.data?.message || "Failed to create channel");
     }
   };
 
   // Copy invite code helper
   const handleCopyInvite = (code) => {
     navigator.clipboard.writeText(code);
-    toast.success("Invite code copied to clipboard!");
+    snackbar.success("Invite code copied to clipboard!");
   };
 
   // Render main content area based on channel type

@@ -8,6 +8,11 @@ const draftSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    draftType: {
+      type: String,
+      enum: ["post", "reel", "story"],
+      default: "post",
+    },
     caption: {
       type: String,
       default: "",
@@ -28,6 +33,25 @@ const draftSchema = new mongoose.Schema(
     mediaPreview: {
       type: String,
       default: "",
+    },
+    mediaItems: [
+      {
+        url: { type: String, default: "" },
+        preview: { type: String, default: "" },
+        mediaType: { type: String, default: "image" },
+      },
+    ],
+    aspectRatio: {
+      type: String,
+      default: "4:5",
+    },
+    filter: {
+      type: String,
+      default: "normal",
+    },
+    audioTrack: {
+      type: Object,
+      default: null,
     },
   },
   { timestamps: true }

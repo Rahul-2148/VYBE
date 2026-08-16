@@ -241,7 +241,17 @@ const FloatingMessagesDock = () => {
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </button>
-                <div className="relative shrink-0">
+                <div
+                  onClick={() => {
+                    if (activeOtherUser?.userName) {
+                      setIsOpen(false);
+                      dispatch(setFloatingDockOpen(false));
+                      navigate(`/profile/${activeOtherUser.userName}`);
+                    }
+                  }}
+                  className="relative shrink-0 cursor-pointer hover:opacity-85 transition"
+                  title={`View @${activeOtherUser?.userName}'s profile`}
+                >
                   <img
                     src={activeOtherUser?.profileImage?.url || dp}
                     alt=""
@@ -251,7 +261,17 @@ const FloatingMessagesDock = () => {
                     <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-bg rounded-full" />
                   )}
                 </div>
-                <div className="flex flex-col min-w-0">
+                <div
+                  onClick={() => {
+                    if (activeOtherUser?.userName) {
+                      setIsOpen(false);
+                      dispatch(setFloatingDockOpen(false));
+                      navigate(`/profile/${activeOtherUser.userName}`);
+                    }
+                  }}
+                  className="flex flex-col min-w-0 cursor-pointer hover:underline"
+                  title={`View @${activeOtherUser?.userName}'s profile`}
+                >
                   <span className="text-xs font-bold text-text truncate max-w-[120px]">
                     {activeOtherUser?.userName || activeOtherUser?.name || activeConvo.name || "User"}
                   </span>
@@ -508,7 +528,7 @@ const FloatingMessagesDock = () => {
           )}
         </div>
       ) : (
-        /* FLOATING INSTAGRAM BOTTOM MESSAGES TAB BAR (CLOSED STATE) */
+        /* FLOATING BOTTOM MESSAGES TAB BAR (CLOSED STATE) */
         <button
           onClick={() => {
             fetchConversations();

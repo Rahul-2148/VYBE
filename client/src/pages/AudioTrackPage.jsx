@@ -16,7 +16,7 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import ShareSheet from "../components/ShareSheet";
 
@@ -35,7 +35,7 @@ export const AudioTrackPage = () => {
 
   // Content Tabs (Reels vs Posts)
   const [activeTab, setActiveTab] = useState("reels");
-  const [loops, setLoops] = useState([]);
+  const [reels, setReels] = useState([]);
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -88,11 +88,12 @@ export const AudioTrackPage = () => {
         setLoading(true);
         const decoded = decodeURIComponent(audioId || "");
 
-        // Fetch Loops
+        // Fetch Reels
         try {
-          const res = await api.get(`/loop/audio/${encodeURIComponent(decoded)}`);
-          if (res.data?.success && Array.isArray(res.data.loops)) {
-            setLoops(res.data.loops);
+          const res = await api.get(`/reel/audio/${encodeURIComponent(decoded)}`);
+          const reels = res.data?.reels;
+          if (res.data?.success && Array.isArray(reels)) {
+            setReels(reels);
             if (res.data.audioTrackName) setAudioName(res.data.audioTrackName);
           }
         } catch {}
@@ -117,7 +118,7 @@ export const AudioTrackPage = () => {
   // Handle Play/Pause Audio Preview
   const togglePlayAudio = () => {
     if (!audioUrl) {
-      toast.error("Audio stream preview not available for this track.");
+      snackbar.error("Audio stream preview not available for this track.");
       return;
     }
 
@@ -165,10 +166,10 @@ export const AudioTrackPage = () => {
           },
           ...savedList.filter((t) => t.id !== audioId),
         ];
-        toast.success("Saved to your Audio Collection! 🔖");
+        snackbar.success("Saved to your Audio Collection! 🔖");
       } else {
         updated = savedList.filter((t) => t.id !== audioId && t.title !== audioName);
-        toast("Removed from saved audio");
+        snackbar("Removed from saved audio");
       }
       localStorage.setItem("vybe_saved_real_music", JSON.stringify(updated));
     } catch {}
@@ -227,7 +228,7 @@ export const AudioTrackPage = () => {
         </div>
       </div>
 
-      {/* INSTAGRAM-STYLE HERO BANNER */}
+      {/* HERO BANNER */}
       <div className="relative overflow-hidden p-6 sm:p-8 rounded-3xl bg-surface border border-border shadow-2xl flex flex-col sm:flex-row items-center gap-6">
         {/* Album Artwork with Vinyl Spinner */}
         <div className="relative group shrink-0">
@@ -279,7 +280,7 @@ export const AudioTrackPage = () => {
           </div>
 
           <p className="text-xs text-text-secondary">
-            {loops.length + posts.length} {loops.length + posts.length === 1 ? "creation" : "creations"} with this soundtrack.
+            {reels.length + posts.length} {reels.length + posts.length === 1 ? "creation" : "creations"} with this soundtrack.
           </p>
 
           <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 pt-1">
@@ -317,7 +318,7 @@ export const AudioTrackPage = () => {
           }`}
         >
           <Video className="w-4 h-4" />
-          <span>Reels ({loops.length})</span>
+          <span>Reels ({reels.length})</span>
         </button>
 
         <button
@@ -341,7 +342,7 @@ export const AudioTrackPage = () => {
             <p className="text-xs font-bold">Loading creations...</p>
           </div>
         ) : activeTab === "reels" ? (
-          loops.length === 0 ? (
+          reels.length === 0 ? (
             <div className="text-center py-16 text-text-muted space-y-2">
               <Video className="w-8 h-8 mx-auto text-text-muted" />
               <p className="text-sm font-bold">No reels with this audio yet</p>
@@ -349,22 +350,22 @@ export const AudioTrackPage = () => {
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
-              {loops.map((loop) => (
+              {reels.map((reel) => (
                 <div
-                  key={loop._id}
-                  onClick={() => navigate("/loops", { state: { initialLoopId: loop._id } })}
+                  key={reel._id}
+                  onClick={() => navigate("/reels", { state: { initialReelId: reel._id } })}
                   className="relative aspect-[9/16] rounded-2xl overflow-hidden bg-surface border border-border cursor-pointer group shadow-lg"
                 >
-                  <video src={loop.media?.url} className="w-full h-full object-cover" />
+                  <video src={reel.media?.url} className="w-full h-full object-cover" />
 
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
                     <Play className="w-10 h-10 text-white fill-white shadow-xl" />
                   </div>
 
                   <div className="absolute bottom-2 left-2 right-2 text-[10px] text-white font-bold flex items-center justify-between">
-                    <span className="truncate">@{loop.author?.userName}</span>
+                    <span className="truncate">@{reel.author?.userName}</span>
                     <span className="flex items-center gap-0.5">
-                      <Eye className="w-3 h-3" /> {loop.views || 0}
+                      <Eye className="w-3 h-3" /> {reel.views || 0}
                     </span>
                   </div>
                 </div>

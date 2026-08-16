@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { MapPin, ArrowLeft, Heart, MessageCircle, Video, Image } from "lucide-react";
 import { motion } from "framer-motion";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
 export const LocationPage = () => {
@@ -10,7 +10,7 @@ export const LocationPage = () => {
   const navigate = useNavigate();
 
   const [posts, setPosts] = useState([]);
-  const [loops, setLoops] = useState([]);
+  const [reels, setReels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("posts"); // posts vs reels
   const fetchLocationDetails = async () => {
@@ -19,10 +19,10 @@ export const LocationPage = () => {
       const res = await api.get(`/search/location/${encodeURIComponent(locationName)}`);
       if (res.data.success) {
         setPosts(res.data.posts || []);
-        setLoops(res.data.loops || []);
+        setReels(res.data.reels || []);
       }
     } catch (err) {
-      toast.error("Failed to load location details.");
+      snackbar.error("Failed to load location details.");
       console.warn('fetchLocationDetails error', err);
     } finally {
       setLoading(false);
@@ -40,7 +40,7 @@ export const LocationPage = () => {
     };
   }, [locationName]);
 
-  const displayItems = activeTab === "posts" ? posts : loops;
+  const displayItems = activeTab === "posts" ? posts : reels;
 
   return (
     <div className="min-h-screen bg-bg text-text p-4 md:p-8 max-w-5xl mx-auto space-y-8">
@@ -66,7 +66,7 @@ export const LocationPage = () => {
             {decodeURIComponent(locationName)}
           </h2>
           <p className="text-xs text-text-secondary">
-            {posts.length} posts and {loops.length} reels tagged at this location.
+            {posts.length} posts and {reels.length} reels tagged at this location.
           </p>
         </div>
       </div>
@@ -93,7 +93,7 @@ export const LocationPage = () => {
           }`}
         >
           <Video className="w-4 h-4" />
-          <span>Reels ({loops.length})</span>
+          <span>Reels ({reels.length})</span>
         </button>
       </div>
 

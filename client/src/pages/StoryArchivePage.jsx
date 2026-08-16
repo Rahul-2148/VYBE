@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { MdOutlineKeyboardBackspace } from "react-icons/md";
 import { useNavigate } from "react-router-dom";
 import { Calendar, RefreshCw, Sparkles, Trash2, Eye } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import moment from "moment";
 
@@ -19,7 +19,7 @@ export const StoryArchivePage = () => {
         setArchivedStories(res.data.stories || []);
       }
     } catch {
-      toast.error("Failed to load archived stories.");
+      snackbar.error("Failed to load archived stories.");
     } finally {
       setLoading(false);
     }
@@ -40,11 +40,11 @@ export const StoryArchivePage = () => {
     try {
       const res = await api.post(`/story/restore/${storyId}`);
       if (res.data?.success) {
-        toast.success("Story restored to feed!");
+        snackbar.success("Story restored to feed!");
         fetchArchivedStories();
       }
     } catch {
-      toast.error("Failed to restore story.");
+      snackbar.error("Failed to restore story.");
     }
   };
 

@@ -422,7 +422,9 @@ export const getUserConversations = async (req, res) => {
       const isPinned = conv.pinnedBy?.includes(userId);
       const isMuted = conv.mutedBy?.includes(userId);
       const isBlocked = conv.blockedBy?.includes(userId);
-      const userUnread = conv.unreadCount?.get(userId.toString()) || 0;
+      const userUnread = typeof conv.unreadCount?.get === "function"
+        ? (conv.unreadCount.get(userId.toString()) || 0)
+        : (conv.unreadCount?.[userId.toString()] || 0);
 
       // GROUP CHAT
       if (conv.isGroup) {
@@ -449,15 +451,16 @@ export const getUserConversations = async (req, res) => {
       }
 
       // 1-1 CHAT — deduplicate
-      const otherUser = conv.participants.find(
-        (p) => p._id.toString() !== userId.toString()
-      );
+      const otherUser = (conv.participants || []).find((p) => {
+        const pid = p?._id ? p._id.toString() : p?.toString();
+        return pid && pid !== userId.toString();
+      });
 
       if (!otherUser) return;
 
-      const key = otherUser._id.toString();
-      if (seenDmUsers.has(key)) return;
-      seenDmUsers.add(key);
+      const otherUserId = otherUser?._id ? otherUser._id.toString() : otherUser?.toString();
+      if (!otherUserId || seenDmUsers.has(otherUserId)) return;
+      seenDmUsers.add(otherUserId);
 
       results.push({
         _id: conv._id,

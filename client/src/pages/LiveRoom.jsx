@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Radio, Eye, Heart, Send, ArrowLeft, Users } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import { getSocket } from "../lib/socket";
 
@@ -26,7 +26,7 @@ export const LiveRoom = () => {
         setLiveStream(active || null);
       }
     } catch (err) {
-      toast.error("Failed to load live stream.");
+      snackbar.error("Failed to load live stream.");
       console.warn('fetchLiveDetails error', err);
     } finally {
       setLoading(false);
@@ -103,7 +103,7 @@ export const LiveRoom = () => {
     });
 
     socket.on("live-stream-ended", () => {
-      toast.error("Live broadcast has ended.");
+      snackbar.error("Live broadcast has ended.");
       navigate("/explore");
     });
 

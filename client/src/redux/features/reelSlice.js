@@ -4,20 +4,17 @@ const reelSlice = createSlice({
   name: "reel",
   initialState: {
     reelData: [],
-    loopData: [],
     isLoading: false,
   },
   reducers: {
     setReelData: (state, action) => {
       state.reelData = action.payload;
-      state.loopData = action.payload;
     },
-    setLoopData: (state, action) => {
-      state.reelData = action.payload;
-      state.loopData = action.payload;
+    setReelsLoading: (state, action) => {
+      state.isLoading = action.payload;
     },
   },
 });
 
-export const { setReelData, setLoopData } = reelSlice.actions;
+export const { setReelData, setReelsLoading } = reelSlice.actions;
 export default reelSlice.reducer;

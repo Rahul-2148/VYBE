@@ -25,6 +25,7 @@ import { forgotPasswordTemplate } from "../utils/emailTemplates/ForgotPasswordTe
 import { passwordResetSuccessTemplate } from "../utils/emailTemplates/PasswordResetSuccessTemplate.js";
 import sendEmail from "../utils/sendEmail.js";
 import { signUpOtpTemplate } from "../utils/emailTemplates/SignUpOtpTemplate.js";
+import { redisService } from "../services/redis.service.js";
 
 // Helper to hash token string
 const hashToken = (token) => crypto.createHash("sha256").update(token).digest("hex");
@@ -120,6 +121,9 @@ export const signUp = async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
     const otpExpiresAt = Date.now() + 15 * 60 * 1000; // 15 mins
 
+    // Store in Redis (Fast TTL) with in-memory fallback
+    await redisService.storeOtp(`signup:${cleanEmail}`, otp, 15 * 60);
+
     const user = await User.create({
       name: name.trim(),
       email: cleanEmail,
@@ -176,23 +180,23 @@ export const verifySignUpOtp = async (req, res) => {
       });
     }
 
-    if (String(user.otp) !== String(otp)) {
+    // 1. Check Redis OTP first
+    const isRedisValid = await redisService.verifyOtp(`signup:${cleanEmail}`, otp);
+    // 2. Fallback to MongoDB User document OTP
+    const isDbValid = String(user.otp) === String(otp) && user.otpExpiresAt > Date.now();
+
+    if (!isRedisValid && !isDbValid) {
       return res.status(400).json({
         success: false,
         error: true,
-        message: "Invalid verification code",
+        message: user.otpExpiresAt && user.otpExpiresAt < Date.now()
+          ? "Verification code has expired. Please sign up again."
+          : "Invalid verification code",
       });
     }
 
-    if (user.otpExpiresAt < Date.now()) {
-      return res.status(400).json({
-        success: false,
-        error: true,
-        message: "Verification code has expired. Please sign up again.",
-      });
-    }
-
-    // Mark verified
+    // Mark verified and clear OTP in both Redis and DB
+    await redisService.del(`otp:signup:${cleanEmail}`);
     user.isEmailVerified = true;
     user.otp = null;
     user.otpExpiresAt = null;
@@ -747,17 +751,31 @@ export const requestMagicLink = async (req, res) => {
 
     const magicLinkUrl = `${process.env.CLIENT_URL || "http://localhost:5173"}/magic-link/${rawToken}`;
 
-    await sendEmail({
-      email: user.email,
-      subject: "Your VYBE Magic Login Link 🪄",
-      html: `<div style="font-family: Arial, sans-serif; padding: 20px; color: #111;">
-        <h2>Sign in to VYBE instantly</h2>
-        <p>Hi ${user.name}, click the button below to sign in directly without a password. This link is valid for 15 minutes.</p>
-        <a href="${magicLinkUrl}" style="background: #e1306c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">Sign In To VYBE</a>
-        <p style="margin-top: 20px; font-size: 12px; color: #777;">If you did not request this link, please ignore this email.</p>
-      </div>`,
-      message: `Sign in to VYBE: ${magicLinkUrl}`,
-    });
+    try {
+      await sendEmail({
+        email: user.email,
+        subject: "Your VYBE Magic Login Link 🪄",
+        html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #09090b; color: #fafafa; padding: 40px 20px; text-align: center;">
+          <div style="max-width: 480px; margin: 0 auto; background-color: #18181b; border: 1px solid #27272a; border-radius: 20px; padding: 36px 28px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+            <div style="font-size: 32px; margin-bottom: 16px;">🪄</div>
+            <h2 style="font-size: 22px; font-weight: 800; margin: 0 0 12px; color: #ffffff; letter-spacing: -0.5px;">Sign in to VYBE</h2>
+            <p style="font-size: 14px; line-height: 22px; color: #a1a1aa; margin: 0 0 28px;">
+              Hi <strong style="color: #ffffff;">${user.name || user.userName}</strong>, tap the button below to log in securely to your account. No password required.
+            </p>
+            <a href="${magicLinkUrl}" style="background: linear-gradient(135deg, #ec4899, #f43f5e, #8b5cf6); color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 14px; display: inline-block; font-weight: 700; font-size: 14px; letter-spacing: 0.2px; box-shadow: 0 4px 14px rgba(244,63,94,0.4);">
+              Sign In To VYBE
+            </a>
+            <p style="margin-top: 28px; font-size: 12px; color: #71717a; line-height: 18px;">
+              This link is single-use and will expire in <strong>15 minutes</strong>.<br />
+              If you didn't request this login link, you can safely ignore this email.
+            </p>
+          </div>
+        </div>`,
+        message: `Sign in to VYBE: ${magicLinkUrl}`,
+      });
+    } catch (emailError) {
+      console.warn("[MagicLink] Email dispatch failed (likely due to SMTP config in dev). Link:", magicLinkUrl);
+    }
 
     await createSecurityAuditLog(user._id, "magic_link_requested", req);
 
@@ -765,6 +783,7 @@ export const requestMagicLink = async (req, res) => {
       success: true,
       error: false,
       message: "Magic Login Link dispatched to your email address.",
+      ...(process.env.NODE_ENV !== "production" && { previewUrl: magicLinkUrl }),
     });
   } catch (error) {
     return res.status(500).json({
@@ -973,6 +992,9 @@ export const sendOtp = async (req, res) => {
     const otpExpiresAt = Date.now() + 15 * 60 * 1000; // 15 mins
     const token = crypto.randomBytes(32).toString("hex");
 
+    // Store in Redis (Fast TTL) with in-memory fallback
+    await redisService.storeOtp(`reset:${user.email}`, otp, 15 * 60);
+
     user.otp = otp;
     user.otpExpiresAt = otpExpiresAt;
     user.isOtpVerified = false;
@@ -1007,9 +1029,22 @@ export const verifyOtp = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, error: true, message: "User not found" });
 
     if (String(otp).length !== 6) return res.status(400).json({ success: false, error: true, message: "OTP must be 6 digits" });
-    if (String(user.otp) !== String(otp)) return res.status(400).json({ success: false, error: true, message: "Invalid OTP" });
-    if (user.otpExpiresAt < Date.now()) return res.status(400).json({ success: false, error: true, message: "OTP expired" });
 
+    // 1. Check Redis OTP
+    const isRedisValid = await redisService.verifyOtp(`reset:${email}`, otp);
+    // 2. Fallback to MongoDB User OTP
+    const isDbValid = String(user.otp) === String(otp) && user.otpExpiresAt > Date.now();
+
+    if (!isRedisValid && !isDbValid) {
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: user.otpExpiresAt && user.otpExpiresAt < Date.now() ? "OTP expired" : "Invalid OTP",
+      });
+    }
+
+    // Mark verified in DB and clear in both
+    await redisService.del(`otp:reset:${email}`);
     user.isOtpVerified = true;
     user.otp = null;
     user.otpExpiresAt = null;

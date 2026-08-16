@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { getSocket } from "../lib/socket";
-import toast from "../lib/toast";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import { playJoinSound, playLeaveSound, playHandRaiseSound } from "../lib/sounds";
 
@@ -162,7 +162,7 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
         console.log("[WebRTC] Local media acquired:", stream.getTracks().map((t) => t.kind).join(", "));
       } catch (error) {
         console.error("[WebRTC] Failed to access media devices:", error);
-        toast.error("Failed to access camera or microphone. Please check permissions.");
+        snackbar.error("Failed to access camera or microphone. Please check permissions.");
         // Still allow joining (audio-only or receive-only)
         setIsMediaReady(true);
       }
@@ -519,7 +519,7 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
       return stream;
     } catch (error) {
       console.error("[WebRTC] Failed to switch device:", error);
-      toast.error("Failed to switch device");
+      snackbar.error("Failed to switch device");
     }
   }, []);
 
@@ -615,7 +615,7 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
       }
     } catch (err) {
       console.error("[WebRTC] Screen share failed:", err);
-      toast.error("Failed to share screen");
+      snackbar.error("Failed to share screen");
     }
   }, [isScreenSharing, room]);
 

@@ -14,6 +14,7 @@ import {
   restoreStory,
   toggleCloseFriend,
   getCloseFriends,
+  clearAllCloseFriends,
   getStoryArchive,
   createHighlight,
   updateCover,
@@ -59,6 +60,7 @@ storyRouter.post("/reply/:storyId", isAuthenticated, replyStory);
 // Close Friends System
 storyRouter.post("/close-friends/toggle/:targetUserId", isAuthenticated, toggleCloseFriend);
 storyRouter.get("/close-friends", isAuthenticated, getCloseFriends);
+storyRouter.delete("/close-friends/clear", isAuthenticated, clearAllCloseFriends);
 
 // Story Archive & Highlights
 storyRouter.get("/archive", isAuthenticated, getStoryArchive);

@@ -69,7 +69,7 @@ export const switchAccount = async (req, res) => {
     }
 
     // Prevent switching to same account
-    if (targetUserId === currentUserId) {
+    if (targetUserId === currentUserId?.toString()) {
       return res.status(400).json({
         success: false,
         error: true,
@@ -78,7 +78,9 @@ export const switchAccount = async (req, res) => {
     }
 
     // Verify target user exists
-    const targetUser = await User.findById(targetUserId).select("-password -twoFactorSecret -twoFactorRecoveryCodes");
+    const targetUser = await User.findById(targetUserId).select(
+      "-password -twoFactorSecret -twoFactorRecoveryCodes"
+    );
     if (!targetUser) {
       return res.status(404).json({
         success: false,
@@ -87,25 +89,69 @@ export const switchAccount = async (req, res) => {
       });
     }
 
-    const currentSession = await Session.findById(req.sessionId);
-    if (!currentSession || !currentSession.deviceGroupId) {
-      return res.status(400).json({
-        success: false,
-        error: true,
-        message: "Current session is invalid or missing device group tracking.",
-      });
+    // 1. Ensure a valid deviceGroupId exists on request & response cookies
+    const deviceGroupId = getOrCreateDeviceGroupId(req, res);
+
+    // 2. Self-heal current user's session if missing or lacking deviceGroupId
+    let currentSession = null;
+    if (req.sessionId) {
+      currentSession = await Session.findById(req.sessionId).catch(() => null);
     }
 
-    // Find the most recent active (non-revoked, non-expired) session for target user belonging to the SAME deviceGroupId
-    const targetSession = await Session.findOne({
+    if (!currentSession) {
+      currentSession = await Session.findOne({
+        user: currentUserId,
+        isRevoked: false,
+        expiresAt: { $gt: new Date() },
+      }).sort({ lastActive: -1 }).catch(() => null);
+    }
+
+    if (currentSession) {
+      if (!currentSession.deviceGroupId) {
+        currentSession.deviceGroupId = deviceGroupId;
+        await currentSession.save().catch(() => null);
+      }
+    } else {
+      // Auto-create active session for current user so they are properly tracked
+      const { deviceInfo, browser, os, ipAddress, location, userAgent } = parseDeviceDetails(req);
+      currentSession = await Session.create({
+        user: currentUserId,
+        refreshTokenHash: "auto-healed",
+        deviceGroupId,
+        deviceInfo,
+        browser,
+        os,
+        ipAddress,
+        location,
+        userAgent,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      }).catch(() => null);
+    }
+
+    // 3. Find the active session for target user belonging to this deviceGroupId
+    let targetSession = await Session.findOne({
       user: targetUserId,
       isRevoked: false,
-      deviceGroupId: currentSession.deviceGroupId,
+      deviceGroupId,
       expiresAt: { $gt: new Date() },
     }).sort({ lastActive: -1 });
 
+    // Fallback: If not linked to deviceGroupId yet, find ANY active valid session for targetUser and link it
     if (!targetSession) {
-      // No active session exists — user needs to re-login for this account
+      targetSession = await Session.findOne({
+        user: targetUserId,
+        isRevoked: false,
+        expiresAt: { $gt: new Date() },
+      }).sort({ lastActive: -1 });
+
+      if (targetSession) {
+        targetSession.deviceGroupId = deviceGroupId;
+        await targetSession.save().catch(() => null);
+      }
+    }
+
+    // If still no active session exists for target user, require re-login
+    if (!targetSession) {
       return res.status(401).json({
         success: false,
         error: true,
@@ -118,7 +164,7 @@ export const switchAccount = async (req, res) => {
     const accessToken = generateAccessToken(targetUser._id, targetSession._id);
     const refreshToken = generateRefreshToken(targetUser._id, targetSession._id);
 
-    // Update session
+    // Update target session
     targetSession.refreshTokenHash = hashToken(refreshToken);
     targetSession.lastActive = new Date();
     await targetSession.save();

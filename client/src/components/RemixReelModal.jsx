@@ -1,22 +1,23 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Repeat, X, Upload, Check } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
-export const RemixReelModal = ({ isOpen, onClose, originalLoop, onSuccess }) => {
+export const RemixReelModal = ({ isOpen, onClose, originalReel, onSuccess }) => {
+  const currentOriginal = originalReel;
   const [videoFile, setVideoFile] = useState(null);
   const [videoPreview, setVideoPreview] = useState(null);
   const [caption, setCaption] = useState("");
   const [loading, setLoading] = useState(false);
 
-  if (!isOpen || !originalLoop) return null;
+  if (!isOpen || !currentOriginal) return null;
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
       if (!file.type.startsWith("video/")) {
-        toast.error("Please select a valid video file.");
+        snackbar.error("Please select a valid video file.");
         return;
       }
       setVideoFile(file);
@@ -27,7 +28,7 @@ export const RemixReelModal = ({ isOpen, onClose, originalLoop, onSuccess }) => 
   const handleUploadRemix = async (e) => {
     e.preventDefault();
     if (!videoFile) {
-      toast.error("Please record or select a video for your Remix.");
+      snackbar.error("Please record or select a video for your Remix.");
       return;
     }
 
@@ -37,17 +38,17 @@ export const RemixReelModal = ({ isOpen, onClose, originalLoop, onSuccess }) => 
     formData.append("caption", caption);
 
     try {
-      const res = await api.post(`/loop/remix/${originalLoop._id}`, formData, {
+      const res = await api.post(`/reel/remix/${currentOriginal._id}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
       if (res.data.success) {
-        toast.success("Remix Reel Published! 🎬");
-        if (onSuccess) onSuccess(res.data.loop);
+        snackbar.success("Remix Reel Published! 🎬");
+        if (onSuccess) onSuccess(res.data.reel);
         onClose();
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to publish Remix.");
+      snackbar.error(err.response?.data?.message || "Failed to publish Remix.");
     } finally {
       setLoading(false);
     }
@@ -69,7 +70,7 @@ export const RemixReelModal = ({ isOpen, onClose, originalLoop, onSuccess }) => 
               </div>
               <div>
                 <h3 className="text-xl font-bold">Remix this Reel</h3>
-                <p className="text-xs text-text-secondary">Create a side-by-side response with @{originalLoop.author?.userName}</p>
+                <p className="text-xs text-text-secondary">Create a side-by-side response with @{originalReel.author?.userName}</p>
               </div>
             </div>
 
@@ -83,14 +84,14 @@ export const RemixReelModal = ({ isOpen, onClose, originalLoop, onSuccess }) => 
             <div className="grid grid-cols-2 gap-3 h-64 bg-surface-inset p-3 rounded-2xl border border-border">
               {/* Original Reel */}
               <div className="relative h-full rounded-xl overflow-hidden bg-bg border border-border">
-                <video src={originalLoop.media?.url} autoPlay loop muted className="w-full h-full object-cover" />
+                <video src={originalReel.media?.url} autoPlay muted onEnded={(e) => { e.target.currentTime = 0; e.target.play().catch(() => null); }} className="w-full h-full object-cover" />
                 <span className="absolute bottom-2 left-2 text-[10px] bg-surface-overlay px-2 py-0.5 rounded text-text">Original</span>
               </div>
 
               {/* User Remix Video Preview or Upload trigger */}
               <div className="relative h-full rounded-xl overflow-hidden bg-surface border border-dashed border-border-strong flex items-center justify-center">
                 {videoPreview ? (
-                  <video src={videoPreview} autoPlay loop muted className="w-full h-full object-cover" />
+                  <video src={videoPreview} autoPlay muted onEnded={(e) => { e.target.currentTime = 0; e.target.play().catch(() => null); }} className="w-full h-full object-cover" />
                 ) : (
                   <label className="flex flex-col items-center justify-center p-4 cursor-pointer text-center space-y-2">
                     <Upload className="w-8 h-8 text-rose-500" />

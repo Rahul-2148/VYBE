@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Search, Check, Users, Camera, Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import dp from "../assets/dp3.png";
 
@@ -40,11 +40,11 @@ export const CreateGroupModal = ({ isOpen, onClose, onGroupCreated }) => {
   const handleCreateGroup = async (e) => {
     e.preventDefault();
     if (!groupName.trim()) {
-      toast.error("Please enter a group name");
+      snackbar.error("Please enter a group name");
       return;
     }
     if (selectedUserIds.length < 2) {
-      toast.error("Select at least 2 members for a group chat");
+      snackbar.error("Select at least 2 members for a group chat");
       return;
     }
 
@@ -59,7 +59,7 @@ export const CreateGroupModal = ({ isOpen, onClose, onGroupCreated }) => {
         members: selectedUserIds,
       });
 
-      toast.success(`Group "${groupName.trim()}" created! 🎉`);
+      snackbar.success(`Group "${groupName.trim()}" created! 🎉`);
       if (onGroupCreated) onGroupCreated(res.data);
       onClose();
     } catch (err) {
@@ -69,11 +69,11 @@ export const CreateGroupModal = ({ isOpen, onClose, onGroupCreated }) => {
           name: groupName.trim(),
           members: selectedUserIds,
         });
-        toast.success(`Group "${groupName.trim()}" created! 🎉`);
+        snackbar.success(`Group "${groupName.trim()}" created! 🎉`);
         if (onGroupCreated) onGroupCreated(res2.data.conversation);
         onClose();
       } catch (err2) {
-        toast.error(err2.response?.data?.message || "Failed to create group.");
+        snackbar.error(err2.response?.data?.message || "Failed to create group.");
       }
     } finally {
       setCreating(false);
@@ -114,30 +114,30 @@ export const CreateGroupModal = ({ isOpen, onClose, onGroupCreated }) => {
           <form onSubmit={handleCreateGroup} className="space-y-4">
             {/* Group Name Input */}
             <div>
-              <label className="block text-[10px] font-bold text-text-secondary uppercase tracking-wider mb-1">Group Name</label>
+              <label className="block text-[10px] font-bold text-text-secondary uppercase tracking-wider mb-1.5">Group Name</label>
               <input
                 type="text"
                 placeholder="e.g. Squad Goals 🎉"
                 value={groupName}
                 onChange={(e) => setGroupName(e.target.value)}
-                className="w-full bg-surface border border-border px-4 py-2.5 rounded-xl text-xs text-text outline-none focus:border-purple-500"
+                className="w-full bg-surface border border-border px-4 py-2.5 rounded-xl text-xs text-text outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition shadow-xs"
                 required
               />
             </div>
 
             {/* Member Search */}
             <div>
-              <label className="block text-[10px] font-bold text-text-secondary uppercase tracking-wider mb-1">
+              <label className="block text-[10px] font-bold text-text-secondary uppercase tracking-wider mb-1.5">
                 Add Members ({selectedUserIds.length} selected)
               </label>
               <div className="relative">
-                <Search className="w-4 h-4 text-text-muted absolute left-3 top-3" />
+                <Search className="w-4 h-4 text-text-muted absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   placeholder="Search followers..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-surface border border-border pl-9 pr-4 py-2 rounded-xl text-xs text-text outline-none focus:border-purple-500"
+                  className="w-full bg-surface border border-border pl-10 pr-4 py-2.5 rounded-xl text-xs text-text outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition shadow-xs"
                 />
               </div>
             </div>

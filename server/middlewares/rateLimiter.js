@@ -21,7 +21,7 @@ export const createRateLimiter = ({
   }, windowMs).unref();
 
   return (req, res, next) => {
-    // Bypass in local development or for loopback to prevent false 429 locks during active testing
+    // Bypass in local development or for localhost/127.0.0.1 to prevent false 429 locks during active testing
     const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
     if (process.env.NODE_ENV !== "production" || ip === "127.0.0.1" || ip === "::1" || ip === "localhost") {
       return next();

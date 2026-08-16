@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import dp from "../assets/dp3.png";
 import { setProfileData, setUserData } from "../redux/features/userSlice";
 import { ClipLoader } from "react-spinners";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import { Link2, Trash2, Plus, User, Lock, Sliders, Palette, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
 import api from "../lib/axios";
 import { useTheme } from "../lib/themeContext";
@@ -146,11 +146,11 @@ const EditProfile = () => {
       if (result.data.success) {
         dispatch(setUserData(result.data));
         dispatch(setProfileData(result.data));
-        toast.success(result.data.message || "Profile updated!");
+        snackbar.success(result.data.message || "Profile updated!");
         navigate(`/profile/${formFields.userName}`);
       }
     } catch (error) {
-      toast.error(error.response?.data?.message || "Failed to update profile.");
+      snackbar.error(error.response?.data?.message || "Failed to update profile.");
     } finally {
       setIsLoading(false);
     }
@@ -159,15 +159,15 @@ const EditProfile = () => {
   const handleChangePassword = async (e) => {
     e.preventDefault();
     if (!currentPassword || !newPassword || !confirmPassword) {
-      toast.error("All password fields are required");
+      snackbar.error("All password fields are required");
       return;
     }
     if (newPassword !== confirmPassword) {
-      toast.error("New passwords do not match!");
+      snackbar.error("New passwords do not match!");
       return;
     }
     if (newPassword.length < 6) {
-      toast.error("New password must be at least 6 characters");
+      snackbar.error("New password must be at least 6 characters");
       return;
     }
 
@@ -178,15 +178,15 @@ const EditProfile = () => {
         newPassword,
       });
       if (res.data?.success) {
-        toast.success(res.data.message || "Password updated successfully!");
+        snackbar.success(res.data.message || "Password updated successfully!");
         setCurrentPassword("");
         setNewPassword("");
         setConfirmPassword("");
       } else {
-        toast.error(res.data?.message || "Failed to update password.");
+        snackbar.error(res.data?.message || "Failed to update password.");
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to update password.");
+      snackbar.error(err.response?.data?.message || "Failed to update password.");
     } finally {
       setIsChangingPass(false);
     }
@@ -215,7 +215,7 @@ const EditProfile = () => {
             name="name"
             value={formFields.name}
             onChange={handleChange}
-            className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500"
+            className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-primary focus:ring-2 focus:ring-primary/10 transition shadow-xs"
           />
         </div>
 
@@ -226,7 +226,7 @@ const EditProfile = () => {
             name="userName"
             value={formFields.userName}
             onChange={handleChange}
-            className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500"
+            className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-primary focus:ring-2 focus:ring-primary/10 transition shadow-xs"
           />
         </div>
 
@@ -240,45 +240,28 @@ const EditProfile = () => {
               setFormFields((prev) => ({
                 ...prev,
                 professionalType: val,
-                category: val === "personal" ? "" : prev.category || "Digital Creator",
-                accountType: val === "business" ? "public" : prev.accountType
+                ...(val === "personal" ? { category: "", professionalCategoryLabel: "", contactEmail: "", contactPhone: "", businessAddress: "", showContactInfo: false, showCategory: false } : {}),
               }));
             }}
-            className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500 capitalize"
+            className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-primary focus:ring-2 focus:ring-primary/10 transition shadow-xs cursor-pointer"
           >
             <option value="personal">Personal Account</option>
-            <option value="creator">Creator Account</option>
-            <option value="business">Business Account</option>
+            <option value="creator">Creator (Content Creator, Influencer, Artist)</option>
+            <option value="business">Business (Local Business, Brand, Company)</option>
           </select>
-        </div>
-
-        <div>
-          <label className="block text-text-secondary font-semibold mb-1">Account Privacy</label>
-          <select
-            name="accountType"
-            value={formFields.professionalType !== "personal" ? "public" : formFields.accountType}
-            disabled={formFields.professionalType !== "personal"}
-            onChange={handleChange}
-            className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500 capitalize disabled:opacity-50"
-          >
-            <option value="public">Public</option>
-            <option value="private">Private</option>
-          </select>
-          {formFields.professionalType !== "personal" && (
-            <p className="text-[10px] text-text-muted mt-1">Professional accounts (Creator & Business) must be public.</p>
-          )}
         </div>
 
         {formFields.professionalType !== "personal" && (
           <>
             <div>
-              <label className="block text-text-secondary font-semibold mb-1">Creator Category</label>
+              <label className="block text-text-secondary font-semibold mb-1">Professional Category</label>
               <select
                 name="category"
                 value={formFields.category}
-                onChange={handleChange}
-                className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500"
+                onChange={(e) => setFormFields((prev) => ({ ...prev, category: e.target.value }))}
+                className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-primary focus:ring-2 focus:ring-primary/10 transition shadow-xs cursor-pointer"
               >
+                <option value="">Select a category...</option>
                 {CATEGORIES.map((cat) => (
                   <option key={cat} value={cat}>
                     {cat}
@@ -297,82 +280,89 @@ const EditProfile = () => {
                 name="showCategory"
                 checked={formFields.showCategory}
                 onChange={(e) => setFormFields((prev) => ({ ...prev, showCategory: e.target.checked }))}
-                className="h-4 w-4 rounded border-border text-rose-600 focus:ring-rose-500 accent-rose-600"
+                className="h-4 w-4 rounded border-border text-primary focus:ring-primary accent-primary"
               />
-            </div>
-
-            <div className="border-t border-border/40 pt-4 mt-2">
-              <button
-                type="button"
-                onClick={() => setIsContactSectionOpen(!isContactSectionOpen)}
-                className="w-full flex items-center justify-between py-2 text-left hover:opacity-80 transition"
-              >
-                <span className="font-bold text-text text-xs uppercase tracking-wider">Contact Information</span>
-                {isContactSectionOpen ? (
-                  <ChevronUp className="w-4 h-4 text-text-muted" />
-                ) : (
-                  <ChevronDown className="w-4 h-4 text-text-muted" />
-                )}
-              </button>
-
-              {isContactSectionOpen && (
-                <div className="space-y-4 mt-4 animate-in fade-in slide-in-from-top-1 duration-200">
-                  <div>
-                    <label className="block text-text-secondary font-semibold mb-1">Public Email</label>
-                    <input
-                      type="email"
-                      name="contactEmail"
-                      value={formFields.contactEmail}
-                      onChange={handleChange}
-                      placeholder="rahul@vybe.in"
-                      className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-text-secondary font-semibold mb-1">Public Phone Number</label>
-                    <input
-                      type="tel"
-                      name="contactPhone"
-                      value={formFields.contactPhone}
-                      onChange={handleChange}
-                      placeholder="+91 98765 43210"
-                      className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500"
-                    />
-                  </div>
-
-                  {formFields.professionalType === "business" && (
-                    <div>
-                      <label className="block text-text-secondary font-semibold mb-1">Business Address</label>
-                      <input
-                        type="text"
-                        name="businessAddress"
-                        value={formFields.businessAddress}
-                        onChange={handleChange}
-                        placeholder="Connaught Place, New Delhi, Delhi"
-                        className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500"
-                      />
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between p-3.5 bg-surface/40 border border-border rounded-xl">
-                    <div>
-                      <label className="block font-bold text-text text-[11px] sm:text-xs">Show Contact Info</label>
-                      <span className="text-[9px] sm:text-[10px] text-text-muted">Display your contact details on your profile</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      name="showContactInfo"
-                      checked={formFields.showContactInfo}
-                      onChange={(e) => setFormFields((prev) => ({ ...prev, showContactInfo: e.target.checked }))}
-                      className="h-4 w-4 rounded border-border text-rose-600 focus:ring-rose-500 accent-rose-600"
-                    />
-                  </div>
-                </div>
-              )}
             </div>
           </>
         )}
+
+        {/* Contact Options — Available for all accounts */}
+        <div className="border-t border-border/40 pt-4 mt-2">
+          <button
+            type="button"
+            onClick={() => setIsContactSectionOpen(!isContactSectionOpen)}
+            className="w-full flex items-center justify-between py-2 text-left hover:opacity-80 transition cursor-pointer"
+          >
+            <div>
+              <span className="font-bold text-text text-xs uppercase tracking-wider block">Contact & Privacy Options</span>
+              <span className="text-[10px] text-text-muted">Manage your public email and masked phone number</span>
+            </div>
+            {isContactSectionOpen ? (
+              <ChevronUp className="w-4 h-4 text-text-muted" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-text-muted" />
+            )}
+          </button>
+
+          {isContactSectionOpen && (
+            <div className="space-y-4 mt-4 animate-in fade-in slide-in-from-top-1 duration-200">
+              <div>
+                <label className="block text-text-secondary font-semibold mb-1">Public / Contact Email</label>
+                <input
+                  type="email"
+                  name="contactEmail"
+                  value={formFields.contactEmail}
+                  onChange={handleChange}
+                  placeholder="name@example.com"
+                  className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-primary focus:ring-2 focus:ring-primary/10 transition shadow-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-text-secondary font-semibold mb-1">Contact Phone Number (Masked by default)</label>
+                <input
+                  type="tel"
+                  name="contactPhone"
+                  value={formFields.contactPhone}
+                  onChange={handleChange}
+                  placeholder="+91 98765 43210"
+                  className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-primary focus:ring-2 focus:ring-primary/10 transition shadow-xs"
+                />
+                <span className="text-[10px] text-text-muted mt-1 block">
+                  Your phone is safely masked on your profile (e.g. +91 98••••••10). Other users can request your full number.
+                </span>
+              </div>
+
+              {formFields.professionalType === "business" && (
+                <div>
+                  <label className="block text-text-secondary font-semibold mb-1">Business Address</label>
+                  <input
+                    type="text"
+                    name="businessAddress"
+                    value={formFields.businessAddress}
+                    onChange={handleChange}
+                    placeholder="Connaught Place, New Delhi, Delhi"
+                    className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-primary focus:ring-2 focus:ring-primary/10 transition shadow-xs"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-between p-3.5 bg-surface/40 border border-border rounded-xl">
+                <div>
+                  <label className="block font-bold text-text text-[11px] sm:text-xs">Show Contact Info</label>
+                  <span className="text-[9px] sm:text-[10px] text-text-muted">Display your contact details on your profile</span>
+                </div>
+                <input
+                  type="checkbox"
+                  name="showContactInfo"
+                  checked={formFields.showContactInfo}
+                  onChange={(e) => setFormFields((prev) => ({ ...prev, showContactInfo: e.target.checked }))}
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary accent-primary"
+                />
+              </div>
+            </div>
+          )}
+        </div>
 
         <div>
           <label className="block text-text-secondary font-semibold mb-1">Bio</label>
@@ -381,37 +371,67 @@ const EditProfile = () => {
             rows={3}
             value={formFields.bio}
             onChange={handleChange}
-            className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-rose-500"
+            className="w-full bg-surface border border-border p-3 rounded-xl outline-none text-text focus:border-primary focus:ring-2 focus:ring-primary/10 transition shadow-xs"
           />
+        </div>
+
+        {/* Account Privacy Toggle */}
+        <div className="p-4 bg-surface/60 border border-border rounded-2xl space-y-1">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+              <div>
+                <label className="block text-xs font-bold text-text">Private Account</label>
+                <span className="text-[10px] text-text-muted">
+                  {formFields.professionalType !== "personal"
+                    ? "Professional accounts are public. Switch to personal mode to make your account private."
+                    : "When your account is private, only accepted followers can view your posts and reels."}
+                </span>
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              name="accountType"
+              disabled={formFields.professionalType !== "personal"}
+              checked={formFields.accountType === "private"}
+              onChange={(e) =>
+                setFormFields((prev) => ({
+                  ...prev,
+                  accountType: e.target.checked ? "private" : "public",
+                }))
+              }
+              className="h-4 w-4 rounded border-border text-primary focus:ring-primary accent-primary cursor-pointer disabled:opacity-40"
+            />
+          </div>
         </div>
 
         {/* Multiple Bio Links */}
         <div className="space-y-2 pt-2">
           <div className="flex items-center justify-between">
             <label className="text-text-secondary font-semibold">Multiple Bio Links</label>
-            <button onClick={() => setShowAddLink(!showAddLink)} className="text-rose-400 font-bold text-xs flex items-center gap-1 hover:underline">
+            <button onClick={() => setShowAddLink(!showAddLink)} className="text-primary font-bold text-xs flex items-center gap-1 hover:underline cursor-pointer">
               <Plus className="w-3.5 h-3.5" />
               Add Link
             </button>
           </div>
 
           {showAddLink && (
-            <div className="p-3 bg-surface border border-border rounded-2xl space-y-2 animate-in fade-in duration-200">
+            <div className="p-3 bg-surface border border-border rounded-2xl space-y-2 animate-in fade-in duration-200 shadow-xs">
               <input
                 type="text"
                 placeholder="Link Title (e.g. Portfolio)"
                 value={newLink.title}
                 onChange={(e) => setNewLink({ ...newLink, title: e.target.value })}
-                className="w-full bg-surface-inset border border-border p-2.5 rounded-xl text-text outline-none"
+                className="w-full bg-surface-hover border border-border p-2.5 rounded-xl text-text outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition"
               />
               <input
                 type="url"
                 placeholder="URL (https://...)"
                 value={newLink.url}
                 onChange={(e) => setNewLink({ ...newLink, url: e.target.value })}
-                className="w-full bg-surface-inset border border-border p-2.5 rounded-xl text-text outline-none"
+                className="w-full bg-surface-hover border border-border p-2.5 rounded-xl text-text outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition"
               />
-              <button onClick={handleAddLink} className="w-full py-2 bg-rose-600 font-bold rounded-xl text-text">
+              <button onClick={handleAddLink} className="w-full py-2 bg-primary hover:bg-primary-hover font-bold rounded-xl text-white shadow-sm transition cursor-pointer">
                 Add Bio Link
               </button>
             </div>
@@ -504,7 +524,7 @@ const EditProfile = () => {
     <div className="space-y-6 animate-in fade-in duration-200">
       <div className="space-y-1">
         <h2 className="text-sm font-bold text-text">Suggested Content Preferences</h2>
-        <p className="text-[11px] text-text-muted">Control explicit recommendations and adjust suggested feeds from loops and posts.</p>
+        <p className="text-[11px] text-text-muted">Control explicit recommendations and adjust suggested feeds from reels and posts.</p>
       </div>
 
       {/* Sensitive Content Control */}

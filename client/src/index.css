@@ -236,6 +236,55 @@
 }
 
 /* ============================================================
+   Adaptive Brand Logo (Pure CSS Light/Dark Auto-Invert)
+   ============================================================ */
+/* For White PNG Assets (e.g. logo.png) */
+.theme-logo-adaptive,
+.theme-logo-white {
+  filter: none;
+  transition: filter 0.2s ease, transform 0.2s ease;
+}
+
+html.light .theme-logo-adaptive,
+html[class~="light"] .theme-logo-adaptive,
+[data-theme="light"] .theme-logo-adaptive,
+html.light .theme-logo-white,
+html[class~="light"] .theme-logo-white,
+[data-theme="light"] .theme-logo-white {
+  filter: invert(1) brightness(0.12) !important;
+}
+
+html.dark .theme-logo-adaptive,
+html:not(.light) .theme-logo-adaptive,
+html[class~="dark"] .theme-logo-adaptive,
+[data-theme="dark"] .theme-logo-adaptive,
+html.dark .theme-logo-white,
+html:not(.light) .theme-logo-white,
+html[class~="dark"] .theme-logo-white,
+[data-theme="dark"] .theme-logo-white {
+  filter: none !important;
+}
+
+/* For Black PNG Assets (e.g. logo2.png) */
+.theme-logo-black {
+  filter: none;
+  transition: filter 0.2s ease, transform 0.2s ease;
+}
+
+html.dark .theme-logo-black,
+html:not(.light) .theme-logo-black,
+html[class~="dark"] .theme-logo-black,
+[data-theme="dark"] .theme-logo-black {
+  filter: invert(1) brightness(2) !important;
+}
+
+html.light .theme-logo-black,
+html[class~="light"] .theme-logo-black,
+[data-theme="light"] .theme-logo-black {
+  filter: none !important;
+}
+
+/* ============================================================
    TAILWIND v4 @theme — Register tokens as Tailwind utilities
    This generates classes like bg-surface, text-text, etc.
    ============================================================ */
@@ -389,11 +438,44 @@ body {
   background: var(--color-surface-active);
 }
 
-/* Focus visible */
-:focus-visible {
+/* ============================================================
+   GLOBAL FORM & INPUT CONTROLS RESET (Ultra-Professional)
+   ============================================================ */
+
+/* Complete removal of ugly default browser rect outlines on all inputs */
+input,
+textarea,
+select,
+[contenteditable="true"] {
+  outline: none !important;
+  box-shadow: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+input:focus,
+input:focus-visible,
+input:active,
+textarea:focus,
+textarea:focus-visible,
+textarea:active,
+select:focus,
+select:focus-visible,
+select:active,
+[contenteditable="true"]:focus,
+[contenteditable="true"]:focus-visible,
+[contenteditable="true"]:active {
+  outline: none !important;
+  outline-offset: 0 !important;
+}
+
+/* Keyboard focus strictly for interactive buttons & links */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
 }
+
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
@@ -558,7 +640,7 @@ body {
 }
 
 /* =============================================
-   VybeInput — Instagram-exact floating-label inputs
+   VybeInput — Border-Notched Floating-Label Inputs
    ============================================= */
 
 .vybe-input-wrapper {
@@ -571,80 +653,128 @@ body {
   display: flex;
   align-items: center;
   width: 100%;
-  height: 45px;
-  background: var(--input-bg);
-  border: 1px solid var(--input-border);
-  border-radius: 10px;
-  padding: 0 14px;
-  gap: 10px;
-  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  height: 52px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  padding: 0 16px;
+  gap: 12px;
+  transition: border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s ease;
   box-sizing: border-box;
 }
 
+.vybe-input-shell:hover {
+  border-color: var(--border-strong);
+}
+
 .vybe-input-shell--focused {
-  border-color: #db2777;
-  box-shadow: 0 0 0 3px rgba(219, 39, 119, 0.15);
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 3.5px var(--primary-muted) !important;
+  background: var(--surface) !important;
 }
 
 .vybe-input-inner {
   position: relative;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
+  align-items: center;
   flex: 1;
   min-width: 0;
   height: 100%;
 }
 
-/* ---- Floating label ---- */
+/* ---- Floating label on top border ---- */
 .vybe-input-label {
   position: absolute;
-  left: 0;
+  left: 16px;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 13px;
-  line-height: 45px;
-  color: var(--input-placeholder);
+  font-size: 14.5px;
+  line-height: 1;
+  color: var(--text-muted);
   pointer-events: none;
   user-select: none;
-  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
-  transform-origin: left top;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: left center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
+  max-width: calc(100% - 32px);
+  font-weight: 400;
+  padding: 0 4px;
+  background: transparent;
+  z-index: 10;
+  border-radius: 4px;
 }
 
+/* When focused or text is filled, label moves up and sits directly ON the top border */
 .vybe-input-label--floated {
-  top: 4px;
-  transform: translateY(0);
-  font-size: 9.5px;
-  line-height: 12px;
-  color: var(--text-muted);
+  top: 0;
+  left: 12px;
+  transform: translateY(-50%);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-secondary);
+  background: var(--surface);
+  padding: 0 6px;
 }
 
-/* ---- Input field ---- */
+.vybe-input-label--focused {
+  color: var(--primary) !important;
+  font-weight: 700 !important;
+  background: var(--surface) !important;
+}
+
+/* ---- Input field — centered vertically with 100% typing room ---- */
 .vybe-input-field {
   width: 100%;
   height: 100%;
-  background: transparent;
-  border: none;
-  outline: none;
-  font-size: 13.5px;
-  line-height: 20px;
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.5;
   color: var(--text);
   padding: 0;
   margin: 0;
   font-family: inherit;
-  caret-color: var(--text);
+  caret-color: var(--primary);
 }
 
-.vybe-input-field--active {
-  padding-top: 15px;
+.vybe-input-field:focus,
+.vybe-input-field:focus-visible,
+.vybe-input-field:active {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 .vybe-input-field::placeholder {
   color: transparent;
+}
+
+/* ---- Ultra-professional utility classes for standalone inputs ---- */
+.input-clean {
+  background-color: var(--surface);
+  border: 1.5px solid var(--border);
+  color: var(--text);
+  outline: none !important;
+  box-shadow: none;
+  border-radius: 14px;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+.input-clean:hover {
+  border-color: var(--border-strong);
+}
+
+.input-clean:focus,
+.input-clean:focus-within {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 3.5px var(--primary-muted) !important;
+  outline: none !important;
 }
 
 /* ---- Show/Hide toggle ---- */
@@ -655,30 +785,32 @@ body {
   background: none;
   border: none;
   outline: none;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 700;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 0 2px;
+  padding: 4px 6px;
+  border-radius: 6px;
   flex-shrink: 0;
   user-select: none;
   line-height: 1;
   font-family: inherit;
-  transition: color 0.1s;
+  transition: all 0.15s ease;
 }
 
 .vybe-input-toggle:hover {
   color: var(--text);
+  background: var(--surface-hover);
 }
 
 .vybe-input-toggle:active {
-  opacity: 0.65;
+  transform: scale(0.95);
 }
 
 /* ---- Leading icon ---- */
 .vybe-input-icon {
   flex-shrink: 0;
-  transition: color 0.15s;
+  transition: color 0.18s;
 }
 
 /* ---- Username suggestions dropdown ---- */
@@ -686,48 +818,56 @@ body {
   position: absolute;
   left: 0;
   right: 0;
-  top: calc(100% + 4px);
+  top: calc(100% + 6px);
   z-index: 50;
-  background: var(--surface-elevated);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  background: var(--surface-inset);
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  padding: 8px;
+  box-shadow: var(--shadow-xl);
+  backdrop-filter: blur(16px);
+  animation: fadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .vybe-input-suggestions-header {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  padding: 4px 8px;
+  justify-content: space-between;
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 4px;
 }
 
 .vybe-input-suggestion-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
   color: var(--text);
-  transition: background 0.1s;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .vybe-input-suggestion-item:hover {
   background: var(--surface-hover);
+  color: var(--primary);
 }
 
 .vybe-input-suggestion-badge {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--success);
+  font-size: 11px;
+  font-weight: 700;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  padding: 2px 8px;
+  border-radius: 9999px;
 }
 
 /* ---- Search bar variant (Explore, SearchModal) ---- */
@@ -846,11 +986,11 @@ body {
 }
 
 /* ============================================================
-   INSTAGRAM-TIER MICRO-INTERACTION & FEELINGS SUITE
+   VYBE-TIER MICRO-INTERACTION & FEELINGS SUITE
    ============================================================ */
 
-/* 1. Instagram Light Bar / Neon Shimmer Sweep */
-@keyframes instagramLightBar {
+/* 1. Vybe Light Bar / Neon Shimmer Sweep */
+@keyframes vybeLightBar {
   0% {
     transform: translateX(-100%);
   }
@@ -862,11 +1002,11 @@ body {
   }
 }
 
-.animate-instagram-light-bar {
-  animation: instagramLightBar 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+.animate-vybe-light-bar {
+  animation: vybeLightBar 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
-/* 2. Instagram Story Ring Continuous Gradient Spin */
+/* 2. VYBE Story Ring Continuous Gradient Spin */
 @keyframes storyRingSpin {
   0% {
     transform: rotate(0deg);
@@ -883,39 +1023,43 @@ body {
 
 /* 3. Audio Equalizer Waveform Bars */
 @keyframes soundWave1 {
-  0%, 100% { height: 4px; }
-  50% { height: 16px; }
+  0%, 100% { height: 3px; }
+  50% { height: 13px; }
 }
 
 @keyframes soundWave2 {
-  0%, 100% { height: 14px; }
-  50% { height: 6px; }
-}
-
-@keyframes soundWave3 {
-  0%, 100% { height: 8px; }
-  50% { height: 18px; }
-}
-
-@keyframes soundWave4 {
-  0%, 100% { height: 12px; }
+  0%, 100% { height: 13px; }
   50% { height: 4px; }
 }
 
+@keyframes soundWave3 {
+  0%, 100% { height: 5px; }
+  50% { height: 14px; }
+}
+
+@keyframes soundWave4 {
+  0%, 100% { height: 10px; }
+  50% { height: 3px; }
+}
+
 .animate-sound-wave-1 {
-  animation: soundWave1 0.65s ease-in-out infinite;
+  animation: soundWave1 0.6s ease-in-out infinite !important;
+  display: block !important;
 }
 
 .animate-sound-wave-2 {
-  animation: soundWave2 0.85s ease-in-out infinite 0.15s;
+  animation: soundWave2 0.75s ease-in-out infinite 0.15s !important;
+  display: block !important;
 }
 
 .animate-sound-wave-3 {
-  animation: soundWave3 0.75s ease-in-out infinite 0.3s;
+  animation: soundWave3 0.65s ease-in-out infinite 0.3s !important;
+  display: block !important;
 }
 
 .animate-sound-wave-4 {
-  animation: soundWave4 0.9s ease-in-out infinite 0.1s;
+  animation: soundWave4 0.8s ease-in-out infinite 0.1s !important;
+  display: block !important;
 }
 
 /* 4. Notification & Unread Dot Glowing Aura */
@@ -991,5 +1135,14 @@ body {
 
 .animate-heart-burst {
   animation: heartBurst 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Hide scrollbar for webkit browsers (used by CallControls mobile scroll) */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 

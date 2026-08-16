@@ -8,6 +8,7 @@ import { createNotificationHelper } from "./notification.controller.js";
 import { Notification } from "../models/notification.model.js";
 import { rankPostsForUser } from "../services/feedAlgorithm.service.js";
 import { getBlockedUserIds } from "../utils/blockHelper.js";
+import { getExcludedAuthorIdsForFeed } from "../utils/feedPrivacyHelper.js";
 
 // 1. Upload Single Post Controller
 export const uploadPost = async (req, res) => {
@@ -181,7 +182,7 @@ export const uploadCarouselPost = async (req, res) => {
   }
 };
 
-// 3. Toggle Archive Post Controller (Instagram-style)
+// 3. Toggle Archive Post Controller
 export const toggleArchivePost = async (req, res) => {
   try {
     const { postId } = req.params;
@@ -200,7 +201,7 @@ export const toggleArchivePost = async (req, res) => {
     const updatedPost = await Post.findOneAndUpdate(
       { _id: postId },
       { $set: { isArchived: newArchiveState } },
-      { new: true }
+      { returnDocument: 'after' }
     ).populate("author", "name userName profileImage isVerified");
 
     return res.status(200).json({
@@ -214,7 +215,7 @@ export const toggleArchivePost = async (req, res) => {
   }
 };
 
-// 4. Get Private Archived Posts Controller (Instagram-style)
+// 4. Get Private Archived Posts Controller
 export const getArchivedPosts = async (req, res) => {
   try {
     const posts = await Post.find({ author: req.userId, isArchived: true })
@@ -228,7 +229,7 @@ export const getArchivedPosts = async (req, res) => {
   }
 };
 
-// 4b. Edit Post Controller (Instagram-style post editing)
+// 4b. Edit Post Controller
 export const editPost = async (req, res) => {
   try {
     const { postId } = req.params;
@@ -275,7 +276,7 @@ export const editPost = async (req, res) => {
     const updatedPost = await Post.findOneAndUpdate(
       { _id: postId },
       { $set: updateFields },
-      { new: true }
+      { returnDocument: 'after' }
     )
       .populate("author", "name userName profileImage isVerified")
       .populate("comments.author", "name userName profileImage isVerified")
@@ -346,15 +347,56 @@ export const addPostToCollection = async (req, res) => {
 // 6. Drafts Controllers
 export const saveDraft = async (req, res) => {
   try {
-    const { caption, location, hashtags, mediaPreview } = req.body;
+    const {
+      draftId,
+      _id,
+      caption = "",
+      location = "",
+      hashtags = [],
+      mediaPreview = "",
+      draftType = "post",
+      mediaItems = [],
+      altText = "",
+      aspectRatio = "4:5",
+      filter = "normal",
+      audioTrack = null,
+    } = req.body;
+
+    const targetDraftId = draftId || _id;
+
+    if (targetDraftId) {
+      const existingDraft = await Draft.findOne({ _id: targetDraftId, author: req.userId });
+      if (existingDraft) {
+        existingDraft.caption = caption;
+        existingDraft.location = location;
+        existingDraft.hashtags = parseHashtags(hashtags);
+        if (mediaPreview) existingDraft.mediaPreview = mediaPreview;
+        existingDraft.draftType = draftType;
+        existingDraft.mediaItems = mediaItems;
+        existingDraft.altText = altText;
+        existingDraft.aspectRatio = aspectRatio;
+        existingDraft.filter = filter;
+        existingDraft.audioTrack = audioTrack;
+        await existingDraft.save();
+
+        return res.status(200).json({ success: true, draft: existingDraft, message: "Draft updated! 📝" });
+      }
+    }
+
     const draft = await Draft.create({
       author: req.userId,
       caption,
       location,
       hashtags: parseHashtags(hashtags),
-      mediaPreview,
+      mediaPreview: mediaPreview || mediaItems?.[0]?.preview || mediaItems?.[0]?.url || "",
+      draftType,
+      mediaItems,
+      altText,
+      aspectRatio,
+      filter,
+      audioTrack,
     });
-    return res.status(201).json({ success: true, draft, message: "Draft saved!" });
+    return res.status(201).json({ success: true, draft, message: "Draft saved! 📝" });
   } catch (error) {
     return res.status(500).json({ message: `saveDraft error: ${error.message}` });
   }
@@ -369,22 +411,27 @@ export const getUserDrafts = async (req, res) => {
   }
 };
 
+export const deleteDraft = async (req, res) => {
+  try {
+    const { draftId } = req.params;
+    const draft = await Draft.findOneAndDelete({ _id: draftId, author: req.userId });
+    if (!draft) {
+      return res.status(404).json({ success: false, message: "Draft not found" });
+    }
+    return res.status(200).json({ success: true, message: "Draft deleted successfully" });
+  } catch (error) {
+    return res.status(500).json({ message: `deleteDraft error: ${error.message}` });
+  }
+};
+
 // 7. Get All Posts (Public Feed - excluding archived)
 export const getAllPosts = async (req, res) => {
   try {
-    const blockedUserIds = await getBlockedUserIds(req.userId);
-    const privateUsers = await User.find({
-      accountType: "private",
-      _id: { $ne: req.userId },
-      followers: { $ne: req.userId }
-    }).select("_id");
-    
-    const privateUserIds = privateUsers.map(u => u._id);
-    const excludedUserIds = [...privateUserIds, ...blockedUserIds];
+    const excludedAuthorIds = await getExcludedAuthorIdsForFeed(req.userId);
 
     const posts = await Post.find({
       isArchived: { $ne: true },
-      author: { $nin: excludedUserIds },
+      author: { $nin: excludedAuthorIds },
       $or: [
         { scheduledPublishTime: { $exists: false } },
         { scheduledPublishTime: null },
@@ -392,12 +439,14 @@ export const getAllPosts = async (req, res) => {
       ]
     })
       .sort({ createdAt: -1 })
-      .populate("author", "name userName profileImage.url profileImage.public_id isVerified")
-      .populate("comments.author", "name userName profileImage.url profileImage.public_id isVerified")
-      .populate("taggedUsers.user", "userName profileImage.url")
+      .populate("author", "name userName profileImage isVerified followers accountType professionalType")
+      .populate("comments.author", "name userName profileImage isVerified")
+      .populate("taggedUsers.user", "userName profileImage")
       .lean();
 
-    return res.status(200).json({ success: true, error: false, posts });
+    const validPosts = posts.filter(p => p && p.author);
+
+    return res.status(200).json({ success: true, error: false, posts: validPosts });
   } catch (error) {
     return res.status(500).json({ message: `getAllPosts error: ${error.message}` });
   }
@@ -408,32 +457,25 @@ export const getRankedFeed = async (req, res) => {
   try {
     const { mode = "for-you" } = req.query;
     const currentUser = await User.findById(req.userId);
-    const blockedUserIds = await getBlockedUserIds(req.userId);
-
-    const privateUsers = await User.find({
-      accountType: "private",
-      _id: { $ne: req.userId },
-      followers: { $ne: req.userId }
-    }).select("_id");
-    
-    const privateUserIds = privateUsers.map(u => u._id);
-    const excludedUserIds = [...privateUserIds, ...blockedUserIds];
+    const excludedAuthorIds = await getExcludedAuthorIdsForFeed(req.userId);
 
     const posts = await Post.find({
       isArchived: { $ne: true },
-      author: { $nin: excludedUserIds },
+      author: { $nin: excludedAuthorIds },
       $or: [
         { scheduledPublishTime: { $exists: false } },
         { scheduledPublishTime: null },
         { scheduledPublishTime: { $lte: new Date() } }
       ]
     })
-      .populate("author", "name userName profileImage.url profileImage.public_id isVerified")
-      .populate("comments.author", "name userName profileImage.url profileImage.public_id isVerified")
-      .populate("taggedUsers.user", "userName profileImage.url")
+      .sort({ createdAt: -1 })
+      .populate("author", "name userName profileImage isVerified followers accountType professionalType")
+      .populate("comments.author", "name userName profileImage isVerified")
+      .populate("taggedUsers.user", "userName profileImage")
       .lean();
 
-    const rankedPosts = rankPostsForUser(posts, currentUser, mode);
+    const validPosts = posts.filter(p => p && p.author);
+    const rankedPosts = rankPostsForUser(validPosts, currentUser, mode);
 
     return res.status(200).json({
       success: true,
@@ -482,7 +524,7 @@ export const likePost = async (req, res) => {
       post = await Post.findOneAndUpdate(
         { _id: postId },
         { $pull: { likes: userId } },
-        { new: true }
+        { returnDocument: 'after' }
       );
 
       if (post) {
@@ -499,7 +541,7 @@ export const likePost = async (req, res) => {
       post = await Post.findOneAndUpdate(
         { _id: postId },
         { $addToSet: { likes: userId } },
-        { new: true }
+        { returnDocument: 'after' }
       );
 
       const existingNotif = await Notification.findOne({
@@ -566,7 +608,7 @@ export const commentPost = async (req, res) => {
     const post = await Post.findByIdAndUpdate(
       postId,
       { $push: { comments: commentObj } },
-      { new: true }
+      { returnDocument: 'after' }
     )
       .populate("author", "name userName profileImage.url profileImage.public_id isVerified")
       .populate("comments.author", "name userName profileImage.url profileImage.public_id isVerified");
@@ -602,14 +644,14 @@ export const savePost = async (req, res) => {
       user = await User.findByIdAndUpdate(
         userId,
         { $pull: { savedPosts: postId } },
-        { new: true }
+        { returnDocument: 'after' }
       );
       await Post.findByIdAndUpdate(postId, { $inc: { savedCount: -1 } });
     } else {
       user = await User.findByIdAndUpdate(
         userId,
         { $addToSet: { savedPosts: postId } },
-        { new: true }
+        { returnDocument: 'after' }
       );
       await Post.findByIdAndUpdate(postId, { $inc: { savedCount: 1 } });
     }
@@ -623,6 +665,31 @@ export const savePost = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: `save error: ${error.message}` });
+  }
+};
+
+// 11b. Get Saved Posts Controller
+export const getSavedPosts = async (req, res) => {
+  try {
+    const user = await User.findById(req.userId).populate({
+      path: "savedPosts",
+      populate: [
+        { path: "author", select: "name userName profileImage isVerified" },
+        { path: "comments.author", select: "userName profileImage isVerified" },
+      ],
+    });
+
+    return res.status(200).json({
+      success: true,
+      error: false,
+      savedPosts: user?.savedPosts || [],
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `getSavedPosts error: ${error.message}`,
+    });
   }
 };
 
@@ -690,7 +757,7 @@ export const deleteComment = async (req, res) => {
     const post = await Post.findByIdAndUpdate(
       postId,
       { $pull: { comments: { _id: commentId } } },
-      { new: true }
+      { returnDocument: 'after' }
     ).populate("author", "name userName profileImage.url profileImage.public_id isVerified")
      .populate("comments.author", "name userName profileImage.url profileImage.public_id isVerified");
 
@@ -731,7 +798,7 @@ export const editComment = async (req, res) => {
     const post = await Post.findOneAndUpdate(
       { _id: postId, "comments._id": commentId },
       { $set: { "comments.$.message": message } },
-      { new: true }
+      { returnDocument: 'after' }
     )
       .populate("author", "name userName profileImage.url profileImage.public_id isVerified")
       .populate("comments.author", "name userName profileImage.url profileImage.public_id isVerified");

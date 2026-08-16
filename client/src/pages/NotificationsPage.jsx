@@ -4,9 +4,10 @@ import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useDispatch } from "react-redux";
 import moment from "moment";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import dp from "../assets/dp3.png";
 import FollowButton from "../components/FollowButton";
+import Navbar from "../components/Navbar";
 import api from "../lib/axios";
 import { getSocket } from "../lib/socket";
 import { triggerHaptic } from "../lib/interactiveEffects";
@@ -47,7 +48,7 @@ export const NotificationsPage = () => {
         setHasMore(res.data.hasMore !== false && fetched.length === 30);
       }
     } catch (e) {
-      toast.error("Failed to load notifications.");
+      snackbar.error("Failed to load notifications.");
     } finally {
       setLoading(false);
     }
@@ -111,11 +112,11 @@ export const NotificationsPage = () => {
     try {
       const res = await api.post(`/user/follow-request/${targetUserId}`, { action });
       if (res.data.success) {
-        toast.success(action === "accept" ? "Follow request accepted" : "Follow request declined");
+        snackbar.success(action === "accept" ? "Follow request accepted" : "Follow request declined");
         setRequests((prev) => prev.filter((u) => u._id !== targetUserId));
       }
     } catch (e) {
-      toast.error("Action failed.");
+      snackbar.error("Action failed.");
     }
   };
 
@@ -124,9 +125,9 @@ export const NotificationsPage = () => {
     setSettings(newSettings);
     try {
       await api.put("/user/notification-preferences", newSettings);
-      toast.success("Preferences updated.");
+      snackbar.success("Preferences updated.");
     } catch {
-      toast.error("Failed to update preferences.");
+      snackbar.error("Failed to update preferences.");
     }
   };
 
@@ -186,7 +187,7 @@ export const NotificationsPage = () => {
               animate={{ opacity: 1, y: 0 }}
               className="bg-surface border border-rose-500/30 rounded-3xl p-5 space-y-4 shadow-xl text-left relative overflow-hidden"
             >
-              <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-rose-500 to-transparent animate-instagram-light-bar" />
+              <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-rose-500 to-transparent animate-vybe-light-bar" />
 
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -336,6 +337,9 @@ export const NotificationsPage = () => {
           </div>
         </div>
       )}
+
+      {/* Mobile Bottom Navigation */}
+      <Navbar />
     </div>
   );
 };
@@ -353,7 +357,7 @@ const NotificationItem = ({ notif, navigate, isFresh }) => {
       }`}
     >
       {isFresh && (
-        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-rose-500 to-transparent animate-instagram-light-bar" />
+        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-rose-500 to-transparent animate-vybe-light-bar" />
       )}
 
       <div className="flex items-center gap-3.5 flex-1 min-w-0">
@@ -386,6 +390,7 @@ const NotificationItem = ({ notif, navigate, isFresh }) => {
             {notif.type === "comment" && `commented: "${notif.commentText}"`}
             {notif.type === "follow" && "started following you."}
             {notif.type === "mention" && "mentioned you in a caption."}
+            {notif.type === "contact_request" && "requested your contact phone number."}
             {notif.type === "call" && `called you: ${notif.commentText || "Voice/Video Call"}`}
           </p>
           <p className="text-[10px] text-text-muted">{moment(notif.createdAt).fromNow()}</p>
@@ -397,6 +402,18 @@ const NotificationItem = ({ notif, navigate, isFresh }) => {
           targetUserId={sender._id}
           tailwind="px-4 py-1.5 bg-rose-600 text-white font-bold text-xs rounded-full shadow shrink-0 ml-3 interactive-tap"
         />
+      ) : notif.type === "contact_request" ? (
+        <button
+          onClick={() => {
+            triggerHaptic("light");
+            navigate("/messages", { state: { targetUser: sender } });
+          }}
+          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-rose-500 hover:opacity-90 text-white font-bold text-xs rounded-full shadow shrink-0 ml-3 interactive-tap cursor-pointer"
+          title="Open Chat to reply or share contact"
+        >
+          <MessageSquare className="w-3.5 h-3.5" />
+          <span>Chat</span>
+        </button>
       ) : notif.type === "call" ? (
         <div className="p-2 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-full shrink-0 ml-3">
           <Phone className="w-4 h-4" />

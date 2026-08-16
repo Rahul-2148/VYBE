@@ -23,7 +23,7 @@ export const NotificationLightBar = () => {
   const { userData } = useSelector((s) => s.user);
   const currentUserId = userData?.user?._id || userData?._id;
 
-  const [activeToast, setActiveToast] = useState(null);
+  const [activeBanner, setActiveBanner] = useState(null);
 
   // Fetch initial unread notification count
   useEffect(() => {
@@ -59,11 +59,11 @@ export const NotificationLightBar = () => {
       triggerHaptic("notification");
 
       dispatch(incrementUnreadNotifications(notif));
-      setActiveToast(notif);
+      setActiveBanner(notif);
 
-      // Auto-hide toast after 4.5 seconds
+      // Auto-hide banner after 4.5 seconds
       setTimeout(() => {
-        setActiveToast((current) => (current?._id === notif._id ? null : current));
+        setActiveBanner((current) => (current?._id === notif._id ? null : current));
         dispatch(dismissLightBar());
       }, 4500);
     };
@@ -75,70 +75,82 @@ export const NotificationLightBar = () => {
       triggerHaptic("light");
     };
 
-    socket.on("notification-received", handleNotification);
-    socket.on("notification:received", handleNotification);
     socket.on("new-notification", handleNotification);
-    socket.on("receive-message", handleMessage);
-    socket.on("message:received", handleMessage);
+    socket.on("receiveMessage", handleMessage);
 
     return () => {
-      socket.off("notification-received", handleNotification);
-      socket.off("notification:received", handleNotification);
       socket.off("new-notification", handleNotification);
-      socket.off("receive-message", handleMessage);
-      socket.off("message:received", handleMessage);
+      socket.off("receiveMessage", handleMessage);
     };
   }, [currentUserId, dispatch, location.pathname]);
+
+  // Fallback to latestNotification from Redux
+  useEffect(() => {
+    if (latestNotification && lightBarActive) {
+      setActiveBanner(latestNotification);
+      const timer = setTimeout(() => {
+        setActiveBanner((current) => (current?._id === latestNotification._id ? null : current));
+        dispatch(dismissLightBar());
+      }, 4500);
+      return () => clearTimeout(timer);
+    }
+  }, [latestNotification, lightBarActive, dispatch]);
+
+  const getMessage = (notif) => {
+    if (!notif) return "";
+    const sender = notif.sender?.userName || notif.author?.userName || "Someone";
+    switch (notif.type) {
+      case "like":
+        return `${sender} liked your post.`;
+      case "comment":
+        return `${sender} commented on your post.`;
+      case "follow":
+        return `${sender} started following you.`;
+      case "follow_request":
+        return `${sender} sent you a follow request.`;
+      case "mention":
+        return `${sender} mentioned you in a comment.`;
+      default:
+        return notif.message || `${sender} interacted with you.`;
+    }
+  };
 
   const getIcon = (type) => {
     switch (type) {
       case "like":
-        return <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />;
+        return <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" />;
       case "comment":
-        return <MessageSquare className="w-3.5 h-3.5 fill-sky-500 text-sky-500" />;
+        return <MessageCircle className="w-3.5 h-3.5 text-blue-500" />;
       case "follow":
       case "follow_request":
-        return <UserPlus className="w-3.5 h-3.5 text-purple-400" />;
+        return <UserPlus className="w-3.5 h-3.5 text-emerald-500" />;
+      case "mention":
+        return <AtSign className="w-3.5 h-3.5 text-purple-500" />;
       default:
-        return <Sparkles className="w-3.5 h-3.5 text-pink-400" />;
+        return <Bell className="w-3.5 h-3.5 text-amber-500" />;
     }
   };
 
-  const getMessage = (notif) => {
-    if (notif.message) return notif.message;
-    const authorName = notif.sender?.userName || notif.author?.userName || "Someone";
-    switch (notif.type) {
-      case "like":
-        return `${authorName} liked your post`;
-      case "comment":
-        return `${authorName} commented on your post`;
-      case "follow":
-        return `${authorName} started following you`;
-      default:
-        return `${authorName} interacted with your content`;
-    }
-  };
-
-  const avatar = activeToast?.sender?.profileImage?.url || activeToast?.author?.profileImage?.url || dp;
-  const senderName = activeToast?.sender?.userName || activeToast?.author?.userName || "VYBE";
+  const avatar = activeBanner?.sender?.profileImage?.url || activeBanner?.author?.profileImage?.url || dp;
+  const senderName = activeBanner?.sender?.userName || activeBanner?.author?.userName || "VYBE";
 
   return (
     <AnimatePresence>
-      {activeToast && (
+      {activeBanner && (
         <motion.div
           initial={{ opacity: 0, y: -60, scale: 0.95 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -40, scale: 0.95 }}
           transition={{ type: "spring", stiffness: 400, damping: 28 }}
           onClick={() => {
-            setActiveToast(null);
+            setActiveBanner(null);
             navigate("/notifications");
           }}
           className="fixed top-5 left-1/2 -translate-x-1/2 z-[1000] w-[92%] max-w-md bg-surface/90 dark:bg-zinc-900/90 backdrop-blur-2xl border border-border/80 rounded-2xl shadow-[0_12px_36px_rgba(0,0,0,0.25)] p-3 cursor-pointer overflow-hidden group select-none"
         >
-          {/* Animated Instagram Light Bar (Bottom glowing sweep) */}
+          {/* Animated Light Bar (Bottom glowing sweep) */}
           <div className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-border/40 overflow-hidden">
-            <div className="h-full w-full bg-gradient-to-r from-pink-500 via-rose-500 to-amber-400 animate-instagram-light-bar shadow-[0_0_12px_rgba(244,63,94,0.9)]" />
+            <div className="h-full w-full bg-gradient-to-r from-pink-500 via-rose-500 to-amber-400 animate-vybe-light-bar shadow-[0_0_12px_rgba(244,63,94,0.9)]" />
           </div>
 
           <div className="flex items-center gap-3">
@@ -152,7 +164,7 @@ export const NotificationLightBar = () => {
                 />
               </div>
               <div className="absolute -bottom-1 -right-1 p-1 bg-surface rounded-full shadow-md border border-border">
-                {getIcon(activeToast.type)}
+                {getIcon(activeBanner.type)}
               </div>
             </div>
 
@@ -168,7 +180,7 @@ export const NotificationLightBar = () => {
                 </span>
               </div>
               <p className="text-xs text-text-secondary truncate mt-0.5">
-                {getMessage(activeToast)}
+                {getMessage(activeBanner)}
               </p>
             </div>
 
@@ -177,7 +189,7 @@ export const NotificationLightBar = () => {
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                setActiveToast(null);
+                setActiveBanner(null);
               }}
               className="p-1.5 text-text-muted hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer"
             >

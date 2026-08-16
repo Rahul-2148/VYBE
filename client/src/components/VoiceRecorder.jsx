@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Mic, Square, Send, Trash2, Play, Pause, ChevronLeft, ChevronRight, X } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 
 export const VoiceRecorder = ({ onSendVoiceNote, onCancel }) => {
   const [isRecording, setIsRecording] = useState(false);
@@ -101,7 +101,7 @@ export const VoiceRecorder = ({ onSendVoiceNote, onCancel }) => {
       setupVisualizer(stream);
     } catch (e) {
       console.warn("VoiceRecorder: startRecording failed", e);
-      toast.error("Microphone access denied or error starting recording.");
+      snackbar.error("Microphone access denied or error starting recording.");
       onCancel();
     }
   }, [onCancel]);
@@ -260,7 +260,7 @@ export const VoiceRecorder = ({ onSendVoiceNote, onCancel }) => {
         setIsDragging(false);
         setDragOffset(0);
         handleDiscard();
-        toast.error("Recording discarded 🗑️");
+        snackbar.error("Recording discarded 🗑️");
       }
     } 
     // Drag right: Send
@@ -273,7 +273,7 @@ export const VoiceRecorder = ({ onSendVoiceNote, onCancel }) => {
         setIsDragging(false);
         setDragOffset(0);
         handleSend();
-        toast.success("Voice note sent! 🚀");
+        snackbar.success("Voice note sent! 🚀");
       }
     }
   };
@@ -372,13 +372,13 @@ export const VoiceRecorder = ({ onSendVoiceNote, onCancel }) => {
           <button
             type="button"
             onClick={togglePreviewPlayback}
-            className="p-2 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 text-text transition cursor-pointer shrink-0 shadow-lg hover:scale-105 active:scale-95"
+            className="p-2 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 text-white transition cursor-pointer shrink-0 shadow-lg hover:scale-105 active:scale-95"
             title={isPlayingPreview ? "Pause preview" : "Play preview"}
           >
             {isPlayingPreview ? (
-              <Pause className="w-3.5 h-3.5 fill-white text-text" />
+              <Pause className="w-3.5 h-3.5 fill-white text-white" />
             ) : (
-              <Play className="w-3.5 h-3.5 fill-white text-text ml-0.5" />
+              <Play className="w-3.5 h-3.5 fill-white text-white ml-0.5" />
             )}
           </button>
 
@@ -402,13 +402,14 @@ export const VoiceRecorder = ({ onSendVoiceNote, onCancel }) => {
       <button
         type="button"
         onClick={handleSend}
-        className="p-2.5 rounded-full bg-blue-600 text-text shadow-lg hover:bg-blue-500 hover:scale-105 active:scale-95 transition cursor-pointer shrink-0 z-10"
+        className="p-2.5 rounded-full bg-primary text-white shadow-lg hover:bg-primary-hover hover:scale-105 active:scale-95 transition cursor-pointer shrink-0 z-10"
         title="Send voice note"
       >
-        <Send className="w-4 h-4 fill-white text-text" />
+        <Send className="w-4 h-4 fill-white text-white" />
       </button>
     </div>
   );
 };
 
 export default VoiceRecorder;
+

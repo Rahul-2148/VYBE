@@ -202,6 +202,13 @@ const storySchema = new mongoose.Schema(
     isArchived: {
       type: Boolean,
       default: false,
+      index: true,
+    },
+
+    archivedAt: {
+      type: Date,
+      default: null,
+      index: true,
     },
 
     expiresAt: {

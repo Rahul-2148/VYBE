@@ -1,16 +1,20 @@
 // music.controller.js
-// Universal Music Controller fetching 100% REAL official songs & audio streams via Apple Music / iTunes Global Engine
+// Universal Dynamic Music Controller fetching 100% REAL official songs & audio streams via Apple Music / iTunes Global Engine
+// Multi-Query Aggregator providing 60-100+ Chart-Topping Hits per Category dynamically updated for any year
 
-// In-memory cache to make music search instantaneous (5 mins TTL)
+// In-memory cache to make music search instantaneous (10 mins TTL)
 const cache = new Map();
-const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_TTL_MS = 10 * 60 * 1000;
+
+// Dynamic current year helper to ensure queries are evergreen
+const getCurrentYear = () => new Date().getFullYear();
 
 const formatTrack = (item) => {
   if (!item || !item.previewUrl) return null;
 
-  // Upgrade cover art from 100x100 to 600x600 for HD album artwork
+  // Upgrade cover art from 100x100 to 1000x1000 for Ultra HD album artwork
   const highResCover = item.artworkUrl100
-    ? item.artworkUrl100.replace("100x100bb.jpg", "600x600bb.jpg")
+    ? item.artworkUrl100.replace("100x100bb.jpg", "1000x1000bb.jpg")
     : item.artworkUrl60 || "";
 
   return {
@@ -27,7 +31,7 @@ const formatTrack = (item) => {
   };
 };
 
-const queryAppleMusic = async (searchTerm, limit = 30) => {
+const queryAppleMusic = async (searchTerm, limit = 50) => {
   const cacheKey = `${searchTerm.toLowerCase().trim()}_${limit}`;
   const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
@@ -60,15 +64,39 @@ const queryAppleMusic = async (searchTerm, limit = 30) => {
   }
 };
 
+// Multi-Query Aggregator to fetch large volume (60-100+ songs) deduplicated
+const queryAppleMusicMulti = async (queries = [], limitPerQuery = 30) => {
+  try {
+    const results = await Promise.all(
+      queries.map((q) => queryAppleMusic(q, limitPerQuery))
+    );
+    const seen = new Set();
+    const blended = [];
+    for (const list of results) {
+      for (const track of list) {
+        const key = `${track.title.toLowerCase().trim()}_${track.artist.toLowerCase().trim()}`;
+        if (!seen.has(key) && track.audioUrl) {
+          seen.add(key);
+          blended.push(track);
+        }
+      }
+    }
+    return blended;
+  } catch (err) {
+    console.error("[MusicController] queryAppleMusicMulti failed:", err.message);
+    return [];
+  }
+};
+
 // 1. Live Global Search for Any Song in the World
 export const searchMusic = async (req, res) => {
   try {
-    const { q, limit = 30 } = req.query;
+    const { q, limit = 60 } = req.query;
     if (!q || !q.trim()) {
       return res.status(400).json({ success: false, message: "Query is required" });
     }
 
-    const tracks = await queryAppleMusic(q.trim(), Math.min(50, Number(limit) || 30));
+    const tracks = await queryAppleMusic(q.trim(), Math.min(100, Number(limit) || 60));
     return res.status(200).json({
       success: true,
       query: q.trim(),
@@ -80,27 +108,108 @@ export const searchMusic = async (req, res) => {
   }
 };
 
-// 2. Curated Genre / Category Queries with Real Official Songs
-const CATEGORY_SEARCH_MAP = {
-  devotional: "Shree Ram Siya Ram",
-  party: "Brown Munde",
-  romantic: "Arijit Singh",
-  gym: "Gym Phonk",
-  lofi: "Lofi Chill Beats",
-  bollywood: "Bollywood Hits",
-  pop: "The Weeknd",
-  sad: "Channa Mereya",
-  travel: "Wanderlust",
-  trending: "Top Hits 2024",
+// 2. Curated Genre / Category Queries with Dynamic Evergreen Terms
+const getCategorySearchMap = () => {
+  const currentYear = getCurrentYear();
+  return {
+    devotional: [
+      "Shree Ram Siya Ram",
+      "Hanuman Chalisa",
+      "Shiv Tandav",
+      "Krishna Bhajan",
+      "Ganesh Vandana",
+      "Aarti Kunj Bihari Ki",
+    ],
+    party: [
+      "Brown Munde",
+      "Tauba Tauba",
+      "Diljit Dosanjh",
+      "Karan Aujla",
+      "Sidhu Moose Wala",
+      "Badshah",
+      "Yo Yo Honey Singh",
+    ],
+    romantic: [
+      "Arijit Singh",
+      "Atif Aslam",
+      "Kesariya",
+      "Tum Hi Ho",
+      "Armaan Malik",
+      "Ed Sheeran",
+      "Jubin Nautiyal",
+    ],
+    gym: [
+      "Gym Phonk",
+      "Gigachad Phonk",
+      "Hardstyle Workout",
+      "Brazilian Phonk",
+      "NEFFEX",
+      "Tokyo Drift",
+    ],
+    lofi: [
+      "Lofi Chill Beats",
+      "Anuv Jain",
+      "Prateek Kuhad",
+      "Zaeden",
+      "Midnight Lofi",
+      "Aesthetic Lofi Beats",
+    ],
+    bollywood: [
+      `Bollywood Hits ${currentYear}`,
+      "Pritam",
+      "Arijit Singh",
+      "Jawan",
+      "Animal",
+      "Kabir Singh",
+      "Stree 2",
+      "Shreya Ghoshal",
+    ],
+    pop: [
+      `Top Pop Hits ${currentYear}`,
+      "The Weeknd",
+      "Taylor Swift",
+      "Dua Lipa",
+      "Bruno Mars",
+      "Billie Eilish",
+      "Justin Bieber",
+    ],
+    sad: [
+      "Channa Mereya",
+      "Arcade",
+      "Let Me Down Slowly",
+      "Husn",
+      "Kabira",
+      "Hamari Adhuri Kahani",
+    ],
+    travel: [
+      "Ilahi",
+      "Safarnama",
+      "Wanderlust",
+      "Electric Feel",
+      "Matargashti",
+      "Coldplay",
+      "Dil Chahta Hai",
+    ],
+    trending: [
+      `Top Hits ${currentYear}`,
+      `Trending Songs ${currentYear}`,
+      "Arijit Singh",
+      "Diljit Dosanjh",
+      "The Weeknd",
+      "Badshah",
+      "Karan Aujla",
+    ],
+  };
 };
 
 export const getCategoryMusic = async (req, res) => {
   try {
     const { category } = req.params;
     const key = (category || "").toLowerCase().trim();
-    const query = CATEGORY_SEARCH_MAP[key] || `${category} Hits`;
+    const categoryMap = getCategorySearchMap();
+    const queries = categoryMap[key] || [category, `${category} Hits`];
 
-    const tracks = await queryAppleMusic(query, 30);
+    const tracks = await queryAppleMusicMulti(queries, 25);
     return res.status(200).json({
       success: true,
       category,
@@ -117,57 +226,111 @@ export const getAIRecommendedMusic = async (req, res) => {
   try {
     const { caption = "", mediaName = "", theme = "", tags = "" } = req.query;
     const combined = `${caption} ${mediaName} ${theme} ${tags}`.toLowerCase().trim();
+    const currentYear = getCurrentYear();
 
     let matchedCategory = "Trending";
     let matchedMoodLabel = "Trending & Viral Hits";
     let matchedIcon = "✨";
-    let searchQuery = "Top Hits 2024";
+    let queries = [
+      `Top Hits ${currentYear}`,
+      `Trending Songs ${currentYear}`,
+      "Arijit Singh",
+      "Diljit Dosanjh",
+      "The Weeknd",
+      "Badshah",
+      "Karan Aujla",
+    ];
 
     if (/god|bhagwan|mandir|temple|bhakti|puja|pooja|ram|shree ram|shiva|shiv|mahadev|krishna|ganesh|hanuman|peace|prayer|spiritual|aarti|darshan|blessing|diwali|navratri/.test(combined)) {
       matchedCategory = "Devotional";
       matchedMoodLabel = "Devotional & Spiritual";
       matchedIcon = "🕉️";
-      searchQuery = "Shree Ram Siya Ram";
+      queries = [
+        "Shree Ram Siya Ram",
+        "Hanuman Chalisa",
+        "Shiv Tandav",
+        "Krishna Bhajan",
+        "Ganesh Vandana",
+      ];
     } else if (/party|club|night|dance|dj|drinks|celebration|birthday|friends|weekend|vibing|hype|rave|bhangra|disco/.test(combined)) {
       matchedCategory = "Party & Punjabi";
       matchedMoodLabel = "Party & Punjabi Energy";
       matchedIcon = "🍾";
-      searchQuery = "Brown Munde";
+      queries = [
+        "Brown Munde",
+        "Tauba Tauba",
+        "Diljit Dosanjh",
+        "Karan Aujla",
+        "Sidhu Moose Wala",
+        "Badshah",
+      ];
     } else if (/gym|workout|fitness|muscle|gains|training|beast|chest|deadlift|squat|run|cardio|grind|discipline|phonk|hardstyle/.test(combined)) {
       matchedCategory = "Gym & Phonk";
       matchedMoodLabel = "Gym & Phonk Hype";
       matchedIcon = "⚡";
-      searchQuery = "Gym Phonk";
+      queries = [
+        "Gym Phonk",
+        "Gigachad Phonk",
+        "Hardstyle Workout",
+        "Brazilian Phonk",
+        "NEFFEX",
+      ];
     } else if (/love|couple|romantic|forever|date|bae|kiss|heart|ishq|pyar|together|soulmate|valentine|wedding|anniversary/.test(combined)) {
       matchedCategory = "Romantic";
       matchedMoodLabel = "Romantic & Love";
       matchedIcon = "💖";
-      searchQuery = "Arijit Singh";
+      queries = [
+        "Arijit Singh",
+        "Atif Aslam",
+        "Kesariya",
+        "Tum Hi Ho",
+        "Armaan Malik",
+        "Ed Sheeran",
+      ];
     } else if (/travel|wanderlust|trip|mountain|beach|sunset|sunrise|vacation|explore|nature|roadtrip|sky|hills|sea|flight/.test(combined)) {
       matchedCategory = "Travel & Nature";
       matchedMoodLabel = "Travel & Wanderlust";
       matchedIcon = "✈️";
-      searchQuery = "Wanderlust";
+      queries = [
+        "Ilahi",
+        "Safarnama",
+        "Wanderlust",
+        "Electric Feel",
+        "Matargashti",
+        "Coldplay",
+      ];
     } else if (/sad|alone|broken|heartbreak|miss|crying|pain|tears|lost|bye|depressed|lonely/.test(combined)) {
       matchedCategory = "Sad & Acoustic";
       matchedMoodLabel = "Sad & Acoustic";
       matchedIcon = "💔";
-      searchQuery = "Channa Mereya";
+      queries = [
+        "Channa Mereya",
+        "Arcade",
+        "Let Me Down Slowly",
+        "Husn",
+        "Kabira",
+      ];
     } else if (/coffee|cafe|tea|chai|food|cooking|brunch|relax|aesthetic|study|peace/.test(combined)) {
       matchedCategory = "Lofi & Chill";
       matchedMoodLabel = "Lofi & Chill Vibes";
       matchedIcon = "☕";
-      searchQuery = "Lofi Chill Beats";
+      queries = [
+        "Lofi Chill Beats",
+        "Anuv Jain",
+        "Prateek Kuhad",
+        "Zaeden",
+        "Midnight Lofi",
+      ];
     }
 
-    const tracks = await queryAppleMusic(searchQuery, 25);
+    const tracks = await queryAppleMusicMulti(queries, 25);
     return res.status(200).json({
       success: true,
       aiInfo: {
         category: matchedCategory,
         label: matchedMoodLabel,
         icon: matchedIcon,
-        detectedQuery: searchQuery,
+        detectedQuery: queries[0],
       },
       tracks,
     });

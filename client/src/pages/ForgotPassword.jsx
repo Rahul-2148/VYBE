@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import { RxCross2 } from "react-icons/rx";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ClipLoader } from "react-spinners";
-import logo2 from "../assets/logo2.png";
+import logo from "../assets/logo.png";
 import api from "../lib/axios";
 import { useTheme } from "../lib/themeContext";
 import VybeInput from "../components/VybeInput";
@@ -35,12 +35,12 @@ const ForgotPassword = () => {
         setError("");
 
         const res = await api.post("/auth/verifyResetToken", { token });
-        toast.success(res.data.message || "Reset link verified.");
+        snackbar.success(res.data.message || "Reset link verified.");
         setStep(3);
       } catch (error) {
         const msg = error.response?.data?.message || "Invalid or expired reset link";
         setError(msg);
-        toast.error(msg);
+        snackbar.error(msg);
         navigate(isAddAccountMode ? "/forgot-password?addAccount=true" : "/forgot-password");
       } finally {
         setIsLoading(false);
@@ -57,11 +57,11 @@ const ForgotPassword = () => {
     setError("");
     try {
       const result = await api.post("/auth/sendOtp", { email });
-      toast.success(result.data.message || "Verification code and link sent!");
+      snackbar.success(result.data.message || "Verification code and link sent!");
       setStep(2);
     } catch (error) {
       const msg = error.response?.data?.message || "Failed to send verification email.";
-      toast.error(msg);
+      snackbar.error(msg);
       setError(msg);
     } finally {
       setIsLoading(false);
@@ -72,18 +72,18 @@ const ForgotPassword = () => {
   const handleStep2 = async (e) => {
     e.preventDefault();
     if (otp.length !== 6) {
-      toast.error("Please enter the 6-digit OTP code");
+      snackbar.error("Please enter the 6-digit OTP code");
       return;
     }
     setIsLoading(true);
     setError("");
     try {
       const result = await api.post("/auth/verifyOtp", { email, otp });
-      toast.success(result.data.message || "OTP verified successfully!");
+      snackbar.success(result.data.message || "OTP verified successfully!");
       setStep(3);
     } catch (error) {
       const msg = error.response?.data?.message || "Invalid or expired OTP.";
-      toast.error(msg);
+      snackbar.error(msg);
       setError(msg);
     } finally {
       setIsLoading(false);
@@ -95,7 +95,7 @@ const ForgotPassword = () => {
     e.preventDefault();
     if (newPass !== confirmPass) {
       setError("Passwords do not match!");
-      toast.error("Passwords do not match!");
+      snackbar.error("Passwords do not match!");
       return;
     }
     setError("");
@@ -106,11 +106,11 @@ const ForgotPassword = () => {
         : { email, password: newPass };
 
       const result = await api.post("/auth/resetPassword", payload);
-      toast.success(result.data.message || "Password reset successfully!");
+      snackbar.success(result.data.message || "Password reset successfully!");
       setTimeout(() => navigate(isAddAccountMode ? "/signin?addAccount=true" : "/signin"), 1500);
     } catch (error) {
       const msg = error.response?.data?.message || "Failed to reset password.";
-      toast.error(msg);
+      snackbar.error(msg);
       setError(msg);
     } finally {
       setIsLoading(false);
@@ -118,32 +118,36 @@ const ForgotPassword = () => {
   };
 
   return (
-    <div className="w-full min-h-screen bg-bg text-text flex flex-col justify-center items-center p-4 selection:bg-rose-500 selection:text-text">
-      <div className="w-full max-w-[440px] bg-surface-inset/90 border border-border/80 rounded-3xl p-8 shadow-2xl flex flex-col items-center space-y-6 relative overflow-hidden">
-        <div className="absolute inset-0 bg-purple-500/5 blur-3xl rounded-full" />
+    <div className="relative w-full min-h-screen bg-bg text-text flex flex-col justify-center items-center p-4 sm:p-6 overflow-x-hidden selection:bg-rose-500 selection:text-white">
+      {/* Dynamic Ambient Background Glow */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-40 -left-40 w-96 h-96 bg-rose-500/10 rounded-full blur-3xl" />
+        <div className="absolute top-1/2 -right-40 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl" />
+      </div>
+
+      <div className="relative z-10 w-full max-w-[440px] bg-surface/90 border border-border rounded-3xl p-8 shadow-2xl backdrop-blur-2xl flex flex-col items-center space-y-6">
         
         {/* Brand Header */}
-        <div className="flex flex-col items-center gap-1.5 text-center relative z-10">
+        <div className="flex flex-col items-center gap-2 text-center">
           <img
-            src={logo2}
+            src={logo}
             alt="VYBE"
-            className="h-10 object-contain cursor-pointer"
+            className="h-9 w-auto object-contain cursor-pointer transition-transform hover:scale-105 theme-logo-adaptive"
             onClick={() => navigate(isAddAccountMode ? "/signin?addAccount=true" : "/signin")}
-            style={{ filter: themeCtx.resolvedTheme === "dark" ? "none" : "invert(1)" }}
           />
           <h2 className="text-xl font-bold tracking-tight text-text">
             {step === 3 ? "Create New Password" : "Trouble Logging In?"}
           </h2>
-          <p className="text-xs text-text-secondary max-w-xs font-medium">
+          <p className="text-xs text-text-secondary max-w-xs font-medium leading-relaxed">
             {step === 1 && "Enter your email address and we'll send you an OTP code and secure reset link."}
             {step === 2 && `Enter the 6-digit confirmation code we sent to ${email}`}
-            {step === 3 && "Secure your account with a new password."}
+            {step === 3 && "Secure your account with a strong new password."}
           </p>
         </div>
 
         {/* STEP 1 — Enter Email */}
         {!token && step === 1 && (
-          <form onSubmit={handleStep1} className="w-full space-y-5 relative z-10">
+          <form onSubmit={handleStep1} className="w-full space-y-5">
             <VybeInput
               id="email"
               label="Email Address"
@@ -151,62 +155,64 @@ const ForgotPassword = () => {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
+              autoFocus
             />
 
             {error && (
-              <div className="w-full flex items-center justify-between p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs">
-                <span>{error}</span>
-                <RxCross2 className="cursor-pointer hover:text-text" size={16} onClick={() => setError("")} />
+              <div className="w-full flex items-center justify-between p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs animate-in fade-in duration-200">
+                <span className="font-medium">{error}</span>
+                <RxCross2 className="cursor-pointer hover:text-rose-600 transition" size={16} onClick={() => setError("")} />
               </div>
             )}
 
             <button
               type="submit"
               disabled={isLoading || !email.trim()}
-              className="w-full h-11 bg-gradient-to-r from-rose-600 via-pink-600 to-purple-600 hover:opacity-95 text-text font-semibold text-sm rounded-xl transition shadow-lg flex items-center justify-center disabled:opacity-50 cursor-pointer"
+              className="w-full h-12 bg-gradient-to-r from-rose-500 via-pink-500 to-purple-600 hover:from-rose-600 hover:to-purple-700 text-white font-bold text-sm rounded-xl shadow-md hover:shadow-lg transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center disabled:opacity-50 cursor-pointer"
             >
-              {isLoading ? <ClipLoader color="white" size={20} /> : "Reset Password"}
+              {isLoading ? <ClipLoader color="#ffffff" size={20} /> : "Send Reset Code & Link"}
             </button>
           </form>
         )}
 
         {/* STEP 2 — Enter OTP */}
         {!token && step === 2 && (
-          <form onSubmit={handleStep2} className="w-full space-y-5 relative z-10">
+          <form onSubmit={handleStep2} className="w-full space-y-5">
             <VybeInput
               id="otp"
-              label="Verification Code (OTP)"
+              label="6-Digit Verification Code (OTP)"
               type="text"
               value={otp}
               onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
               required
+              autoFocus
             />
 
             {error && (
-              <div className="w-full flex items-center justify-between p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs">
-                <span>{error}</span>
-                <RxCross2 className="cursor-pointer hover:text-text" size={16} onClick={() => setError("")} />
+              <div className="w-full flex items-center justify-between p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs animate-in fade-in duration-200">
+                <span className="font-medium">{error}</span>
+                <RxCross2 className="cursor-pointer hover:text-rose-600 transition" size={16} onClick={() => setError("")} />
               </div>
             )}
 
             <button
               type="submit"
               disabled={isLoading || otp.length !== 6}
-              className="w-full h-11 bg-gradient-to-r from-rose-600 via-pink-600 to-purple-600 hover:opacity-95 text-text font-semibold text-sm rounded-xl transition shadow-lg flex items-center justify-center disabled:opacity-50 cursor-pointer"
+              className="w-full h-12 bg-gradient-to-r from-rose-500 via-pink-500 to-purple-600 hover:from-rose-600 hover:to-purple-700 text-white font-bold text-sm rounded-xl shadow-md hover:shadow-lg transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center disabled:opacity-50 cursor-pointer"
             >
-              {isLoading ? <ClipLoader color="white" size={20} /> : "Verify Code"}
+              {isLoading ? <ClipLoader color="#ffffff" size={20} /> : "Verify Code"}
             </button>
 
             {/* Helper Text */}
-            <p className="text-[10px] text-text-muted text-center leading-relaxed">
+            <p className="text-[11px] text-text-muted text-center leading-relaxed">
               Don't want to use the OTP code? You can click the secure reset link directly from the email to reset your password.
             </p>
 
-            <div className="flex flex-col items-center gap-2 pt-2 text-xs">
+            <div className="flex flex-col items-center gap-2 pt-1 text-xs">
               <button
                 type="button"
                 onClick={() => setStep(1)}
-                className="font-bold text-rose-500 hover:text-rose-400 hover:underline cursor-pointer"
+                className="font-bold text-rose-500 hover:text-rose-400 hover:underline cursor-pointer transition"
               >
                 Change Email Address
               </button>
@@ -216,7 +222,7 @@ const ForgotPassword = () => {
 
         {/* STEP 3 — Reset Password */}
         {step === 3 && (
-          <form onSubmit={handleStep3} className="w-full space-y-4 relative z-10">
+          <form onSubmit={handleStep3} className="w-full space-y-4">
             <VybeInput
               id="newPass"
               label="New Password (min 6 chars)"
@@ -227,6 +233,7 @@ const ForgotPassword = () => {
               showPassword={showNewPassword}
               setShowPassword={setShowNewPassword}
               required
+              autoFocus
             />
 
             <VybeInput
@@ -242,28 +249,28 @@ const ForgotPassword = () => {
             />
 
             {error && (
-              <div className="w-full flex items-center justify-between p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs">
-                <span>{error}</span>
-                <RxCross2 className="cursor-pointer hover:text-text" size={16} onClick={() => setError("")} />
+              <div className="w-full flex items-center justify-between p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs animate-in fade-in duration-200">
+                <span className="font-medium">{error}</span>
+                <RxCross2 className="cursor-pointer hover:text-rose-600 transition" size={16} onClick={() => setError("")} />
               </div>
             )}
 
             <button
               type="submit"
               disabled={isLoading || newPass.length < 6 || confirmPass.length < 6}
-              className="w-full h-11 bg-gradient-to-r from-rose-600 via-pink-600 to-purple-600 hover:opacity-95 text-text font-semibold text-sm rounded-xl transition shadow-lg flex items-center justify-center disabled:opacity-50 cursor-pointer"
+              className="w-full h-12 bg-gradient-to-r from-rose-500 via-pink-500 to-purple-600 hover:from-rose-600 hover:to-purple-700 text-white font-bold text-sm rounded-xl shadow-md hover:shadow-lg transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center disabled:opacity-50 cursor-pointer"
             >
-              {isLoading ? <ClipLoader color="white" size={20} /> : "Reset Password"}
+              {isLoading ? <ClipLoader color="#ffffff" size={20} /> : "Save New Password"}
             </button>
           </form>
         )}
 
         {/* Back to Sign In Footer */}
         {step !== 3 && (
-          <div className="w-full pt-2 border-t border-border/80 text-center relative z-10">
+          <div className="w-full pt-3 border-t border-border text-center">
             <span
               onClick={() => navigate(isAddAccountMode ? "/signin?addAccount=true" : "/signin")}
-              className="text-xs font-bold text-rose-500 hover:text-rose-400 cursor-pointer hover:underline"
+              className="text-xs font-bold text-rose-500 hover:text-rose-400 cursor-pointer hover:underline transition"
             >
               Back to Log In
             </span>

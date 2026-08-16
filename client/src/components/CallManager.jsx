@@ -6,7 +6,7 @@ import { getSocket } from "../lib/socket";
 import api from "../lib/axios";
 import CallScreen from "./CallScreen";
 import { useWebRTC } from "../hooks/useWebRTC";
-import toast from "../lib/toast";
+import { snackbar } from "../lib/snackbar";
 import {
   startOutgoingSound,
   stopOutgoingSound,
@@ -129,52 +129,52 @@ export const CallManager = () => {
         stopOutgoingSound();
         stopIncomingRingtone();
         clearRingTimeout();
-        toast.dismiss("call-ringing");
-        toast.success("Call accepted!");
+        snackbar.dismiss("call-ringing");
+        snackbar.success("Call accepted!");
       } else if (data.response === "declined") {
         stopOutgoingSound();
         stopIncomingRingtone();
         clearRingTimeout();
-        toast.dismiss("call-ringing");
-        toast.error("Call declined by user");
+        snackbar.dismiss("call-ringing");
+        snackbar.error("Call declined by user");
         setActiveCall(null);
       } else if (data.response === "busy") {
         stopOutgoingSound();
         stopIncomingRingtone();
         clearRingTimeout();
-        toast.dismiss("call-ringing");
-        toast.error("User is busy on another call");
+        snackbar.dismiss("call-ringing");
+        snackbar.error("User is busy on another call");
         setActiveCall(null);
       } else if (data.response === "cancelled") {
         // Caller hung up while we were still ringing — dismiss incoming call UI
         stopIncomingRingtone();
         stopOutgoingSound();
         setIncomingCall(null);
-        toast.error("Caller cancelled the call");
+        snackbar.error("Caller cancelled the call");
       }
     };
 
     const handleRejected = (data) => {
       // If user is offline or not immediately answering, keep ringing until caller cancels or 30s timeout
       if (data.reason === "User is offline") {
-        toast.dismiss("call-ringing");
-        toast.loading("Calling... (Waiting for user)", { id: "call-ringing" });
+        snackbar.dismiss("call-ringing");
+        snackbar.loading("Calling... (Waiting for user)", { id: "call-ringing" });
         return;
       }
       stopOutgoingSound();
       stopIncomingRingtone();
       clearRingTimeout();
-      toast.dismiss("call-ringing");
-      toast.error(data.reason || "Call declined");
+      snackbar.dismiss("call-ringing");
+      snackbar.error(data.reason || "Call declined");
       setActiveCall(null);
     };
 
     const handleCallStatus = (data) => {
       if (data.status === "ringing") {
-        toast.loading("Ringing...", { id: "call-ringing" });
+        snackbar.loading("Ringing...", { id: "call-ringing" });
         startOutgoingSound();
       } else if (data.status === "calling") {
-        toast.loading("Calling...", { id: "call-ringing" });
+        snackbar.loading("Calling...", { id: "call-ringing" });
         startOutgoingSound();
       }
     };
@@ -212,20 +212,20 @@ export const CallManager = () => {
           conversationId,
         });
 
-        toast.loading("Calling...", { id: "call-ringing" });
+        snackbar.loading("Calling...", { id: "call-ringing" });
 
         // Ring timeout — auto-cancel after 30s
         ringTimeoutRef.current = setTimeout(() => {
           stopOutgoingSound();
-          toast.dismiss("call-ringing");
-          toast.error("No answer");
+          snackbar.dismiss("call-ringing");
+          snackbar.error("No answer");
           // End the DB session
           api.post("/call/end", { room }).catch(() => null);
           setActiveCall(null);
         }, RING_TIMEOUT_MS);
 
       } catch (err) {
-        toast.error("Failed to start call");
+        snackbar.error("Failed to start call");
         setActiveCall(null);
       }
     };
@@ -268,7 +268,7 @@ export const CallManager = () => {
       });
       setIncomingCall(null);
     } catch (e) {
-      toast.error("Failed to join call");
+      snackbar.error("Failed to join call");
       setIncomingCall(null);
     }
   };
@@ -299,7 +299,7 @@ export const CallManager = () => {
     const targetUserId = activeCall.targetUser?._id || activeCall.targetUser;
 
     setActiveCall(null);
-    toast.dismiss("call-ringing");
+    snackbar.dismiss("call-ringing");
     clearRingTimeout();
     stopIncomingRingtone();
     stopOutgoingSound();
@@ -406,7 +406,7 @@ const CallScreenWrapper = ({ room, type, currentUserId, callerName, onEndCall, l
   // Clear "Ringing..." notification if peer joins
   useEffect(() => {
     if (Object.keys(rtc.peers).length > 0) {
-      toast.dismiss("call-ringing");
+      snackbar.dismiss("call-ringing");
     }
   }, [rtc.peers]);
 

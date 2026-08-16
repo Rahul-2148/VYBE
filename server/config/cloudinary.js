@@ -21,8 +21,16 @@ const uploadOnCloudinary = async (file, folder) => {
       fs.unlinkSync(file);
     }
 
+    // Optimize format & quality for both images and videos
+    let finalUrl = result.secure_url;
+    if (result.resource_type === "image" && finalUrl.includes("/upload/")) {
+      finalUrl = finalUrl.replace("/upload/", "/upload/f_auto,q_auto/");
+    } else if (result.resource_type === "video" && finalUrl.includes("/upload/")) {
+      finalUrl = finalUrl.replace("/upload/", "/upload/f_auto,q_auto:best,vc_auto/");
+    }
+
     return {
-      url: result.secure_url,
+      url: finalUrl,
       public_id: result.public_id,
     };
   } catch (error) {

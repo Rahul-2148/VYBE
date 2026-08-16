@@ -2,13 +2,14 @@ import React, { useState, useEffect } from "react";
 import {
   X, Bell, BellOff, Archive, Search, Pin, Shield, UserMinus, Users,
   Image, Film, FileText, Link2, ChevronRight, VolumeX, Volume2,
-  Clock, Trash2, Flag, Lock, Palette, ExternalLink, Download, Play
+  Clock, Trash2, Flag, Lock, Palette, ExternalLink, Download, Play, User
 } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
+import { useNavigate } from "react-router-dom";
 import { toggleMuteInRedux, toggleArchiveInRedux, removeConversationInRedux, clearMessagesInRedux, updateConversationThemeInRedux, updateConversationDisappearingInRedux, toggleVanish } from "../redux/features/messageSlice";
 import dp from "../assets/dp3.png";
 import api from "../lib/axios";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import moment from "moment";
 import ChatThemePickerModal from "./ChatThemePickerModal";
 import { MediaLightboxModal } from "./MediaLightboxModal";
@@ -22,6 +23,7 @@ const MEDIA_TABS = [
 
 const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { userData } = useSelector((s) => s.user);
   const { conversations } = useSelector((s) => s.message);
   const currentUserId = userData?.user?._id || userData?._id;
@@ -72,10 +74,10 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
       const res = await api.patch(`/conversation/mute/${conversationId}`);
       if (res.data?.success) {
         dispatch(toggleMuteInRedux({ conversationId, muted: res.data.muted }));
-        toast.success(res.data.muted ? "Notifications muted" : "Notifications unmuted");
+        snackbar.success(res.data.muted ? "Notifications muted" : "Notifications unmuted");
       }
     } catch {
-      toast.error("Failed");
+      snackbar.error("Failed");
     }
   };
 
@@ -84,10 +86,10 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
       const res = await api.patch(`/conversation/archive/${conversationId}`);
       if (res.data?.success) {
         dispatch(toggleArchiveInRedux({ conversationId, archived: res.data.archived }));
-        toast.success(res.data.archived ? "Chat archived" : "Chat unarchived");
+        snackbar.success(res.data.archived ? "Chat archived" : "Chat unarchived");
       }
     } catch {
-      toast.error("Failed");
+      snackbar.error("Failed");
     }
   };
 
@@ -96,10 +98,10 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
       const res = await api.patch(`/conversation/disappearing/${conversationId}`, { duration });
       if (res.data?.success) {
         dispatch(updateConversationDisappearingInRedux({ conversationId, disappearingMessages: res.data.disappearingMessages }));
-        toast.success(res.data.disappearingMessages?.enabled ? "Disappearing messages on" : "Disappearing messages off");
+        snackbar.success(res.data.disappearingMessages?.enabled ? "Disappearing messages on" : "Disappearing messages off");
       }
     } catch {
-      toast.error("Failed to update");
+      snackbar.error("Failed to update");
     }
   };
 
@@ -108,57 +110,49 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
       const res = await api.patch(`/conversation/vanish/${conversationId}`);
       if (res.data?.success) {
         dispatch(toggleVanish(conversationId));
-        toast.success(res.data.vanishMode ? "Vanish Mode turned ON 👻" : "Vanish Mode turned OFF");
+        snackbar.success(res.data.vanishMode ? "Vanish Mode turned ON 👻" : "Vanish Mode turned OFF");
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to toggle Vanish Mode");
+      snackbar.error(err.response?.data?.message || "Failed to toggle Vanish Mode");
     }
   };
 
   const handleDeleteChat = async () => {
-    if (!window.confirm("Are you sure you want to delete this conversation? This cannot be undone.")) return;
     try {
       const res = await api.delete(`/conversation/delete/${conversationId}`);
       if (res.data?.success) {
         dispatch(removeConversationInRedux(conversationId));
-        toast.success("Chat deleted");
+        snackbar.success("Chat deleted 🗑️");
         onClose();
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to delete chat");
+      snackbar.error(err.response?.data?.message || "Failed to delete chat");
     }
   };
 
   const handleClearChat = async () => {
-    if (!window.confirm("Are you sure you want to clear all messages in this chat?")) return;
     try {
       const res = await api.delete(`/conversation/clear/${conversationId}`);
       if (res.data?.success) {
         dispatch(clearMessagesInRedux(conversationId));
-        toast.success("Chat history cleared");
+        snackbar.success("Chat history cleared 🧹");
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to clear chat");
+      snackbar.error(err.response?.data?.message || "Failed to clear chat");
     }
   };
 
   const handleBlockUser = async () => {
     if (!otherUser?._id) return;
-    const isBlocked = conversation?.blockedBy?.some((id) => id.toString() === currentUserId);
-    const confirmMsg = isBlocked 
-      ? `Unblock @${otherUser?.userName}?`
-      : `Block @${otherUser?.userName}? They won't be able to message you.`;
-    if (!window.confirm(confirmMsg)) return;
-    
     try {
       const res = await api.patch(`/conversation/block/${conversationId}`);
       if (res.data?.success) {
-        toast.success(res.data.blocked ? `Blocked @${otherUser?.userName}` : `Unblocked @${otherUser?.userName}`);
+        snackbar.success(res.data.blocked ? `Blocked @${otherUser?.userName} 🚫` : `Unblocked @${otherUser?.userName}`);
         onClose();
         window.location.href = "/messages";
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to toggle block status");
+      snackbar.error(err.response?.data?.message || "Failed to toggle block status");
     }
   };
 
@@ -194,13 +188,32 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
             <img
               src={otherUser?.profileImage?.url || dp}
               alt=""
-              className="w-20 h-20 rounded-full object-cover mb-3"
+              onClick={() => {
+                if (otherUser?.userName) {
+                  onClose();
+                  navigate(`/profile/${otherUser.userName}`);
+                }
+              }}
+              className="w-20 h-20 rounded-full object-cover mb-3 cursor-pointer hover:opacity-85 transition active:scale-95 border-2 border-border shadow-md"
+              title={`View @${otherUser?.userName}'s profile`}
             />
           )}
 
-          <h3 className="text-lg font-bold text-text">
-            {isGroup ? details?.groupName || "Group Chat" : otherUser?.userName || "User"}
+          <h3 
+            onClick={() => {
+              if (!isGroup && otherUser?.userName) {
+                onClose();
+                navigate(`/profile/${otherUser.userName}`);
+              }
+            }}
+            className={`text-lg font-bold text-text flex items-center gap-1.5 ${!isGroup ? "cursor-pointer hover:underline" : ""}`}
+          >
+            <span>{isGroup ? details?.groupName || "Group Chat" : otherUser?.name || otherUser?.userName || "User"}</span>
           </h3>
+
+          {!isGroup && otherUser?.userName && (
+            <p className="text-xs text-text-secondary mt-0.5">@{otherUser.userName}</p>
+          )}
 
           {isGroup && details?.description && (
             <p className="text-xs text-text-muted mt-1 text-center max-w-[280px]">{details.description}</p>
@@ -210,6 +223,20 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
             <p className="text-xs text-text-muted mt-0.5">
               {otherUser.isOnline ? "Active now" : otherUser.lastSeen ? `Active ${moment(otherUser.lastSeen).fromNow()}` : "Offline"}
             </p>
+          )}
+
+          {!isGroup && otherUser?.userName && (
+            <button
+              onClick={() => {
+                onClose();
+                navigate(`/profile/${otherUser.userName}`);
+              }}
+              className="mt-3.5 inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-surface hover:bg-surface-hover border border-border text-xs font-bold text-text transition cursor-pointer active:scale-95 shadow-sm"
+            >
+              <User className="w-3.5 h-3.5 text-primary" />
+              <span>View Profile</span>
+              <ExternalLink className="w-3 h-3 text-text-muted" />
+            </button>
           )}
         </div>
 
@@ -230,7 +257,7 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
             <span className="text-[11px] text-text-muted">{isArchived ? "Unarchive" : "Archive"}</span>
           </button>
           <button
-            onClick={() => toast.success("Reported chat to safety team.")}
+            onClick={() => snackbar.success("Reported chat to safety team.")}
             className="flex flex-col items-center gap-1.5 py-3 rounded-xl hover:bg-surface transition cursor-pointer"
           >
             <Flag className="w-5 h-5 text-text-secondary" />
@@ -348,19 +375,32 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
                 const isOwnerRole = details?.admins?.some((a) => a && (a.user?._id || a.user)?.toString() === memberId?.toString() && a.role === "owner");
 
                 return (
-                  <div key={memberId || idx} className="flex items-center gap-3 py-1.5">
+                  <div
+                    key={memberId || idx}
+                    onClick={() => {
+                      if (memberObj.userName) {
+                        onClose();
+                        navigate(`/profile/${memberObj.userName}`);
+                      }
+                    }}
+                    className="flex items-center gap-3 py-1.5 px-2 rounded-xl hover:bg-surface transition cursor-pointer group"
+                    title={`View @${memberObj.userName || "User"}'s profile`}
+                  >
                     <img
                       src={memberObj.profileImage?.url || dp}
                       alt=""
-                      className="w-10 h-10 rounded-full object-cover"
+                      className="w-10 h-10 rounded-full object-cover border border-border group-hover:border-primary/50 transition"
                     />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-text font-medium truncate">
-                        {memberObj.userName || memberObj.name || "User"}
-                        {memberId?.toString() === currentUserId?.toString() && <span className="text-text-muted text-xs ml-1">(You)</span>}
+                      <p className="text-sm text-text font-medium truncate group-hover:underline flex items-center gap-1">
+                        <span>{memberObj.name || memberObj.userName || "User"}</span>
+                        {memberId?.toString() === currentUserId?.toString() && <span className="text-text-muted text-xs font-normal">(You)</span>}
                       </p>
-                      {isOwnerRole && <span className="text-[10px] text-amber-400 font-semibold">Owner</span>}
-                      {isAdmin && !isOwnerRole && <span className="text-[10px] text-blue-400 font-semibold">Admin</span>}
+                      <p className="text-[11px] text-text-secondary truncate">
+                        @{memberObj.userName || "user"}
+                        {isOwnerRole && <span className="text-[10px] text-amber-400 font-semibold ml-2">Owner</span>}
+                        {isAdmin && !isOwnerRole && <span className="text-[10px] text-blue-400 font-semibold ml-2">Admin</span>}
+                      </p>
                     </div>
                     {memberObj.isOnline && (
                       <div className="w-2 h-2 bg-green-500 rounded-full shrink-0" />

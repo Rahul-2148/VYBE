@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FolderPlus, Bookmark, Plus, Check, X } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
 export const CollectionsModal = ({ isOpen, onClose, postId }) => {
@@ -23,7 +23,7 @@ export const CollectionsModal = ({ isOpen, onClose, postId }) => {
         setCollections(res.data.collections || []);
       }
     } catch {
-      toast.error("Failed to load collections.");
+      snackbar.error("Failed to load collections.");
     }
   };
 
@@ -35,13 +35,13 @@ export const CollectionsModal = ({ isOpen, onClose, postId }) => {
       setLoading(true);
       const res = await api.post("/post/collections", { name: newCollectionName });
       if (res.data.success) {
-        toast.success(`Collection "${res.data.collection.name}" created!`);
+        snackbar.success(`Collection "${res.data.collection.name}" created!`);
         setCollections([...collections, res.data.collection]);
         setNewCollectionName("");
         setShowCreate(false);
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to create collection.");
+      snackbar.error(err.response?.data?.message || "Failed to create collection.");
     } finally {
       setLoading(false);
     }
@@ -51,11 +51,11 @@ export const CollectionsModal = ({ isOpen, onClose, postId }) => {
     try {
       const res = await api.post("/post/collections/add-post", { collectionId, postId });
       if (res.data.success) {
-        toast.success("Updated collection!");
+        snackbar.success("Updated collection!");
         fetchCollections();
       }
     } catch {
-      toast.error("Failed to update collection.");
+      snackbar.error("Failed to update collection.");
     }
   };
 

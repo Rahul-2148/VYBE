@@ -1,12 +1,14 @@
 import React, { useEffect, useState, useRef } from "react";
-import { Search, Compass, Heart, MessageCircle, Play, ArrowLeft, TrendingUp, Grid3X3, Film, Bookmark, Users, Eye } from "lucide-react";
+import { Search, Compass, Heart, MessageCircle, Play, ArrowLeft, TrendingUp, Grid3X3, Film, Bookmark, Users, Eye, Sparkles } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import SearchModal from "../components/SearchModal";
 import FollowButton from "../components/FollowButton";
+import Navbar from "../components/Navbar";
 import api from "../lib/axios";
 import dp from "../assets/dp3.png";
+import VerifiedBadge from "../components/VerifiedBadge";
 
 const CATEGORIES = [
   { id: "all", label: "For You", icon: "✨" },
@@ -108,7 +110,7 @@ const ExploreMediaCard = ({ post, index, activeTab, navigate, formatCount, getVi
           src={post.media?.url || post.audioUrl}
           className="w-full h-full object-cover"
           muted
-          loop
+          onEnded={(e) => { e.target.currentTime = 0; e.target.play().catch(() => null); }}
           playsInline
           preload="metadata"
           poster={thumbnail || undefined}
@@ -165,7 +167,7 @@ export const Explore = () => {
     () => sessionStorage.getItem("explore_active_tab") || "grid"
   );
   const [posts, setPosts] = useState([]);
-  const [loops, setLoops] = useState([]);
+  const [reels, setReels] = useState([]);
   const [suggestedUsers, setSuggestedUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showSearchModal, setShowSearchModal] = useState(false);
@@ -176,7 +178,7 @@ export const Explore = () => {
   const fetchExploreFeed = async () => {
     if (cacheRef.current[selectedCategory]) {
       setPosts(cacheRef.current[selectedCategory].posts);
-      setLoops(cacheRef.current[selectedCategory].loops);
+      setReels(cacheRef.current[selectedCategory].reels);
       setLoading(false);
       return;
     }
@@ -185,14 +187,14 @@ export const Explore = () => {
       const res = await api.get(`/search/explore?category=${selectedCategory}`);
       if (res.data.success) {
         const p = res.data.posts || [];
-        const l = res.data.loops || [];
-        cacheRef.current[selectedCategory] = { posts: p, loops: l };
+        const r = res.data.reels || [];
+        cacheRef.current[selectedCategory] = { posts: p, reels: r };
         setPosts(p);
-        setLoops(l);
+        setReels(r);
       }
     } catch (err) {
       console.warn(err);
-      toast.error("Failed to load explore feed.");
+      snackbar.error("Failed to load explore feed.");
     } finally {
       setLoading(false);
     }
@@ -206,7 +208,7 @@ export const Explore = () => {
       }
     } catch (err) {
       console.warn(err);
-      toast.error("Failed to load suggested users.");
+      snackbar.error("Failed to load suggested users.");
     } finally {
       setLoading(false);
     }
@@ -245,8 +247,8 @@ export const Explore = () => {
   };
 
   // Filter posts vs reels
-  const gridPosts = posts.filter((p) => p.mediaType !== "video");
-  const reelPosts = posts.filter((p) => p.mediaType === "video").concat(loops);
+  const gridPosts = posts.filter((p) => p.mediaType !== "video" && !p.media?.url?.endsWith(".mp4") && !p.media?.url?.includes("/video/"));
+  const reelPosts = reels.concat(posts.filter((p) => p.mediaType === "video" || p.media?.url?.endsWith(".mp4") || p.media?.url?.includes("/video/")));
 
   const displayPosts = activeTab === "reels" ? reelPosts : gridPosts;
 
@@ -284,14 +286,20 @@ export const Explore = () => {
             <ArrowLeft className="w-5 h-5 text-text" />
           </button>
 
-          {/* Search Bar */}
+          {/* Search Bar with VYBE AI Style */}
           <div
             onClick={() => setShowSearchModal(true)}
-            className="vybe-search-bar"
-            style={{ cursor: "pointer" }}
+            className="flex-1 flex items-center gap-3 px-3.5 py-2 rounded-2xl bg-surface border border-border/80 hover:border-primary/50 transition shadow-xs cursor-pointer select-none group"
           >
-            <Search className="search-icon" />
-            <span style={{ fontSize: 14, color: "var(--input-placeholder)", fontWeight: 400, flex: 1, userSelect: "none" }}>Search</span>
+            <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-cyan-400 via-purple-500 to-rose-500 p-[1.5px] shrink-0 flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
+              <div className="w-full h-full bg-surface rounded-full flex items-center justify-center">
+                <Sparkles className="w-2.5 h-2.5 text-purple-400" />
+              </div>
+            </div>
+            <span className="text-xs text-text-muted font-medium flex-1 truncate">
+              Ask VYBE AI or Search...
+            </span>
+            <Search className="w-4 h-4 text-text-secondary group-hover:text-text transition shrink-0" />
           </div>
         </div>
 
@@ -315,7 +323,7 @@ export const Explore = () => {
       </div>
 
       {/* Content Area */}
-      <div className="max-w-6xl mx-auto px-1 sm:px-2">
+      <div className="max-w-6xl mx-auto px-1 sm:px-2 pb-20 md:pb-8">
         {/* Tab Bar */}
         <div className="flex items-center border-b border-border/80 mt-1">
           {TABS.map((tab) => {
@@ -345,58 +353,109 @@ export const Explore = () => {
           </div>
         ) : displayPosts.length === 0 && activeTab !== "accounts" ? (
           <div className="text-center py-20 space-y-3">
-            <Compass className="w-12 h-12 text-text-muted mx-auto" />
-            <p className="text-sm text-text-muted">No posts found for this category</p>
-            <button
-              onClick={() => setSelectedCategory("all")}
-              className="text-xs text-rose-400 hover:underline cursor-pointer"
-            >
-              Browse all posts
-            </button>
+            {activeTab === "reels" ? (
+              <>
+                <Film className="w-12 h-12 text-rose-500 mx-auto" />
+                <p className="text-sm font-bold text-text">
+                  {selectedCategory === "all" ? "No reels found yet" : `No reels found for "${selectedCategory}"`}
+                </p>
+                <p className="text-xs text-text-secondary">
+                  {selectedCategory === "all" ? "Be the first creator to share a reel!" : "Try switching categories or view all reels."}
+                </p>
+                <div className="flex items-center justify-center gap-3 pt-2">
+                  {selectedCategory !== "all" && (
+                    <button
+                      onClick={() => setSelectedCategory("all")}
+                      className="px-4 py-2 bg-surface border border-border text-xs text-rose-400 hover:text-rose-300 rounded-full cursor-pointer transition font-semibold"
+                    >
+                      Browse all reels
+                    </button>
+                  )}
+                  <button
+                    onClick={() => navigate("/upload")}
+                    className="px-5 py-2 bg-gradient-to-r from-rose-500 to-purple-600 text-xs text-white rounded-full cursor-pointer transition font-bold shadow-lg hover:opacity-95"
+                  >
+                    Upload Reel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <Compass className="w-12 h-12 text-text-muted mx-auto" />
+                <p className="text-sm font-bold text-text">
+                  {selectedCategory === "all" ? "No posts found yet" : `No posts found for "${selectedCategory}"`}
+                </p>
+                <p className="text-xs text-text-secondary">
+                  {selectedCategory === "all" ? "Be the first to create a post!" : "Try switching categories or browse all posts."}
+                </p>
+                <div className="flex items-center justify-center gap-3 pt-2">
+                  {selectedCategory !== "all" && (
+                    <button
+                      onClick={() => setSelectedCategory("all")}
+                      className="px-4 py-2 bg-surface border border-border text-xs text-rose-400 hover:text-rose-300 rounded-full cursor-pointer transition font-semibold"
+                    >
+                      Browse all posts
+                    </button>
+                  )}
+                  <button
+                    onClick={() => navigate("/upload")}
+                    className="px-5 py-2 bg-gradient-to-r from-rose-500 to-purple-600 text-xs text-white rounded-full cursor-pointer transition font-bold shadow-lg hover:opacity-95"
+                  >
+                    Create Post
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         ) : activeTab === "accounts" ? (
-          /* ===== SUGGESTED ACCOUNTS - Instagram Style ===== */
-          <div className="py-4 px-2 space-y-3">
-            <p className="text-xs text-text-muted font-semibold uppercase tracking-wider px-1">Suggested for you</p>
-            {suggestedUsers.length === 0 && !loading ? (
-              <div className="text-center py-16 space-y-3">
-                <Users className="w-12 h-12 text-text-muted mx-auto" />
-                <p className="text-sm text-text-muted">No suggested accounts right now</p>
+          /* ===== SUGGESTED ACCOUNTS ===== */
+          <div className="py-4 space-y-4">
+            <div className="flex items-center justify-between px-2">
+              <h2 className="text-sm font-bold text-text flex items-center gap-2">
+                <Users className="w-4 h-4 text-purple-400" />
+                <span>Discover Creators</span>
+              </h2>
+            </div>
+            {suggestedUsers.length === 0 ? (
+              <div className="text-center py-12 text-text-muted text-xs">
+                No new creator suggestions found
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 px-1">
                 {suggestedUsers.map((user) => {
-                  const profileImg = typeof user.profileImage === "string"
-                    ? user.profileImage
-                    : user.profileImage?.url || dp;
+                  const avatar = user.profileImage?.url || dp;
                   return (
                     <div
                       key={user._id}
-                      className="bg-surface/60 border border-border/60 rounded-2xl p-4 flex flex-col items-center gap-2.5 hover:bg-surface-hover/60 transition group"
+                      className="p-3.5 rounded-2xl bg-surface border border-border/80 flex flex-col justify-between gap-3 hover:border-primary/40 transition shadow-xs group"
                     >
                       <div
+                        className="flex items-center gap-3 cursor-pointer"
                         onClick={() => navigate(`/profile/${user.userName}`)}
-                        className="cursor-pointer flex flex-col items-center gap-2.5 w-full"
                       >
-                        <div className="relative">
+                        <div className="relative shrink-0">
                           <img
-                            src={profileImg}
+                            src={avatar}
                             alt=""
-                            className="w-18 h-18 rounded-full object-cover border-2 border-border-strong group-hover:border-purple-500/50 transition"
+                            className="w-11 h-11 rounded-full object-cover border border-border"
                           />
-                          {user.isVerified && (
-                            <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center border-2 border-bg">
-                              <svg className="w-3 h-3 text-text" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
-                              </svg>
-                            </div>
-                          )}
                         </div>
-                        <div className="text-center min-w-0 w-full">
-                          <p className="text-xs font-bold truncate">@{user.userName || "user"}</p>
-                          <p className="text-[10px] text-text-muted truncate">{user.name || ""}</p>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs font-bold text-text truncate group-hover:text-primary transition flex items-center gap-1">
+                              <span>{user.name || user.userName}</span>
+                              {user.isVerified && (
+                                <VerifiedBadge size="xs" />
+                              )}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-text-secondary block truncate">
+                            @{user.userName}
+                          </span>
                           {user.followers?.length > 0 && (
-                            <p className="text-[10px] text-text-muted mt-0.5">{formatCount(user.followers.length)} followers</p>
+                            <span className="text-[10px] text-text-muted block mt-0.5">
+                              {formatCount(user.followers.length)} followers
+                            </span>
                           )}
                         </div>
                       </div>
@@ -411,7 +470,7 @@ export const Explore = () => {
             )}
           </div>
         ) : (
-          /* Staggered Instagram Grid */
+          /* Staggered Media Grid */
           <div className={`grid gap-0.5 ${
             activeTab === "reels"
               ? "grid-cols-2 sm:grid-cols-3"
@@ -431,6 +490,10 @@ export const Explore = () => {
           </div>
         )}
       </div>
+
+      {/* Mobile Bottom Navigation Bar */}
+      <Navbar />
+
       {/* Search Modal */}
       {showSearchModal && <SearchModal isOpen={showSearchModal} onClose={() => setShowSearchModal(false)} />}
     </div>

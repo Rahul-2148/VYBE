@@ -2,7 +2,7 @@ import { Notification } from "../models/notification.model.js";
 import { User } from "../models/user.model.js";
 
 // Helper function to create notification & emit via Socket.io
-export const createNotificationHelper = async ({ req, recipient, sender, type, post, loop, story, commentText }) => {
+export const createNotificationHelper = async ({ req, recipient, sender, type, post, reel, story, commentText }) => {
   try {
     if (!recipient || recipient.toString() === sender.toString()) return;
 
@@ -19,10 +19,14 @@ export const createNotificationHelper = async ({ req, recipient, sender, type, p
 
     if (isBlocked) return;
 
+    const targetReel = reel;
+
     // Deduplication check
     let dupQuery = { recipient, sender, type };
     if (post) dupQuery.post = post;
-    if (loop) dupQuery.loop = loop;
+    if (targetReel) {
+      dupQuery.reel = targetReel;
+    }
     if (story) dupQuery.story = story;
 
     // Check user notification preferences
@@ -39,14 +43,14 @@ export const createNotificationHelper = async ({ req, recipient, sender, type, p
         sender,
         type,
         post: post || null,
-        loop: loop || null,
+        reel: targetReel || null,
         story: story || null,
         commentText: commentText || "",
       };
       notif = await Notification.findOneAndUpdate(
         dupQuery,
         { $setOnInsert: updateDoc },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: 'after' }
       );
     } else if (type === "comment") {
       dupQuery.commentText = commentText || "";
@@ -54,83 +58,156 @@ export const createNotificationHelper = async ({ req, recipient, sender, type, p
       const duplicateComment = await Notification.findOne(dupQuery);
       if (duplicateComment) return duplicateComment;
     }
-
-    if (!notif) {
-      notif = await Notification.create({
-        recipient,
-        sender,
-        type,
-        post: post || null,
-        loop: loop || null,
-        story: story || null,
-        commentText: commentText || "",
-      });
-    }
-
-    const populated = await notif.populate([
-      { path: "sender", select: "name userName profileImage isVerified" },
-      { path: "post", select: "media mediaType" },
-      { path: "loop", select: "media" },
-    ]);
-
-    // Emit Socket.io real-time event
-    const io = req?.app?.locals?.io;
-    if (io) {
-      io.to(`user_${recipient}`).emit("notification-received", {
-        notification: populated,
-      });
-    }
-
-    return populated;
-  } catch (error) {
-    console.error("createNotificationHelper error:", error);
+  } catch (dupError) {
+    console.error("Duplicate notification check error:", dupError);
   }
+
+  const notification = await Notification.create({
+    recipient,
+    sender,
+    type,
+    post: post || null,
+    reel: targetReel || null,
+    story: story || null,
+    commentText: commentText || "",
+  });
+
+  const populated = await Notification.findById(notification._id)
+    .populate("sender", "name userName profileImage isVerified")
+    .populate({
+      path: "post",
+      select: "media caption mediaType",
+    })
+    .populate({
+      path: "reel",
+      select: "media caption",
+    })
+    .populate({
+      path: "story",
+      select: "media",
+    });
+
+  // Emit Real-time Notification via Socket.IO
+  try {
+    const io = global.io;
+    if (io) {
+      io.to(`user_${recipient}`).emit("new-notification", populated);
+    }
+  } catch (socketError) {
+    console.error("Socket notification emit error:", socketError);
+  }
+
+  return populated;
 };
 
-// Get User Notifications Activity Feed
-export const getUserNotifications = async (req, res) => {
+// Get User's Notifications
+export const getNotifications = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 30;
-    const before = req.query.before;
+    const userId = req.userId;
 
-    let filter = { recipient: req.userId };
-    if (before) {
-      filter.createdAt = { $lt: new Date(before) };
-    }
+    const notifications = await Notification.find({ recipient: userId })
+      .populate("sender", "name userName profileImage isVerified")
+      .populate({
+        path: "post",
+        select: "media caption mediaType",
+      })
+      .populate({
+        path: "reel",
+        select: "media caption",
+      })
+      .populate({
+        path: "story",
+        select: "media",
+      })
+      .sort({ createdAt: -1 })
+      .limit(50);
 
-    let query = Notification.find(filter)
-      .sort({ createdAt: -1 });
-
-    if (!before) {
-      query = query.skip((page - 1) * limit);
-    }
-    query = query.limit(limit)
-      .populate("sender", "name userName profileImage followers isVerified")
-      .populate("post", "media mediaType")
-      .populate("loop", "media");
-
-    const notifications = await query;
-    const unreadCount = await Notification.countDocuments({ recipient: req.userId, read: false });
+    const unreadCount = await Notification.countDocuments({
+      recipient: userId,
+      isRead: false,
+    });
 
     return res.status(200).json({
       success: true,
-      unreadCount,
       notifications,
-      hasMore: notifications.length === limit,
+      unreadCount,
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: `getUserNotifications error: ${error.message}` });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch notifications",
+      error: error.message,
+    });
   }
 };
 
-// Mark Notifications Read
-export const markNotificationsRead = async (req, res) => {
+// Mark All as Read
+export const markNotificationsAsRead = async (req, res) => {
   try {
-    await Notification.updateMany({ recipient: req.userId, read: false }, { $set: { read: true } });
-    return res.status(200).json({ success: true, message: "Notifications marked as read" });
+    const userId = req.userId;
+
+    await Notification.updateMany(
+      { recipient: userId, isRead: false },
+      { $set: { isRead: true } }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "All notifications marked as read",
+    });
   } catch (error) {
-    return res.status(500).json({ success: false, message: `markRead error: ${error.message}` });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to mark notifications as read",
+      error: error.message,
+    });
+  }
+};
+
+// Delete Single Notification
+export const deleteNotification = async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+    const userId = req.userId;
+
+    await Notification.findOneAndDelete({
+      _id: notificationId,
+      recipient: userId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Notification removed",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete notification",
+      error: error.message,
+    });
+  }
+};
+
+// Get Unread Count
+export const getUnreadCount = async (req, res) => {
+  try {
+    const userId = req.userId;
+
+    const count = await Notification.countDocuments({
+      recipient: userId,
+      isRead: false,
+    });
+
+    return res.status(200).json({
+      success: true,
+      unreadCount: count,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get unread count",
+      error: error.message,
+    });
   }
 };
 
@@ -141,7 +218,7 @@ export const updateNotificationSettings = async (req, res) => {
     const user = await User.findByIdAndUpdate(
       req.userId,
       { $set: { notificationSettings: settings } },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     return res.status(200).json({
@@ -157,7 +234,7 @@ export const updateNotificationSettings = async (req, res) => {
 // Get Unread Notification Count
 export const getUnreadNotificationCount = async (req, res) => {
   try {
-    const unreadCount = await Notification.countDocuments({ recipient: req.userId, read: false });
+    const unreadCount = await Notification.countDocuments({ recipient: req.userId, isRead: false });
     return res.status(200).json({
       success: true,
       unreadCount,
@@ -166,3 +243,8 @@ export const getUnreadNotificationCount = async (req, res) => {
     return res.status(500).json({ success: false, message: `getUnreadNotificationCount error: ${error.message}` });
   }
 };
+
+// Aliases for route compatibility
+export const getUserNotifications = getNotifications;
+export const markNotificationsRead = markNotificationsAsRead;
+

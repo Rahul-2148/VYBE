@@ -40,7 +40,7 @@ export const ChatListItem = ({ chat, onContextMenu }) => {
     if (!isMine) return null;
 
     if (msg.status === "seen") {
-      return <CheckCheck className="w-3.5 h-3.5 text-blue-400 shrink-0" />;
+      return <CheckCheck className="w-3.5 h-3.5 text-primary shrink-0" />;
     }
     if (msg.status === "delivered") {
       return <CheckCheck className="w-3.5 h-3.5 text-text-muted shrink-0" />;
@@ -56,7 +56,7 @@ export const ChatListItem = ({ chat, onContextMenu }) => {
 
   // Format last message
   const formatLastMessage = () => {
-    if (isTyping) return null; // Will show typing indicator instead
+    if (isTyping) return null;
 
     if (!chat.lastMessage) return "Tap to start chatting";
 
@@ -75,7 +75,7 @@ export const ChatListItem = ({ chat, onContextMenu }) => {
     if (msg.type?.startsWith("shared_")) return `${prefix}Shared a post`;
 
     const text = msg.content?.text || msg.text || "Message";
-    return prefix + (text.length > 40 ? text.slice(0, 40) + "…" : text);
+    return prefix + (text.length > 36 ? text.slice(0, 36) + "â€¦" : text);
   };
 
   // Time display
@@ -108,29 +108,40 @@ export const ChatListItem = ({ chat, onContextMenu }) => {
     <div
       onClick={handleSelectChat}
       onContextMenu={onContextMenu}
-      className={`relative flex items-center gap-3 px-4 py-3 cursor-pointer transition-all duration-100 ${
+      className={`relative flex items-center gap-3 px-4 py-3 cursor-pointer transition-all duration-150 border-l-[3px] ${
         isSelected
-          ? "bg-surface-hover/80"
-          : "hover:bg-surface/60"
+          ? "bg-surface-hover border-primary shadow-xs"
+          : "border-transparent hover:bg-surface-hover/50"
       }`}
     >
       {/* Avatar */}
-      <div className="relative shrink-0">
+      <div 
+        onClick={(e) => {
+          if (!isGroup && participant?.userName) {
+            e.stopPropagation();
+            navigate(`/profile/${participant.userName}`);
+          }
+        }}
+        className={`relative shrink-0 ${!isGroup && participant?.userName ? "hover:scale-105 transition-transform" : ""}`}
+        title={!isGroup && participant?.userName ? `View @${participant.userName}'s profile` : undefined}
+      >
         {isGroup ? (
-          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 p-[2px]">
+          <div className="w-13 h-13 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 p-[2px]">
             {avatar ? (
               <img src={avatar} alt="" className="w-full h-full rounded-full object-cover" />
             ) : (
               <div className="w-full h-full rounded-full bg-surface flex items-center justify-center">
-                <Users className="w-6 h-6 text-purple-300" />
+                <Users className="w-5 h-5 text-purple-300" />
               </div>
             )}
           </div>
         ) : (
           <div className="relative">
-            <img src={avatar} alt="" className="w-14 h-14 rounded-full object-cover" />
+            <img src={avatar} alt="" className="w-13 h-13 rounded-full object-cover border border-border/50" />
             {isOnline && (
-              <div className="absolute bottom-0.5 right-0.5 w-3.5 h-3.5 bg-green-500 border-[2.5px] border-bg rounded-full" />
+              <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-bg rounded-full shadow-xs">
+                <div className="w-full h-full rounded-full bg-green-400 animate-pulse" />
+              </div>
             )}
           </div>
         )}
@@ -140,41 +151,41 @@ export const ChatListItem = ({ chat, onContextMenu }) => {
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
-            <p className={`text-[14px] truncate ${unreadCount > 0 ? "font-bold text-text" : "font-semibold text-text"}`}>
+            <p className={`text-[14px] truncate leading-tight ${unreadCount > 0 ? "font-bold text-text" : "font-semibold text-text"}`}>
               {title}
             </p>
             {chat.isMuted && <VolumeX className="w-3.5 h-3.5 text-text-muted shrink-0" />}
           </div>
           <div className="flex items-center gap-1 shrink-0">
             {getStatusIcon()}
-            <span className={`text-xs ${unreadCount > 0 ? "font-bold text-text" : "text-text-muted"}`}>
+            <span className={`text-[11px] ${unreadCount > 0 ? "font-bold text-primary" : "text-text-muted"}`}>
               {getTimeDisplay()}
             </span>
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-2 mt-0.5">
+        <div className="flex items-center justify-between gap-2 mt-1">
           <div className="flex-1 min-w-0">
             {isTyping ? (
-              <p className="text-xs font-semibold text-green-400 flex items-center gap-1">
+              <p className="text-xs font-semibold text-green-500 flex items-center gap-1.5">
                 <span>typing</span>
                 <span className="flex gap-0.5">
-                  <span className="w-1 h-1 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <span className="w-1 h-1 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <span className="w-1 h-1 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                  <span className="w-1 h-1 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1 h-1 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1 h-1 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                 </span>
               </p>
             ) : (
-              <p className={`text-xs truncate ${unreadCount > 0 ? "font-semibold text-text" : "text-text-muted"}`}>
+              <p className={`text-xs truncate ${unreadCount > 0 ? "font-semibold text-text" : "text-text-secondary"}`}>
                 {formatLastMessage()}
               </p>
             )}
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {chat.isPinned && <Pin className="w-3 h-3 text-text-muted transform rotate-45" />}
+            {chat.isPinned && <Pin className="w-3 h-3 text-amber-400 transform rotate-45" />}
             {unreadCount > 0 && (
-              <div className="bg-blue-500 text-text font-bold text-[10px] min-w-[20px] h-[20px] px-1.5 flex items-center justify-center rounded-full">
+              <div className="bg-primary text-white font-bold text-[10px] min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full shadow-xs">
                 {unreadCount > 99 ? "99+" : unreadCount}
               </div>
             )}

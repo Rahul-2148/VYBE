@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, X, Copy, Check, RefreshCw } from "lucide-react";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
 export const AICreationModal = ({ isOpen, onClose, mode = "caption", onSelectResult }) => {
@@ -28,7 +28,7 @@ export const AICreationModal = ({ isOpen, onClose, mode = "caption", onSelectRes
         }
       }
     } catch {
-      toast.error("AI Generation failed.");
+      snackbar.error("AI Generation failed.");
     } finally {
       setLoading(false);
     }
@@ -36,7 +36,7 @@ export const AICreationModal = ({ isOpen, onClose, mode = "caption", onSelectRes
 
   const handleUseResult = (text) => {
     if (onSelectResult) onSelectResult(text);
-    toast.success("Applied to input!");
+    snackbar.success("Applied to input!");
     onClose();
   };
 
@@ -56,7 +56,7 @@ export const AICreationModal = ({ isOpen, onClose, mode = "caption", onSelectRes
                 <Sparkles className="w-5 h-5 text-text animate-pulse" />
               </div>
               <div>
-                <h2 className="text-lg font-bold">Meta AI Assistant</h2>
+                <h2 className="text-lg font-bold">VYBE AI Studio</h2>
                 <p className="text-xs text-text-secondary">
                   {mode === "caption" ? "Generate captions & hashtags" : "Generate creative profile bio"}
                 </p>

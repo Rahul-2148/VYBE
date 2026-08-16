@@ -130,7 +130,6 @@ const conversationSchema = new mongoose.Schema(
     // Chat theme/wallpaper customization
     theme: {
       type: String,
-      enum: ["default", "midnight", "ocean", "forest", "sunset", "lavender", "custom"],
       default: "default",
     },
 

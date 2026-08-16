@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Maximize2, Minimize2, MicOff, Users, MessageSquare, Shield, Sparkles, X } from "lucide-react";
+import { Maximize2, Minimize2, MicOff, Monitor, Users, MessageSquare, Shield, Sparkles, X } from "lucide-react";
 import CallControls from "./CallControls";
 import { getSocket } from "../lib/socket";
-import toast from "../lib/toast";
+import { snackbar } from "../lib/snackbar";
 
 export const CallScreen = ({
   localStream,
@@ -85,8 +85,17 @@ export const CallScreen = ({
   const [isWatchPartyHost, setIsWatchPartyHost] = useState(false);
   const [showWatchPartyInput, setShowWatchPartyInput] = useState(false);
   const [watchPartyInputUrl, setWatchPartyInputUrl] = useState("");
+  const [watchPartyBuffering, setWatchPartyBuffering] = useState(false);
   const watchPartyVideoRef = useRef(null);
-  const isSyncingRef = useRef(false); // Prevents infinite loops of sync events
+  const isSyncingRef = useRef(false); // Prevents infinite cycles of sync events
+  const watchPartySyncIntervalRef = useRef(null); // Heartbeat sync interval
+
+  // Detect which peer is screen sharing (for auto-spotlight)
+  const screenSharerSocketId = Object.entries(peers).find(
+    ([, data]) => data.screenSharing
+  )?.[0] || null;
+  const isSelfScreenSharing = isScreenSharing;
+  const anyoneScreenSharing = isSelfScreenSharing || screenSharerSocketId;
 
   // Listen for incoming chat messages via socket
   useEffect(() => {
@@ -126,7 +135,7 @@ export const CallScreen = ({
         setIsWatchPartyActive(true);
         setWatchPartyUrl(videoUrl);
         setIsWatchPartyHost(false);
-        toast.success("Watch Party started by other participant!");
+        snackbar.success("Watch Party started by other participant!");
       }
     };
 
@@ -135,10 +144,15 @@ export const CallScreen = ({
         setIsWatchPartyActive(false);
         setWatchPartyUrl("");
         setIsWatchPartyHost(false);
-        toast.error("Watch Party stopped by other participant");
+        if (watchPartySyncIntervalRef.current) {
+          clearInterval(watchPartySyncIntervalRef.current);
+          watchPartySyncIntervalRef.current = null;
+        }
+        snackbar.error("Watch Party stopped by other participant");
       }
     };
 
+    // Accept sync events from ANY participant (not just host)
     const handleSynced = ({ action, currentTime, playing, senderId }) => {
       if (senderId === currentUserId) return;
       const video = watchPartyVideoRef.current;
@@ -146,7 +160,8 @@ export const CallScreen = ({
 
       isSyncingRef.current = true;
 
-      if (Math.abs(video.currentTime - currentTime) > 0.8) {
+      // Sync time if drift > 1.5 seconds
+      if (Math.abs(video.currentTime - currentTime) > 1.5) {
         video.currentTime = currentTime;
       }
 
@@ -158,7 +173,7 @@ export const CallScreen = ({
 
       setTimeout(() => {
         isSyncingRef.current = false;
-      }, 100);
+      }, 200);
     };
 
     socket.on("call:watch-party-started", handleStarted);
@@ -169,6 +184,10 @@ export const CallScreen = ({
       socket.off("call:watch-party-started", handleStarted);
       socket.off("call:watch-party-stopped", handleStopped);
       socket.off("call:watch-party-synced", handleSynced);
+      if (watchPartySyncIntervalRef.current) {
+        clearInterval(watchPartySyncIntervalRef.current);
+        watchPartySyncIntervalRef.current = null;
+      }
     };
   }, [currentUserId]);
 
@@ -236,7 +255,7 @@ export const CallScreen = ({
     setShowWatchPartyInput(false);
 
     socket?.emit("call:watch-party-start", { room, videoUrl: url });
-    toast.success("Watch Party started!");
+    snackbar.success("Watch Party started!");
   };
 
   const handleStopWatchParty = () => {
@@ -245,12 +264,18 @@ export const CallScreen = ({
     setWatchPartyUrl("");
     setIsWatchPartyHost(false);
 
+    if (watchPartySyncIntervalRef.current) {
+      clearInterval(watchPartySyncIntervalRef.current);
+      watchPartySyncIntervalRef.current = null;
+    }
+
     socket?.emit("call:watch-party-stop", { room });
-    toast.error("Watch Party stopped");
+    snackbar.error("Watch Party stopped");
   };
 
-  const handleVideoSyncEvent = (action) => {
-    if (!isWatchPartyHost || isSyncingRef.current) return;
+  // Any participant can trigger sync events (not just host — like Discord)
+  const handleVideoSyncEvent = useCallback((action) => {
+    if (isSyncingRef.current) return;
     const video = watchPartyVideoRef.current;
     if (!video) return;
 
@@ -261,7 +286,38 @@ export const CallScreen = ({
       currentTime: video.currentTime,
       playing: !video.paused,
     });
-  };
+  }, [room]);
+
+  // Heartbeat sync every 3 seconds — keeps all clients tightly synced like Discord
+  useEffect(() => {
+    if (!isWatchPartyActive) {
+      if (watchPartySyncIntervalRef.current) {
+        clearInterval(watchPartySyncIntervalRef.current);
+        watchPartySyncIntervalRef.current = null;
+      }
+      return;
+    }
+
+    watchPartySyncIntervalRef.current = setInterval(() => {
+      const video = watchPartyVideoRef.current;
+      if (!video || video.paused || isSyncingRef.current) return;
+
+      const socket = getSocket();
+      socket?.emit("call:watch-party-sync", {
+        room,
+        action: "heartbeat",
+        currentTime: video.currentTime,
+        playing: !video.paused,
+      });
+    }, 3000);
+
+    return () => {
+      if (watchPartySyncIntervalRef.current) {
+        clearInterval(watchPartySyncIntervalRef.current);
+        watchPartySyncIntervalRef.current = null;
+      }
+    };
+  }, [isWatchPartyActive, room]);
 
   // Render Float widget
   if (isMinimized) {
@@ -378,12 +434,13 @@ export const CallScreen = ({
       {/* Main Call View Area */}
       <div className="flex-1 flex gap-4 w-full h-[70vh] items-center justify-center relative overflow-hidden mb-4">
         
-        {/* Watch Party Video Player Side */}
+        {/* Watch Party Video Player Side — ALL participants can control */}
         {isWatchPartyActive && (
           <div className="flex-[2.5] h-full bg-black rounded-3xl overflow-hidden relative border border-white/10 flex flex-col justify-between shadow-2xl">
             <video
               ref={watchPartyVideoRef}
               src={watchPartyUrl}
+              crossOrigin="anonymous"
               controls={true}
               autoPlay
               playsInline
@@ -391,26 +448,36 @@ export const CallScreen = ({
               onPlay={() => handleVideoSyncEvent("play")}
               onPause={() => handleVideoSyncEvent("pause")}
               onSeeked={() => handleVideoSyncEvent("seek")}
+              onWaiting={() => setWatchPartyBuffering(true)}
+              onPlaying={() => setWatchPartyBuffering(false)}
+              onCanPlay={() => setWatchPartyBuffering(false)}
             />
-            {/* Watch Party Host Badge */}
-            <div className="absolute top-4 left-4 bg-pink-500 text-white px-3 py-1.5 rounded-xl text-[10px] font-bold tracking-wider uppercase flex items-center gap-1 shadow-lg">
-              <Sparkles className="w-3.5 h-3.5" /> Watch Party {isWatchPartyHost ? "(Host)" : "(Syncing)"}
-            </div>
-            {isWatchPartyHost && (
-              <button
-                onClick={handleStopWatchParty}
-                className="absolute top-4 right-4 bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-lg"
-              >
-                End Session
-              </button>
+            {/* Buffering indicator */}
+            {watchPartyBuffering && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-10">
+                <div className="w-10 h-10 border-4 border-pink-500 border-t-transparent rounded-full animate-spin" />
+              </div>
             )}
+            {/* Watch Party Badge */}
+            <div className="absolute top-4 left-4 bg-pink-500 text-white px-3 py-1.5 rounded-xl text-[10px] font-bold tracking-wider uppercase flex items-center gap-1 shadow-lg">
+              <Sparkles className="w-3.5 h-3.5" /> Co-watching {isWatchPartyHost ? "(Host)" : "(Synced)"}
+            </div>
+            {/* Any participant can end the session */}
+            <button
+              onClick={handleStopWatchParty}
+              className="absolute top-4 right-4 bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-lg"
+            >
+              End Session
+            </button>
           </div>
         )}
 
-        {/* Grid or Spotlight Layout */}
+        {/* Grid or Spotlight Layout — auto-spotlight when someone is screen sharing */}
         <div className={`h-full grid gap-4 transition-all duration-300 ${
           isWatchPartyActive
             ? "flex-1 max-w-[280px] grid-cols-1 overflow-y-auto"
+            : anyoneScreenSharing
+            ? "flex-1 grid-cols-4 grid-rows-4" /* Force spotlight layout for screen sharing */
             : layout === "grid"
             ? totalStreamsCount === 1
               ? "flex-1 grid-cols-1"
@@ -422,7 +489,11 @@ export const CallScreen = ({
           
           {/* Local Stream Render */}
           <div className={`relative bg-zinc-900 border-2 rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center transition-all ${
-            layout === "spotlight"
+            anyoneScreenSharing
+              ? isSelfScreenSharing
+                ? "col-span-4 row-span-3 border-purple-500"
+                : "col-span-1 row-span-1 border-white/10"
+              : layout === "spotlight"
               ? activeSpeaker === currentUserId
                 ? "col-span-4 row-span-3 border-emerald-500"
                 : "col-span-1 row-span-1 border-white/10"
@@ -430,7 +501,7 @@ export const CallScreen = ({
               ? "border-emerald-500"
               : "border-white/10"
           }`}>
-            {isVideoOff ? (
+            {isVideoOff && !isSelfScreenSharing ? (
               <div className="text-center space-y-2">
                 <div className="w-16 h-16 rounded-full bg-zinc-800 mx-auto flex items-center justify-center border border-zinc-700">
                   <span className="text-lg font-bold text-white">Y</span>
@@ -447,6 +518,12 @@ export const CallScreen = ({
                 style={{ filter: filterStyleMap[videoFilter || "none"] }}
               />
             )}
+             {/* Screen Share Badge */}
+             {isSelfScreenSharing && (
+               <div className="absolute top-3 left-3 bg-purple-600 text-white px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase flex items-center gap-1.5 shadow-lg animate-pulse">
+                 <Monitor className="w-3.5 h-3.5" /> Sharing Screen
+               </div>
+             )}
              <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur px-3 py-1 rounded-full text-[11px] font-bold text-white flex items-center gap-1.5">
                <span>You {isMuted && "(Muted)"}</span>
                {isHandRaised && <span className="text-amber-400 text-xs animate-bounce">✋</span>}
@@ -457,11 +534,16 @@ export const CallScreen = ({
            {/* Remote Streams Render */}
            {peerList.map(([socketId, peerData]) => {
              const isSpeaker = activeSpeaker === peerData.userId;
+             const isPeerScreenSharing = peerData.screenSharing;
              return (
                <div
                  key={socketId}
                  className={`relative bg-zinc-900 border-2 rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center transition-all ${
-                   layout === "spotlight"
+                   anyoneScreenSharing
+                     ? isPeerScreenSharing
+                       ? "col-span-4 row-span-3 border-purple-500"
+                       : "col-span-1 row-span-1 border-white/10"
+                     : layout === "spotlight"
                      ? isSpeaker
                        ? "col-span-4 row-span-3 border-emerald-500"
                        : "col-span-1 row-span-1 border-white/10"
@@ -470,7 +552,7 @@ export const CallScreen = ({
                      : "border-white/10"
                  }`}
                >
-                 {peerData.videoOff ? (
+                 {peerData.videoOff && !isPeerScreenSharing ? (
                    <div className="text-center space-y-2">
                      <div className="w-16 h-16 rounded-full bg-zinc-800 mx-auto flex items-center justify-center border border-zinc-700">
                        <span className="text-lg font-bold text-white">
@@ -487,8 +569,14 @@ export const CallScreen = ({
                      autoPlay
                      playsInline
                      className="w-full h-full object-cover"
-                     style={{ filter: filterStyleMap[peerData.videoFilter || "none"] }}
+                     style={{ filter: isPeerScreenSharing ? '' : filterStyleMap[peerData.videoFilter || "none"] }}
                    />
+                 )}
+                 {/* Screen Share Badge on remote peer */}
+                 {isPeerScreenSharing && (
+                   <div className="absolute top-3 left-3 bg-purple-600 text-white px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase flex items-center gap-1.5 shadow-lg animate-pulse">
+                     <Monitor className="w-3.5 h-3.5" /> Sharing Screen
+                   </div>
                  )}
                  <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur px-3 py-1 rounded-full text-[11px] font-bold text-white flex items-center gap-1.5">
                    <span>@{peerData.userName || "Participant"}</span>

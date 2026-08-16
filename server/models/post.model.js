@@ -106,11 +106,21 @@ const postSchema = new mongoose.Schema(
       audioUrl: { type: String },
       coverUrl: { type: String },
     },
-    // AI Content Disclosure (Instagram-style "Made with AI" label)
+    // AI Content Disclosure ("Made with AI" label)
     aiLabel: {
       isAIGenerated: { type: Boolean, default: false },
       tool: { type: String, default: "" },           // e.g. "DALL-E", "Midjourney", "ChatGPT"
+      contentType: { type: String, default: "image" },
       disclosedAt: { type: Date, default: null },
+    },
+    // VYBE TV Long-form video support
+    isVybeTv: {
+      type: Boolean,
+      default: false,
+    },
+    duration: {
+      type: Number,
+      default: 0,
     },
     // Edit tracking
     isEdited: {

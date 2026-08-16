@@ -3,13 +3,30 @@ import { Server } from "socket.io";
 import { User } from "./models/user.model.js";
 import { Session } from "./models/session.model.js";
 import { Conversation } from "./models/conversation.model.js";
-import cookie from "cookie";
+import { parseCookie } from "cookie";
+import * as cookie from "cookie";
 import jwt from "jsonwebtoken";
 import { Channel } from "./models/channel.model.js";
 import { Community } from "./models/community.model.js";
 import Redis from "ioredis";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { CallSession } from "./models/callSession.model.js";
+
+const parseRawCookie = (cookieStr) => {
+  if (!cookieStr) return {};
+  try {
+    if (typeof parseCookie === "function") return parseCookie(cookieStr);
+    if (typeof cookie?.parseCookie === "function") return cookie.parseCookie(cookieStr);
+    if (typeof cookie?.parse === "function") return cookie.parse(cookieStr);
+  } catch (e) {}
+  return Object.fromEntries(
+    cookieStr.split(";").map((c) => {
+      const idx = c.indexOf("=");
+      if (idx === -1) return [c.trim(), ""];
+      return [c.slice(0, idx).trim(), decodeURIComponent(c.slice(idx + 1).trim())];
+    })
+  );
+};
 
 const activeUsers = new Map();
 const socketToUserMap = new Map();
@@ -51,7 +68,7 @@ const persistPresence = async (userId, isOnline) => {
       ? { $set: { isOnline: true, lastSeen: null } }
       : { $set: { isOnline: false, lastSeen: new Date() } };
 
-    return await User.findByIdAndUpdate(userId, update, { new: true }).exec();
+    return await User.findByIdAndUpdate(userId, update, { returnDocument: 'after' }).exec();
   } catch (error) {
     console.error(`[presence] failed for ${userId}:`, error);
   }
@@ -168,7 +185,7 @@ export const initializeSocket = (httpServer) => {
 
       // Extract from cookies if not provided directly
       if (!jwtToken && socket.handshake.headers.cookie) {
-        const cookies = cookie.parse(socket.handshake.headers.cookie);
+        const cookies = parseRawCookie(socket.handshake.headers.cookie);
         jwtToken = cookies.accessToken || cookies.token;
       }
 
@@ -641,7 +658,7 @@ export const initializeSocket = (httpServer) => {
     });
 
     // =====================================================
-    // INSTAGRAM LIVE BROADCASTING SUITE
+    // LIVE BROADCASTING SUITE
     // =====================================================
     socket.on("start-live-stream", (data) => {
       const { streamId, title } = data;
@@ -692,16 +709,16 @@ export const initializeSocket = (httpServer) => {
     });
 
     // =====================================================
-    // REEL / LOOP REALTIME EVENTS
+    // REEL REALTIME EVENTS
     // =====================================================
-    socket.on("loop-like-toggle", (data) => {
-      const { loopId, userId, isLiked, likesCount } = data;
-      io.emit("loop-like-updated", { loopId, userId, isLiked, likesCount });
+    socket.on("reel-like-toggle", (data) => {
+      const { reelId, userId, isLiked, likesCount } = data;
+      io.emit("reel-like-updated", { reelId, userId, isLiked, likesCount });
     });
 
-    socket.on("loop-comment-send", (data) => {
-      const { loopId, comment } = data;
-      io.emit("loop-comment-updated", { loopId, comment });
+    socket.on("reel-comment-send", (data) => {
+      const { reelId, comment } = data;
+      io.emit("reel-comment-updated", { reelId, comment });
     });
 
     // =====================================================

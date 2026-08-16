@@ -37,15 +37,15 @@ This document details the features and updates made to align VYBE's post uploade
     - Displays **"Follow Back"** if the target user is currently in your followers list but you aren't following them back.
     - Displays **"Requested"** if you sent a follow request to a private account that is still pending approval.
 
-- **Instagram-Style Private Accounts Lock Screen & Follow Requests**:
+- **Private Accounts Lock Screen & Follow Requests**:
   - Added a `followRequests` field to the database schema in [user.model.js](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/server/models/user.model.js) to track pending approvals.
   - Updated the backend `follow` controller in [user.controller.js](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/server/controllers/user.controller.js) so that clicking Follow on a private account toggles between sending and cancelling a request.
   - Implemented `/user/follow-requests` and `/user/follow-request/:action` (`accept` or `decline`) API endpoints.
   - Integrated a **"Follow Requests"** panel at the top of the activity feed in [NotificationsPage.jsx](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/client/src/pages/NotificationsPage.jsx) allowing private accounts to Confirm or Delete requests in real-time.
-  - Placed an Instagram-style private lock screen in [Profile.jsx](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/client/src/pages/Profile.jsx) showing a lock icon and hiding all posts, reels, and highlights for unapproved visitors.
+  - Placed a private lock screen in [Profile.jsx](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/client/src/pages/Profile.jsx) showing a lock icon and hiding all posts, reels, and highlights for unapproved visitors.
 
-- **Profile Message Redirect & Infinite Overwrite Loop Fixed**:
-  - Identified and fixed a critical override bug in [Messages.jsx](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/client/src/pages/Messages.jsx) where navigating to a newly created conversation from the profile page would enter an infinite loop. This was repeatedly overwriting the fully-loaded target participant data with optimistic mock data (`{ userName: "Chat" }`) during inbox synchronization.
+- **Profile Message Redirect & Overwrite Cycle Fixed**:
+  - Identified and fixed a critical override bug in [Messages.jsx](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/client/src/pages/Messages.jsx) where navigating to a newly created conversation from the profile page would repeatedly overwrite the fully-loaded target participant data with optimistic mock data (`{ userName: "Chat" }`) during inbox synchronization.
   - Added a smart safeguard check that returns early if the requested `conversationId` is already successfully active and fully populated with real user details.
 
 - **TypeError Crash Prevention on Null/Deleted Participants**:
@@ -56,13 +56,13 @@ This document details the features and updates made to align VYBE's post uploade
   - Enabled active plan state presentation inside [MonetizationDashboard.jsx](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/client/src/pages/MonetizationDashboard.jsx). If a verification plan is purchased or active, the Buy button is swapped with a pre-styled, disabled **"Active Subscription"** pill.
   - Expanded blue checkmark badge (`CheckCircle2`) visibility across all core views of the application to follow verified users everywhere:
     - Beside post creator usernames and comments author tags in [Post.jsx](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/client/src/components/Post.jsx).
-    - Beside Loop video overlay creators and comment authors in [LoopCard.jsx](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/client/src/components/LoopCard.jsx).
+    - Beside Reel video overlay creators and comment authors in [ReelCard.jsx](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/client/src/components/ReelCard.jsx).
     - Beside recipient names in chat area headers in [MessageArea.jsx](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/client/src/pages/MessageArea.jsx).
     - Beside user accounts in both Recent Searches list and live query search suggestions in [SearchModal.jsx](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/client/src/components/SearchModal.jsx).
     - Beside creators in the suggested users sidebar in [RightHome.jsx](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/client/src/components/RightHome.jsx) and list details in [OtherUsers.jsx](file:///c:/Users/Rahul%20Raj%20Modi/OneDrive/Desktop/Full%20stack%20Projects/Vybe/client/src/components/OtherUsers.jsx).
 
 ### 4. Smart Caption Translation & Google Translate Fallback (Hindi & English)
-- **Instagram-Style "See Translation" Toggle**: Restored the clean single toggle button on [AITranslateButton.jsx](file:///c:/Users/Rahul%20Raj%2520Modi/OneDrive/Desktop/Full%2520stack%2520Projects/Vybe/client/src/components/AITranslateButton.jsx).
+- **"See Translation" Toggle**: Restored the clean single toggle button on [AITranslateButton.jsx](file:///c:/Users/Rahul%20Raj%2520Modi/OneDrive/Desktop/Full%2520stack%2520Projects/Vybe/client/src/components/AITranslateButton.jsx).
 - **Auto-Detect Language Mode**: The backend controller [ai.controller.js](file:///c:/Users/Rahul%20Raj%2520Modi/OneDrive/Desktop/Full%2520stack%2520Projects/Vybe/server/controllers/ai.controller.js) automatically scans the text using regex for Devnagari characters and common Romanized Hinglish vocabulary keywords (e.g. `suno`, `kya`, `accha`, `yaar`, `tm`).
   - If Hindi/Hinglish is detected, the target language defaults to **English (`"en"`)**.
   - If English is detected, the target language defaults to **Hindi (`"hi"`)**.

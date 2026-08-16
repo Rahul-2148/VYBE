@@ -941,7 +941,7 @@ export const StoryStickersDrawer = ({ open, onClose, onAddSticker }) => {
   const renderPoll = () => (
     <div className="space-y-3 flex-1 min-h-0 flex flex-col justify-between">
       <div className="space-y-3">
-        {/* Live Instagram Poll Card Preview */}
+        {/* Live Poll Card Preview */}
         <div className="bg-white text-zinc-950 rounded-2xl p-4 shadow-2xl text-center space-y-2 border border-white/40">
           <input
             type="text"
@@ -964,7 +964,7 @@ export const StoryStickersDrawer = ({ open, onClose, onAddSticker }) => {
               placeholder="No"
               value={pollOptions[1]}
               onChange={(e) => setPollOptions([pollOptions[0], e.target.value])}
-              className="flex-1 py-2 px-3 bg-zinc-100 rounded-xl font-bold text-xs text-center border border-zinc-200 outline-none focus:border-rose-500"
+              className="flex-1 py-2 px-3 bg-zinc-100 rounded-xl font-bold text-xs text-center border border-zinc-200 outline-none"
             />
           </div>
         </div>
@@ -993,7 +993,7 @@ export const StoryStickersDrawer = ({ open, onClose, onAddSticker }) => {
   const renderQuestion = () => (
     <div className="space-y-3 flex-1 min-h-0 flex flex-col justify-between">
       <div className="space-y-3">
-        {/* Instagram Questions Card Preview */}
+        {/* Questions Card Preview */}
         <div className="bg-white text-zinc-950 rounded-2xl p-4 shadow-2xl text-center space-y-2 border border-white/40">
           <div className="bg-gradient-to-r from-purple-500 to-pink-500 -mx-4 -mt-4 p-2.5 rounded-t-2xl text-white font-extrabold text-[10px] uppercase tracking-wider">
             Ask me a question
@@ -1083,7 +1083,7 @@ export const StoryStickersDrawer = ({ open, onClose, onAddSticker }) => {
   const renderCountdown = () => (
     <div className="space-y-3 flex-1 min-h-0 flex flex-col justify-between">
       <div className="space-y-3">
-        {/* Instagram Countdown Card Preview */}
+        {/* Countdown Card Preview */}
         <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white rounded-2xl p-4 shadow-2xl text-center space-y-2 border border-white/30">
           <input
             type="text"

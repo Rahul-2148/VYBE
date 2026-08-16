@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
   Search,
@@ -7,27 +6,17 @@ import {
   Play,
   Pause,
   Check,
-  Crown,
-  Scissors,
   Upload,
   Sparkles,
   Bookmark,
-  Volume2,
-  VolumeX,
-  Flame,
-  Heart,
-  Dumbbell,
-  Coffee,
-  Film,
-  Globe,
   Loader2,
 } from "lucide-react";
 import { useSelector } from "react-redux";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
 // Fallback direct iTunes search helper if server route is unreachable
-const fetchItunesDirect = async (query, limit = 25) => {
+const fetchItunesDirect = async (query, limit = 30) => {
   try {
     const res = await fetch(
       `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=${limit}&media=music`
@@ -43,7 +32,7 @@ const fetchItunesDirect = async (query, limit = 25) => {
         album: item.collectionName || "",
         audioUrl: item.previewUrl,
         coverUrl: item.artworkUrl100
-          ? item.artworkUrl100.replace("100x100bb.jpg", "600x600bb.jpg")
+          ? item.artworkUrl100.replace("100x100bb.jpg", "1000x1000bb.jpg")
           : item.artworkUrl60 || "",
         duration: item.trackTimeMillis ? Math.round(item.trackTimeMillis / 1000) : 30,
         genre: item.primaryGenreName || "Music",
@@ -53,20 +42,24 @@ const fetchItunesDirect = async (query, limit = 25) => {
   }
 };
 
-// All Real Category Tabs
-const CATEGORIES = [
-  { id: "For You", name: "For You ✨", query: "Top Hits Trending 2024" },
+// All Real Category Tabs (Dynamically updated for any year)
+const getCurrentYear = () => new Date().getFullYear();
+
+const getCategories = () => [
+  { id: "For You", name: "For You ✨", query: `Top Hits Trending ${getCurrentYear()}` },
   { id: "Devotional", name: "Devotional 🕉️", query: "Shree Ram Siya Ram Shiv Tandav Hanuman Chalisa Krishna Bhajan" },
   { id: "Party & Punjabi", name: "Party & Punjabi 🔥", query: "Brown Munde 295 Tauba Tauba Sub Urban Punjabi Party Hits" },
   { id: "Romantic", name: "Romantic 💖", query: "Arijit Singh Kesariya Tum Hi Ho Golden Hour Romantic Songs" },
   { id: "Gym & Phonk", name: "Gym & Phonk ⚡", query: "Gigachad Phonk Tokyo Drift Hardstyle Gym Workout Motivation" },
   { id: "Lofi & Chill", name: "Lofi & Chill ☕", query: "Lofi Rain Midnight City Aesthetic Chill Beats" },
-  { id: "Bollywood", name: "Bollywood 🎬", query: "Chaleya Jawan Animal Satranga Bollywood Hits" },
+  { id: "Bollywood", name: "Bollywood 🎬", query: `Bollywood Hits ${getCurrentYear()} Chaleya Jawan Animal` },
   { id: "Pop & Global", name: "Pop & Global 🌍", query: "The Weeknd Blinding Lights Levitating Dua Lipa Pop Hits" },
   { id: "Sad & Acoustic", name: "Sad & Acoustic 💔", query: "Channa Mereya Arcade Let Me Down Slowly Sad Songs" },
   { id: "Travel & Nature", name: "Travel & Nature ✈️", query: "Wanderlust Electric Feel Acoustic Travel Chill" },
   { id: "Saved", name: "Saved Tracks 🔖", query: "" },
 ];
+
+const CATEGORIES = getCategories();
 
 export const StoryMusicPickerModal = ({
   open,
@@ -105,6 +98,12 @@ export const StoryMusicPickerModal = ({
   const [currentTime, setCurrentTime] = useState(0);
   const [totalDuration, setTotalDuration] = useState(30);
 
+  // Stable Content Context Ref
+  const contentContextRef = useRef(contentContext);
+  useEffect(() => {
+    contentContextRef.current = contentContext;
+  }, [contentContext]);
+
   // Toggle Save Track
   const toggleSaveTrack = (track, e) => {
     e?.stopPropagation();
@@ -112,10 +111,10 @@ export const StoryMusicPickerModal = ({
     let updated;
     if (exists) {
       updated = savedTracks.filter((t) => t.id !== track.id);
-      toast("Removed from Saved");
+      snackbar("Removed from Saved");
     } else {
       updated = [track, ...savedTracks];
-      toast.success("Saved to your music library! 🔖");
+      snackbar.success("Saved to your music library! 🔖");
     }
     setSavedTracks(updated);
     try {
@@ -123,93 +122,104 @@ export const StoryMusicPickerModal = ({
     } catch {}
   };
 
-  // Fetch Music Function (from Backend with Direct iTunes Fallback)
-  const fetchMusicData = useCallback(async (query, isAI = false, categoryName = "") => {
+  // Stable Load Music Function
+  const loadMusic = useCallback(async (tabName, queryText) => {
     setLoading(true);
     try {
-      if (isAI) {
-        // AI Content-Aware Recommendation
-        const params = new URLSearchParams({
-          caption: contentContext.caption || "",
-          mediaName: contentContext.mediaName || "",
-          theme: contentContext.theme || "",
-          tags: (contentContext.tags || []).join(" "),
-        });
-
+      // 1. If Searching
+      if (queryText && queryText.trim()) {
         try {
-          const res = await api.get(`/music/recommend?${params.toString()}`);
-          if (res.data?.success && res.data.tracks?.length > 0) {
+          const res = await api.get(`/music/search?q=${encodeURIComponent(queryText.trim())}&limit=30`);
+          if (res.data?.success && Array.isArray(res.data.tracks) && res.data.tracks.length > 0) {
             setTracks(res.data.tracks);
-            setAiInfo(res.data.aiInfo);
             setLoading(false);
             return;
           }
         } catch {}
 
-        // Fallback direct
-        const fallbackTracks = await fetchItunesDirect(query || "Trending Hits 2024", 30);
-        setTracks(fallbackTracks);
+        const fallback = await fetchItunesDirect(queryText.trim(), 30);
+        setTracks(fallback);
         setLoading(false);
         return;
       }
 
-      if (categoryName) {
+      // 2. Saved Tab
+      if (tabName === "Saved") {
         try {
-          const res = await api.get(`/music/category/${encodeURIComponent(categoryName)}`);
-          if (res.data?.success && res.data.tracks?.length > 0) {
+          const saved = JSON.parse(localStorage.getItem("vybe_saved_real_music") || "[]");
+          setTracks(saved);
+        } catch {
+          setTracks([]);
+        }
+        setLoading(false);
+        return;
+      }
+
+      // 3. For You Tab (AI Content-Aware)
+      if (tabName === "For You") {
+        const ctx = contentContextRef.current || {};
+        const params = new URLSearchParams({
+          caption: ctx.caption || "",
+          mediaName: ctx.mediaName || "",
+          theme: ctx.theme || "",
+          tags: (ctx.tags || []).join(" "),
+        });
+
+        try {
+          const res = await api.get(`/music/recommend?${params.toString()}`);
+          if (res.data?.success && Array.isArray(res.data.tracks) && res.data.tracks.length > 0) {
             setTracks(res.data.tracks);
+            if (res.data.aiInfo) {
+              setAiInfo(res.data.aiInfo);
+            }
             setLoading(false);
             return;
           }
         } catch {}
+
+        const fallback = await fetchItunesDirect(`Top Hits Trending ${getCurrentYear()}`, 30);
+        setTracks(fallback);
+        setLoading(false);
+        return;
       }
 
-      // Live search query
+      // 4. Specific Category Tab
+      const catObj = CATEGORIES.find((c) => c.id === tabName);
+      const query = catObj ? catObj.query : `${tabName} Hits`;
+      const catKey = tabName.toLowerCase().replace(/[^a-z]/g, "");
+
       try {
-        const res = await api.get(`/music/search?q=${encodeURIComponent(query)}&limit=30`);
-        if (res.data?.success && res.data.tracks?.length > 0) {
+        const res = await api.get(`/music/category/${encodeURIComponent(catKey)}`);
+        if (res.data?.success && Array.isArray(res.data.tracks) && res.data.tracks.length > 0) {
           setTracks(res.data.tracks);
           setLoading(false);
           return;
         }
       } catch {}
 
-      // Direct Apple API Fallback
       const direct = await fetchItunesDirect(query, 30);
       setTracks(direct);
     } catch (err) {
-      console.warn("Music fetch failed:", err);
+      console.warn("Music load failed:", err);
+      setTracks([]);
     } finally {
       setLoading(false);
     }
-  }, [contentContext]);
+  }, []);
 
-  // Initial Load & Tab Switching Effect
+  // Safe Single-Trigger Load Effect
   useEffect(() => {
     if (!open) return;
 
     if (search.trim()) {
       const timer = setTimeout(() => {
-        fetchMusicData(search.trim());
-      }, 350);
+        loadMusic(activeTab, search.trim());
+      }, 300);
       return () => clearTimeout(timer);
     }
 
-    if (activeTab === "Saved") {
-      setTracks(savedTracks);
-      return;
-    }
-
-    if (activeTab === "For You") {
-      fetchMusicData("", true);
-      return;
-    }
-
-    const catObj = CATEGORIES.find((c) => c.id === activeTab);
-    if (catObj) {
-      fetchMusicData(catObj.query, false, catObj.id.toLowerCase().replace(/[^a-z]/g, ""));
-    }
-  }, [open, activeTab, search, savedTracks, fetchMusicData]);
+    loadMusic(activeTab, "");
+  }, [open, activeTab, search, loadMusic]);
 
   // Cleanup Audio on unmount
   useEffect(() => {
@@ -238,6 +248,8 @@ export const StoryMusicPickerModal = ({
         audioObj.pause();
       }
       const audio = new Audio(track.audioUrl);
+      audio.volume = 1.0;
+      audio.preload = "auto";
       audio.currentTime = trimmingTrack?.id === track.id ? startTime : 0;
       audio.play().catch(() => null);
 
@@ -300,7 +312,7 @@ export const StoryMusicPickerModal = ({
     if (!file) return;
 
     if (!file.type.includes("audio")) {
-      toast.error("Please select a valid audio file (MP3, WAV, AAC, M4A).");
+      snackbar.error("Please select a valid audio file (MP3, WAV, AAC, M4A).");
       return;
     }
 
@@ -322,7 +334,7 @@ export const StoryMusicPickerModal = ({
     setDeviceTracks((prev) => [newTrack, ...prev]);
     setTracks((prev) => [newTrack, ...prev]);
     handleSelectTrack(newTrack);
-    toast.success(`Loaded "${cleanTitle}" from your device! 📁`);
+    snackbar.success(`Loaded "${cleanTitle}" from your device! 📁`);
   };
 
   // Trimmer Seek
@@ -362,15 +374,15 @@ export const StoryMusicPickerModal = ({
 
   return (
     <div
-      className="fixed inset-0 z-[700] bg-black/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 select-none font-sans"
+      className="fixed inset-0 z-[700] bg-black/85 backdrop-blur-md flex items-center justify-center p-1 sm:p-1.5 select-none font-sans"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-lg max-h-[92vh] bg-zinc-950 border border-zinc-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col justify-between text-white"
+        className="relative w-full max-w-lg h-[98.5vh] max-h-[98vh] sm:max-h-[960px] bg-zinc-950 border border-zinc-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col text-white"
         onClick={(e) => e.stopPropagation()}
       >
         {/* HEADER BAR */}
-        <div className="p-4 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900/60">
+        <div className="p-3.5 sm:p-4 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900/70">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-rose-500 via-purple-500 to-amber-400 flex items-center justify-center shadow-lg shadow-rose-500/20">
               <Music className="w-4 h-4 text-white" />
@@ -384,6 +396,7 @@ export const StoryMusicPickerModal = ({
           <div className="flex items-center gap-2">
             {/* Device Audio Upload Button */}
             <button
+              type="button"
               onClick={() => fileInputRef.current?.click()}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white rounded-full text-xs font-bold transition cursor-pointer"
               title="Upload MP3 / Audio from your device"
@@ -400,6 +413,7 @@ export const StoryMusicPickerModal = ({
             />
 
             <button
+              type="button"
               onClick={onClose}
               className="p-1.5 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-white transition cursor-pointer"
             >
@@ -409,7 +423,7 @@ export const StoryMusicPickerModal = ({
         </div>
 
         {/* SEARCH BAR */}
-        <div className="p-3 px-4 shrink-0 bg-zinc-900/30">
+        <div className="p-2.5 px-4 shrink-0 bg-zinc-900/30">
           <div className="relative flex items-center">
             <Search className="w-4 h-4 text-zinc-400 absolute left-3.5" />
             <input
@@ -421,6 +435,7 @@ export const StoryMusicPickerModal = ({
             />
             {search && (
               <button
+                type="button"
                 onClick={() => setSearch("")}
                 className="absolute right-3 text-zinc-500 hover:text-white text-xs cursor-pointer"
               >
@@ -435,6 +450,7 @@ export const StoryMusicPickerModal = ({
           {CATEGORIES.map((cat) => (
             <button
               key={cat.id}
+              type="button"
               onClick={() => {
                 setActiveTab(cat.id);
                 setSearch("");
@@ -452,12 +468,12 @@ export const StoryMusicPickerModal = ({
 
         {/* AI RECOMMENDED BANNER (When Content Matched) */}
         {aiInfo && activeTab === "For You" && !search && (
-          <div className="mx-4 mt-2 p-2.5 bg-gradient-to-r from-purple-950/70 via-rose-950/60 to-zinc-900 border border-purple-500/30 rounded-2xl flex items-center justify-between shadow-lg shrink-0 animate-in fade-in">
+          <div className="mx-4 mt-2 p-2 bg-gradient-to-r from-purple-950/70 via-rose-950/60 to-zinc-900 border border-purple-500/30 rounded-2xl flex items-center justify-between shadow-lg shrink-0">
             <div className="flex items-center gap-2">
               <span className="text-lg">{aiInfo.icon}</span>
               <div>
                 <p className="text-[11px] font-black text-rose-300 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />
+                  <Sparkles className="w-3 h-3 text-amber-400" />
                   AI Recommended for your Content
                 </p>
                 <p className="text-[9px] text-zinc-300">
@@ -471,8 +487,8 @@ export const StoryMusicPickerModal = ({
           </div>
         )}
 
-        {/* TRACKS LIST SCROLLABLE VIEWPORT */}
-        <div className="flex-1 min-h-[240px] max-h-[380px] overflow-y-auto px-4 py-2 space-y-1.5 hide-scrollbar">
+        {/* TRACKS LIST SCROLLABLE VIEWPORT (Shrinks cleanly when trimmer is open) */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-2 space-y-1.5 hide-scrollbar">
           {loading ? (
             <div className="py-16 flex flex-col items-center justify-center gap-3 text-zinc-400">
               <Loader2 className="w-6 h-6 animate-spin text-rose-500" />
@@ -540,12 +556,12 @@ export const StoryMusicPickerModal = ({
 
                   {/* Right: Bookmark & Action Check */}
                   <div className="flex items-center gap-2">
-                    {/* Animated Equalizer Bars when playing */}
+                    {/* Animated Equalizer 3 Wave Lines on Left of Bookmark when playing */}
                     {isPlaying && (
-                      <div className="flex items-end gap-0.5 h-4 px-1">
-                        <span className="w-0.5 bg-rose-500 h-full animate-pulse" />
-                        <span className="w-0.5 bg-rose-400 h-2/3 animate-bounce" />
-                        <span className="w-0.5 bg-rose-500 h-4/5 animate-pulse" />
+                      <div className="flex items-end gap-[2px] h-4 px-1 shrink-0">
+                        <span className="w-[2px] bg-rose-500 rounded-full block animate-sound-wave-1" />
+                        <span className="w-[2px] bg-rose-400 rounded-full block animate-sound-wave-2" />
+                        <span className="w-[2px] bg-rose-500 rounded-full block animate-sound-wave-3" />
                       </div>
                     )}
 
@@ -573,14 +589,14 @@ export const StoryMusicPickerModal = ({
           )}
         </div>
 
-        {/* BOTTOM TRIMMING & WAVEFORM HUD (When Track Selected) */}
+        {/* BOTTOM TRIMMING & WAVEFORM HUD (Fully visible, never cut off) */}
         {trimmingTrack && (
-          <div className="p-4 bg-zinc-900 border-t border-zinc-800 shrink-0 space-y-3">
+          <div className="p-3.5 sm:p-4 bg-zinc-900 border-t border-zinc-800 shrink-0 space-y-2.5 shadow-2xl">
             {/* Track Info & Duration Pills */}
             <div className="flex items-center justify-between">
               <div className="min-w-0 max-w-[200px]">
                 <p className="text-xs font-black text-white truncate">{trimmingTrack.title}</p>
-                <p className="text-[9px] text-zinc-400 truncate">{trimmingTrack.artist}</p>
+                <p className="text-[10px] text-zinc-400 truncate">{trimmingTrack.artist}</p>
               </div>
 
               {/* Snippet Duration Pills */}
@@ -588,8 +604,9 @@ export const StoryMusicPickerModal = ({
                 {[15, 30, "full"].map((dur) => (
                   <button
                     key={dur}
+                    type="button"
                     onClick={() => setSnippetDuration(dur)}
-                    className={`px-2 py-0.5 rounded-full transition cursor-pointer ${
+                    className={`px-2.5 py-0.5 rounded-full transition cursor-pointer ${
                       snippetDuration === dur ? "bg-rose-600 text-white" : "text-zinc-400 hover:text-white"
                     }`}
                   >
@@ -620,6 +637,7 @@ export const StoryMusicPickerModal = ({
 
             {/* Apply Button */}
             <button
+              type="button"
               onClick={handleConfirmSelection}
               className="w-full py-2.5 bg-gradient-to-r from-rose-500 via-pink-500 to-purple-600 hover:opacity-95 active:scale-98 rounded-2xl text-xs font-black text-white shadow-xl flex items-center justify-center gap-2 cursor-pointer"
             >

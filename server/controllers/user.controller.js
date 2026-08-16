@@ -6,6 +6,7 @@ import { createNotificationHelper } from "./notification.controller.js";
 import { CATEGORY_KEYWORDS } from "./search.controller.js";
 import { getBlockedUserIds } from "../utils/blockHelper.js";
 import { Conversation } from "../models/conversation.model.js";
+import { Message } from "../models/message.model.js";
 import mongoose from "mongoose";
 import { Notification } from "../models/notification.model.js";
 
@@ -45,7 +46,7 @@ export const getCurrentUser = async (req, res) => {
   try {
     const userId = req.userId; // auth middleware
     const user = await User.findById(userId).populate(
-      "posts loops posts.author posts.comments stories followers following followRequests"
+      "posts reels posts.author posts.comments stories followers following followRequests"
     );
     if (!user) {
       return res.status(404).json({ message: "User not found!" });
@@ -221,14 +222,23 @@ export const editProfile = async (req, res) => {
     user.age = age || user.age;
     user.location = location || user.location;
     user.website = website || user.website;
-    user.accountType = accountType || user.accountType;
+    if (accountType !== undefined) user.accountType = accountType;
+    if (req.body.isPrivate !== undefined) {
+      user.accountType = req.body.isPrivate === true || String(req.body.isPrivate) === "true" ? "private" : "public";
+    }
     if (parsedLinks) user.links = parsedLinks;
     if (category !== undefined) user.category = category;
     if (professionalType !== undefined) user.professionalType = professionalType;
     
-    // Professional accounts cannot be private
-    if (user.professionalType !== "personal") {
+    // Exact Instagram Rule:
+    // 1. If account is private, professionalType must be personal.
+    // 2. If professionalType is creator or business, accountType must be public.
+    if (user.accountType === "private") {
+      user.professionalType = "personal";
+    } else if (user.professionalType && user.professionalType !== "personal") {
       user.accountType = "public";
+    } else if (!user.professionalType) {
+      user.professionalType = "personal";
     }
 
     if (showCategory !== undefined) {
@@ -275,7 +285,17 @@ export const getProfile = async (req, res) => {
       userName: { $regex: new RegExp("^" + cleanUserName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&") + "$", "i") },
     })
       .select("-password")
-      .populate("posts loops stories followers following followRequests");
+      .populate({
+        path: "posts",
+        match: { isArchived: { $ne: true } },
+        options: { sort: { createdAt: -1 } },
+        populate: [
+          { path: "author", select: "name userName profileImage isVerified" },
+          { path: "comments.author", select: "name userName profileImage isVerified" },
+          { path: "taggedUsers.user", select: "userName profileImage" },
+        ],
+      })
+      .populate("reels stories followers following followRequests");
     if (!user) {
       return res.status(404).json({ message: "User not found!" });
     }
@@ -301,6 +321,21 @@ export const getProfile = async (req, res) => {
         { _id: user._id },
         { $inc: { "insights.profileVisitsCount": 1 } }
       );
+    } else if (currentUserId && currentUserId.toString() === user._id.toString()) {
+      // If owner is viewing own profile, populate full savedPosts and savedReels
+      await user.populate([
+        {
+          path: "savedPosts",
+          populate: [
+            { path: "author", select: "name userName profileImage isVerified" },
+            { path: "comments.author", select: "userName profileImage isVerified" },
+          ],
+        },
+        {
+          path: "savedReels",
+          populate: { path: "author", select: "name userName profileImage isVerified" },
+        },
+      ]);
     }
 
     return res.status(200).json({ success: true, error: false, user: user.toObject() });
@@ -308,6 +343,45 @@ export const getProfile = async (req, res) => {
     return res
       .status(500)
       .json({ message: `getProfileByUserName error: ${error.message}` });
+  }
+};
+
+// get all saved items (posts + reels) for logged-in user
+export const getSavedItems = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const user = await User.findById(userId)
+      .populate({
+        path: "savedPosts",
+        populate: [
+          { path: "author", select: "name userName profileImage isVerified" },
+          { path: "comments.author", select: "userName profileImage isVerified" },
+        ],
+      })
+      .populate({
+        path: "savedReels",
+        populate: { path: "author", select: "name userName profileImage isVerified" },
+      });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const validSavedPosts = (user.savedPosts || []).filter(Boolean);
+    const validSavedReels = (user.savedReels || []).filter(Boolean);
+
+    return res.status(200).json({
+      success: true,
+      error: false,
+      savedPosts: validSavedPosts,
+      savedReels: validSavedReels,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: `getSavedItems error: ${error.message}`,
+    });
   }
 };
 
@@ -413,7 +487,7 @@ export const follow = async (req, res) => {
     });
 
     const updatedCurrentUser = await User.findById(currentUserId).populate(
-      "posts loops stories followers following"
+      "posts reels stories followers following"
     );
 
     return res.status(200).json({
@@ -471,7 +545,7 @@ export const switchAccountType = async (req, res) => {
 export const getAccountInsights = async (req, res) => {
   try {
     const user = await User.findById(req.userId)
-      .populate("posts loops followers");
+      .populate("posts reels followers");
     if (!user) return res.status(404).json({ message: "User not found!" });
 
     // Calculate aggregated metrics
@@ -483,7 +557,7 @@ export const getAccountInsights = async (req, res) => {
       totalComments += p.comments?.length || 0;
     });
 
-    user.loops?.forEach((l) => {
+    user.reels?.forEach((l) => {
       totalLikes += l.likes?.length || 0;
       totalComments += l.comments?.length || 0;
     });
@@ -560,7 +634,7 @@ export const getAccountInsights = async (req, res) => {
         category: user.category || "Digital Creator",
         followersCount: followerCount,
         followingCount: user.following?.length || 0,
-        totalPosts: (user.posts?.length || 0) + (user.loops?.length || 0),
+        totalPosts: (user.posts?.length || 0) + (user.reels?.length || 0),
         totalLikes,
         totalComments,
         reachCount: Math.round(reachCount),
@@ -642,7 +716,12 @@ export const updatePrivacySettings = async (req, res) => {
     if (allowStoryRepliesFrom !== undefined) user.privacySettings.allowStoryRepliesFrom = allowStoryRepliesFrom;
     if (allowPostSharingToDM !== undefined) user.privacySettings.allowPostSharingToDM = allowPostSharingToDM;
     if (messageRequestPermission !== undefined) user.privacySettings.messageRequestPermission = messageRequestPermission;
-    if (accountType !== undefined) user.accountType = accountType;
+    if (accountType !== undefined) {
+      user.accountType = accountType;
+      if (accountType === "private") {
+        user.professionalType = "personal";
+      }
+    }
     if (readReceipts !== undefined) user.readReceipts = readReceipts;
 
     await user.save();
@@ -662,14 +741,16 @@ export const updatePrivacySettings = async (req, res) => {
 // Get User Theme
 export const getUserTheme = async (req, res) => {
   try {
+    if (!req.userId) {
+      return res.status(200).json({ success: true, theme: "system" });
+    }
     const user = await User.findById(req.userId).select("theme");
-    if (!user) return res.status(404).json({ message: "User not found!" });
     return res.status(200).json({
       success: true,
-      theme: user.theme || "system",
+      theme: user?.theme || "system",
     });
   } catch (error) {
-    return res.status(500).json({ message: `getUserTheme error: ${error.message}` });
+    return res.status(200).json({ success: true, theme: "system" });
   }
 };
 
@@ -683,7 +764,7 @@ export const updateUserTheme = async (req, res) => {
     const user = await User.findByIdAndUpdate(
       req.userId,
       { $set: { theme } },
-      { new: true }
+      { returnDocument: 'after' }
     );
     if (!user) return res.status(404).json({ message: "User not found!" });
     return res.status(200).json({
@@ -733,7 +814,7 @@ export const handleFollowRequest = async (req, res) => {
             $pull: { followRequests: senderId },
             $addToSet: { followers: senderId }
           },
-          { new: true, session }
+          { returnDocument: 'after', session }
         );
         
         // Atomically update sender (add to following)
@@ -763,7 +844,7 @@ export const handleFollowRequest = async (req, res) => {
         const currentUser = await User.findByIdAndUpdate(
           req.userId,
           { $pull: { followRequests: senderId } },
-          { new: true, session }
+          { returnDocument: 'after', session }
         );
         if (!currentUser) throw new Error("User not found!");
 
@@ -904,5 +985,228 @@ export const getBlockedUsersList = async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Get followers of a user with live search support
+export const getUserFollowers = async (req, res) => {
+  try {
+    const { userName } = req.params;
+    const { search = "" } = req.query;
+    const cleanUserName = (userName || "").trim();
+
+    const targetUser = await User.findOne({
+      userName: { $regex: new RegExp("^" + cleanUserName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&") + "$", "i") },
+    }).select("followers accountType");
+
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const filter = {
+      _id: { $in: targetUser.followers || [] },
+    };
+
+    if (search && search.trim()) {
+      const q = search.trim();
+      filter.$or = [
+        { userName: { $regex: q, $options: "i" } },
+        { name: { $regex: q, $options: "i" } },
+      ];
+    }
+
+    const followers = await User.find(filter).select(
+      "name userName profileImage isVerified bio profession followers following"
+    );
+
+    return res.status(200).json({
+      success: true,
+      followers,
+      count: targetUser.followers?.length || 0,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Get following of a user with live search support
+export const getUserFollowing = async (req, res) => {
+  try {
+    const { userName } = req.params;
+    const { search = "" } = req.query;
+    const cleanUserName = (userName || "").trim();
+
+    const targetUser = await User.findOne({
+      userName: { $regex: new RegExp("^" + cleanUserName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&") + "$", "i") },
+    }).select("following accountType");
+
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const filter = {
+      _id: { $in: targetUser.following || [] },
+    };
+
+    if (search && search.trim()) {
+      const q = search.trim();
+      filter.$or = [
+        { userName: { $regex: q, $options: "i" } },
+        { name: { $regex: q, $options: "i" } },
+      ];
+    }
+
+    const following = await User.find(filter).select(
+      "name userName profileImage isVerified bio profession followers following"
+    );
+
+    return res.status(200).json({
+      success: true,
+      following,
+      count: targetUser.following?.length || 0,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Get mutual connections between followers and following
+export const getUserMutuals = async (req, res) => {
+  try {
+    const { userName } = req.params;
+    const cleanUserName = (userName || "").trim();
+
+    const targetUser = await User.findOne({
+      userName: { $regex: new RegExp("^" + cleanUserName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&") + "$", "i") },
+    }).select("followers following");
+
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const followerIds = (targetUser.followers || []).map((id) => id.toString());
+    const followingIds = (targetUser.following || []).map((id) => id.toString());
+
+    // Mutuals: in both followers AND following
+    const mutualIds = followerIds.filter((id) => followingIds.includes(id));
+
+    const mutuals = await User.find({
+      _id: { $in: mutualIds },
+    }).select("name userName profileImage isVerified bio profession followers following");
+
+    return res.status(200).json({
+      success: true,
+      mutuals,
+      count: mutuals.length,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Request Contact Phone Number from user
+export const requestContactInfo = async (req, res) => {
+  try {
+    const { targetUserId } = req.params;
+    const currentUserId = req.userId;
+
+    if (!targetUserId) {
+      return res.status(400).json({ success: false, message: "Target user required" });
+    }
+
+    if (targetUserId.toString() === currentUserId.toString()) {
+      return res.status(400).json({ success: false, message: "Cannot request your own contact" });
+    }
+
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const currentUser = await User.findById(currentUserId).select("name userName profileImage contactPhone");
+
+    const uObjId = new mongoose.Types.ObjectId(currentUserId);
+    const tObjId = new mongoose.Types.ObjectId(targetUserId);
+
+    // 1. Find or create 1-on-1 Conversation
+    let conversation = await Conversation.findOne({
+      isGroup: false,
+      participants: { $all: [uObjId, tObjId] },
+    });
+
+    if (!conversation) {
+      conversation = await Conversation.create({
+        participants: [uObjId, tObjId],
+        isGroup: false,
+        requestStatus: "none",
+      });
+    }
+
+    // 2. Create the Contact Request Message in the conversation
+    const message = await Message.create({
+      conversation: conversation._id,
+      sender: currentUserId,
+      type: "contact_request",
+      content: {
+        text: `📱 Contact Request: @${currentUser.userName} requested to view your phone number.`,
+        contactData: {
+          name: currentUser.name,
+          phone: currentUser.contactPhone || "",
+        },
+      },
+    });
+
+    // Update conversation last message & timestamp
+    conversation.lastMessage = message._id;
+    conversation.updatedAt = new Date();
+    await conversation.save();
+
+    // 3. Create Notification
+    const notification = await Notification.create({
+      recipient: targetUserId,
+      sender: currentUserId,
+      type: "contact_request",
+      commentText: "requested your contact phone number in chat.",
+    });
+
+    // 4. Real-time emit via Socket.IO
+    try {
+      const io = req.app.locals.io;
+      if (io) {
+        const populatedMessage = await Message.findById(message._id).populate("sender", "name userName profileImage isVerified");
+        const notifPayload = {
+          _id: notification._id,
+          recipient: targetUserId,
+          sender: currentUser,
+          type: "contact_request",
+          commentText: "requested your contact phone number in chat.",
+          createdAt: notification.createdAt,
+        };
+
+        const targetRooms = [`user_${targetUserId}`, targetUserId.toString()];
+        targetRooms.forEach((r) => {
+          io.to(r).emit("notification-received", { notification: notifPayload });
+          io.to(r).emit("new-notification", notifPayload);
+          io.to(r).emit("notification:received", notifPayload);
+          io.to(r).emit("receive-message", populatedMessage);
+          io.to(r).emit("message-received", { message: populatedMessage });
+          io.to(r).emit("new-message", populatedMessage);
+        });
+
+        io.to(conversation._id.toString()).emit("new-message", populatedMessage);
+        io.to(`conversation_${conversation._id}`).emit("message-received", { message: populatedMessage });
+      }
+    } catch (sErr) {
+      console.warn("Socket notification warning:", sErr.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Contact request sent to @${targetUser.userName} in Direct Messages!`,
+      conversationId: conversation._id,
+      messageId: message._id,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: `requestContactInfo error: ${err.message}` });
   }
 };

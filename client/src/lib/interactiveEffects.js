@@ -1,6 +1,6 @@
 /**
- * interactiveEffects.js - Global Micro-Interactions, Haptics & Audio Synthesizer for VYBE
- * Provides Instagram-tier sensory feedback, micro-haptics, pleasant audio chimes, and particle dynamics.
+ * VYBE Interactive & Sensory Micro-Feedback Engine
+ * Provides enterprise-tier sensory feedback, micro-haptics, pleasant audio chimes, and particle dynamics.
  */
 
 // Web Audio API Synthesizer (Zero asset dependency, zero lag)

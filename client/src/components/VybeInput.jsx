@@ -1,17 +1,16 @@
 import React, { useState } from "react";
 
 /**
- * Instagram-exact floating-label input field.
+ * Ultra-Professional Floating-Label Input Field
  *
- * Design spec (pixel-perfect Instagram web login, July 2026):
- *   • Height: 36px
- *   • Background: var(--input-bg) → #fafafa light / #121212 dark
- *   • Border: 1px solid var(--input-border) → #dbdbdb light / #363636 dark
- *   • Border-radius: 3px (Instagram signature — almost square)
- *   • Font: system-ui 12px, label 10px when floated
- *   • Focus: border darkens to var(--input-focus), no ring glow
- *   • Floating label: smooth 100ms ease-out transform + font-size change
- *   • Show/Hide password: text button, 14px semibold, right-aligned
+ * Design Spec:
+ *   • Height: 54px (spacious, ergonomic, easy tap target)
+ *   • Background: var(--surface)
+ *   • Border: 1px solid var(--border) → transitions to var(--primary) on focus
+ *   • Border-radius: 14px
+ *   • Font: 15px for input text (comfortable & prevents mobile iOS auto-zoom)
+ *   • Floating label: sits at 7px with 11px font-size when active
+ *   • Focus: smooth 3.5px primary-muted ring glow
  */
 const VybeInput = ({
   id,
@@ -35,33 +34,32 @@ const VybeInput = ({
   return (
     <div className="vybe-input-wrapper">
       <div
-        className={`vybe-input-shell ${focused ? "vybe-input-shell--focused" : ""}`}
+        className={`vybe-input-shell ${focused ? "vybe-input-shell--focused" : ""} ${isFloated ? "vybe-input-shell--floated" : ""}`}
       >
+        {/* Notched Floating Label sitting on top border */}
+        <label
+          htmlFor={id}
+          className={`vybe-input-label ${isFloated ? "vybe-input-label--floated" : ""} ${focused ? "vybe-input-label--focused" : ""}`}
+        >
+          {label}
+        </label>
+
         {/* Optional leading icon (for search fields) */}
         {Icon && (
           <Icon
             className="vybe-input-icon"
             style={{
-              width: 16,
-              height: 16,
+              width: 18,
+              height: 18,
               flexShrink: 0,
-              color: "var(--text-muted)",
-              transition: "color 0.15s",
-              ...(focused ? { color: "var(--text-secondary)" } : {}),
+              color: focused ? "var(--primary)" : "var(--text-muted)",
+              transition: "color 0.18s",
             }}
           />
         )}
 
         <div className="vybe-input-inner">
-          {/* Floating label */}
-          <label
-            htmlFor={id}
-            className={`vybe-input-label ${isFloated ? "vybe-input-label--floated" : ""}`}
-          >
-            {label}
-          </label>
-
-          {/* Actual input */}
+          {/* Actual input — perfectly centered */}
           <input
             id={id}
             type={isPassword ? (showPassword ? "text" : "password") : type}
@@ -72,7 +70,7 @@ const VybeInput = ({
             required={required}
             autoFocus={autoFocus}
             autoComplete="off"
-            className={`vybe-input-field ${isFloated ? "vybe-input-field--active" : ""}`}
+            className="vybe-input-field"
           />
         </div>
 
@@ -82,6 +80,7 @@ const VybeInput = ({
             type="button"
             onClick={() => setShowPassword(!showPassword)}
             className="vybe-input-toggle"
+            title={showPassword ? "Hide password" : "Show password"}
           >
             {showPassword ? "Hide" : "Show"}
           </button>
@@ -111,3 +110,4 @@ const VybeInput = ({
 };
 
 export default VybeInput;
+

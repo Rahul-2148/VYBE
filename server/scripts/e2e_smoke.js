@@ -66,13 +66,13 @@ const run = async () => {
     console.log("live-comment-received on A", commentReceived?.comment === commentText);
     results.push(commentReceived?.comment === commentText);
 
-    // loop-like toggle (broadcast)
-    const aLoopPromise = onceWithTimeout(a, "loop-like-updated");
-    const bLoopPromise = onceWithTimeout(b, "loop-like-updated");
-    a.emit("loop-like-toggle", { loopId: "loop123", userId: "userA", isLiked: true, likesCount: 1 });
-    const [aLoop, bLoop] = await Promise.all([aLoopPromise, bLoopPromise]);
-    console.log("loop-like-updated received by both", !!aLoop && !!bLoop);
-    results.push(!!aLoop && !!bLoop);
+    // reel-like toggle (broadcast)
+    const aReelPromise = onceWithTimeout(a, "reel-like-updated");
+    const bReelPromise = onceWithTimeout(b, "reel-like-updated");
+    a.emit("reel-like-toggle", { reelId: "reel123", userId: "userA", isLiked: true, likesCount: 1 });
+    const [aReel, bReel] = await Promise.all([aReelPromise, bReelPromise]);
+    console.log("reel-like-updated received by both", !!aReel && !!bReel);
+    results.push(!!aReel && !!bReel);
 
     // call invite flow
     const bInvitePromise = onceWithTimeout(b, "call:invite-received");

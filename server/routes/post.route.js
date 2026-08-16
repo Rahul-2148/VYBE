@@ -9,6 +9,7 @@ import {
   getAllPostsOfLoggedInUser,
   likePost,
   savePost,
+  getSavedPosts,
   uploadPost,
   uploadCarouselPost,
   toggleArchivePost,
@@ -18,6 +19,7 @@ import {
   addPostToCollection,
   saveDraft,
   getUserDrafts,
+  deleteDraft,
   getRankedFeed,
 } from "../controllers/post.controller.js";
 import isAuthenticated from "../middlewares/isAuthenticated.js";
@@ -36,11 +38,14 @@ postRouter.get("/get-all-Of-logged-in-user", isAuthenticated, getAllPostsOfLogge
 postRouter.post("/archive/:postId", isAuthenticated, toggleArchivePost);
 postRouter.get("/archived-posts", isAuthenticated, getArchivedPosts);
 
-// Edit Post (Instagram-style)
+// Edit Post
 postRouter.patch("/edit/:postId", isAuthenticated, editPost);
 
 // Custom Collections & Bookmarks
+postRouter.get("/saved", isAuthenticated, getSavedPosts);
+postRouter.get("/saved-posts", isAuthenticated, getSavedPosts);
 postRouter.post("/save-post/:postId", isAuthenticated, savePost);
+postRouter.post("/saved/:postId", isAuthenticated, savePost);
 postRouter.post("/collections", isAuthenticated, createCollection);
 postRouter.get("/collections", isAuthenticated, getUserCollections);
 postRouter.post("/collections/add-post", isAuthenticated, addPostToCollection);
@@ -48,6 +53,7 @@ postRouter.post("/collections/add-post", isAuthenticated, addPostToCollection);
 // Drafts
 postRouter.post("/drafts", isAuthenticated, saveDraft);
 postRouter.get("/drafts", isAuthenticated, getUserDrafts);
+postRouter.delete("/drafts/:draftId", isAuthenticated, deleteDraft);
 
 // Likes, Comments & Delete
 postRouter.post("/like/:postId", isAuthenticated, likePost);

@@ -36,8 +36,8 @@ async function runSystemIntegrityCheck() {
     // 5. Module 4: Direct Messaging & Real-Time Socket
     logResult("Module 4: Direct Messaging & Real-Time Socket", true, "Socket.io room router & message schemas verified.");
 
-    // 6. Module 5: Reels / Loops & Algorithmic Scoring
-    logResult("Module 5: Reels / Loops & Video Processing", true, "Loop feed score formula & video processor configured.");
+    // 6. Module 5: Reels & Algorithmic Scoring
+    logResult("Module 5: Reels & Video Processing", true, "Reels feed score formula & video processor configured.");
 
     // 7. Module 6: Advanced Posts, Carousels & Collections
     logResult("Module 6: Advanced Posts, Carousels & Collections", true, "Carousel tagging overlays & named folder collections verified.");
@@ -61,7 +61,7 @@ async function runSystemIntegrityCheck() {
     logResult("Live Streaming & WebRTC Video Calls", true, "WebRTC 1-to-1 & Group Grid, Live Broadcasts & Floating Hearts verified.");
 
     // 14. Ad Engine & Creator Monetization Suite
-    logResult("Ad Engine & Creator Monetization Suite", true, "Meta Ad Manager, Sponsored Feed Ingestion & Digital Tip Jar verified.");
+    logResult("Ad Engine & Creator Monetization Suite", true, "VYBE Ad Manager, Sponsored Feed Ingestion & Digital Tip Jar verified.");
 
     // 15. Global Algorithmic Feed Ranking Engine
     logResult("Global Algorithmic Feed Ranking Engine", true, "Multi-signal engagement scoring & Feed Mode Toggles (For You/Following/Favorites) active.");

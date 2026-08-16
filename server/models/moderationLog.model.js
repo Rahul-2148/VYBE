@@ -10,7 +10,7 @@ const moderationLogSchema = new mongoose.Schema(
     },
     contentType: {
       type: String,
-      enum: ["comment", "post", "loop", "message"],
+      enum: ["comment", "post", "reel", "message"],
       required: true,
     },
     content: {

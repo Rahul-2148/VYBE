@@ -17,6 +17,11 @@ import {
   blockUserDirect,
   unblockUserDirect,
   getBlockedUsersList,
+  getUserFollowers,
+  getUserFollowing,
+  getUserMutuals,
+  requestContactInfo,
+  getSavedItems,
 } from "../controllers/user.controller.js";
 import isAuthenticated from "../middlewares/isAuthenticated.js";
 import { upload } from "../middlewares/multer.js";
@@ -24,8 +29,13 @@ import { upload } from "../middlewares/multer.js";
 const userRouter = express.Router();
 
 userRouter.get("/current-user", isAuthenticated, getCurrentUser);
+userRouter.get("/saved-items", isAuthenticated, getSavedItems);
 userRouter.get("/suggested", isAuthenticated, suggestedUsers);
 userRouter.get("/getProfile/:userName", isAuthenticated, getProfile);
+userRouter.get("/:userName/followers", isAuthenticated, getUserFollowers);
+userRouter.get("/:userName/following", isAuthenticated, getUserFollowing);
+userRouter.get("/:userName/mutuals", isAuthenticated, getUserMutuals);
+userRouter.post("/request-contact/:targetUserId", isAuthenticated, requestContactInfo);
 userRouter.get("/follow/:targetUserId", isAuthenticated, follow);
 userRouter.get("/insights", isAuthenticated, getAccountInsights);
 userRouter.get("/privacy-settings", isAuthenticated, getPrivacySettings);

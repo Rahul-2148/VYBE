@@ -1,17 +1,20 @@
 import React, { useState, useEffect } from "react";
-import { X, MapPin, Type, MessageSquare, Eye, EyeOff, Sparkles, Save, Loader2, ImageIcon, Bot } from "lucide-react";
+import { X, MapPin, Type, MessageSquare, Eye, EyeOff, Sparkles, Save, Loader2, ImageIcon, Bot, Layers } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { toast } from "sonner";
+import { snackbar } from "../lib/snackbar";
+import { triggerHaptic } from "../lib/interactiveEffects";
+import AIInfoModal from "./AIInfoModal";
 import api from "../lib/axios";
 
-const AI_TOOLS = [
-  "DALL·E",
+const POPULAR_AI_TOOLS = [
   "Midjourney",
+  "ChatGPT / DALL·E",
+  "Runway Gen-3",
+  "Sora",
   "Stable Diffusion",
-  "Adobe Firefly",
-  "ChatGPT",
-  "Google Gemini",
-  "Other AI Tool",
+  "Flux.1",
+  "ElevenLabs",
+  "Luma Dream",
 ];
 
 const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
@@ -22,6 +25,8 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
   const [likesHidden, setLikesHidden] = useState(post?.likesHidden || false);
   const [isAIGenerated, setIsAIGenerated] = useState(post?.aiLabel?.isAIGenerated || false);
   const [aiTool, setAiTool] = useState(post?.aiLabel?.tool || "");
+  const [aiContentType, setAiContentType] = useState(post?.aiLabel?.contentType || "image");
+  const [showAIInfoModal, setShowAIInfoModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showAltText, setShowAltText] = useState(false);
 
@@ -34,6 +39,7 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
       setLikesHidden(post.likesHidden || false);
       setIsAIGenerated(post.aiLabel?.isAIGenerated || false);
       setAiTool(post.aiLabel?.tool || "");
+      setAiContentType(post.aiLabel?.contentType || "image");
     }
   }, [post]);
 
@@ -49,16 +55,17 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
         aiLabel: {
           isAIGenerated,
           tool: isAIGenerated ? aiTool : "",
+          contentType: isAIGenerated ? aiContentType : "image",
         },
       });
 
       if (res.data.success) {
-        toast.success("Post updated!");
+        snackbar.success("Post updated!");
         onPostUpdated?.(res.data.post);
         onClose();
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to update post.");
+      snackbar.error(err.response?.data?.message || "Failed to update post.");
     } finally {
       setSaving(false);
     }
@@ -77,7 +84,7 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+        className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
         onClick={onClose}
       >
         <motion.div
@@ -92,7 +99,7 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
           <div className="flex items-center justify-between px-5 py-4 border-b border-border">
             <button
               onClick={onClose}
-              className="p-1.5 text-text-secondary hover:text-text rounded-full hover:bg-surface transition"
+              className="p-1.5 text-text-secondary hover:text-text rounded-full hover:bg-surface transition cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -100,7 +107,7 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
             <button
               onClick={handleSave}
               disabled={saving}
-              className="px-4 py-1.5 bg-[#0095f6] hover:bg-[#1aa1f7] disabled:opacity-50 text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5"
+              className="px-4 py-1.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-95 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-md shadow-purple-500/20 cursor-pointer"
             >
               {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
               Done
@@ -153,7 +160,7 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
                 {location && (
                   <button
                     onClick={() => setLocation("")}
-                    className="text-text-muted hover:text-text transition"
+                    className="text-text-muted hover:text-text transition cursor-pointer"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -165,7 +172,7 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
             <div className="border-b border-border">
               <button
                 onClick={() => setShowAltText(!showAltText)}
-                className="w-full px-5 py-4 flex items-center justify-between text-sm text-text hover:bg-surface/50 transition"
+                className="w-full px-5 py-4 flex items-center justify-between text-sm text-text hover:bg-surface/50 transition cursor-pointer"
               >
                 <div className="flex items-center gap-3">
                   <Type className="w-5 h-5 text-text-secondary" />
@@ -185,20 +192,20 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
                     onChange={(e) => setAltText(e.target.value)}
                     placeholder="Describe what's in your photo..."
                     rows={2}
-                    className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-xs text-text outline-none focus:border-[#0095f6] resize-none placeholder:text-text-muted transition"
+                    className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-xs text-text outline-none focus:border-primary resize-none placeholder:text-text-muted transition"
                   />
                 </div>
               )}
             </div>
 
             {/* Advanced Settings */}
-            <div className="px-5 py-3">
+            <div className="px-5 py-3 border-b border-border">
               <h3 className="text-[11px] font-bold text-text-muted uppercase tracking-wider mb-3">
                 Advanced Settings
               </h3>
 
               {/* Hide Like Count */}
-              <div className="flex items-center justify-between py-3.5">
+              <div className="flex items-center justify-between py-2.5">
                 <div className="flex items-center gap-3">
                   {likesHidden ? (
                     <EyeOff className="w-5 h-5 text-text-secondary" />
@@ -211,8 +218,9 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setLikesHidden(!likesHidden)}
-                  className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${likesHidden ? "bg-[#0095f6]" : "bg-zinc-600"}`}
+                  className={`relative w-11 h-6 rounded-full transition-colors duration-200 cursor-pointer ${likesHidden ? "bg-rose-600" : "bg-surface-hover border border-border"}`}
                 >
                   <span
                     className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${likesHidden ? "translate-x-5" : "translate-x-0"}`}
@@ -221,7 +229,7 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
               </div>
 
               {/* Turn Off Comments */}
-              <div className="flex items-center justify-between py-3.5">
+              <div className="flex items-center justify-between py-2.5">
                 <div className="flex items-center gap-3">
                   <MessageSquare className="w-5 h-5 text-text-secondary" />
                   <div>
@@ -230,8 +238,9 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setAllowComments(!allowComments)}
-                  className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${!allowComments ? "bg-[#0095f6]" : "bg-zinc-600"}`}
+                  className={`relative w-11 h-6 rounded-full transition-colors duration-200 cursor-pointer ${!allowComments ? "bg-rose-600" : "bg-surface-hover border border-border"}`}
                 >
                   <span
                     className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${!allowComments ? "translate-x-5" : "translate-x-0"}`}
@@ -241,23 +250,24 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
             </div>
 
             {/* AI Content Label Section */}
-            <div className="px-5 py-3 border-t border-border">
-              <h3 className="text-[11px] font-bold text-text-muted uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5" />
-                AI Content
-              </h3>
-
-              <div className="flex items-center justify-between py-3.5">
+            <div className="px-5 py-4 space-y-3.5 bg-surface/30">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <Bot className="w-5 h-5 text-text-secondary" />
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-500/20 via-pink-500/20 to-purple-600/20 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0">
+                    <Sparkles className="w-4 h-4 fill-purple-400/20" />
+                  </div>
                   <div>
-                    <p className="text-sm text-text font-medium">AI generated content</p>
-                    <p className="text-[10px] text-text-muted">Label this post as made with AI</p>
+                    <p className="text-sm text-text font-bold">Add "Made with AI" Label</p>
+                    <p className="text-[10px] text-text-muted">Disclose that this post contains AI-generated media</p>
                   </div>
                 </div>
                 <button
-                  onClick={() => setIsAIGenerated(!isAIGenerated)}
-                  className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${isAIGenerated ? "bg-[#0095f6]" : "bg-zinc-600"}`}
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic("selection");
+                    setIsAIGenerated(!isAIGenerated);
+                  }}
+                  className={`relative w-11 h-6 rounded-full transition-colors duration-200 cursor-pointer ${isAIGenerated ? "bg-gradient-to-r from-purple-600 to-pink-600" : "bg-surface-hover border border-border"}`}
                 >
                   <span
                     className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${isAIGenerated ? "translate-x-5" : "translate-x-0"}`}
@@ -265,33 +275,102 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
                 </button>
               </div>
 
-              {/* AI Tool Selector (shown when AI is enabled) */}
+              {/* AI Tool & Content Type Selector (shown when AI is enabled) */}
               {isAIGenerated && (
-                <div className="pl-8 pb-3 space-y-2">
-                  <p className="text-[10px] text-text-muted mb-2">
-                    Which AI tool was used to create or edit this content?
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {AI_TOOLS.map((tool) => (
-                      <button
-                        key={tool}
-                        onClick={() => setAiTool(tool)}
-                        className={`px-3 py-1.5 rounded-full text-[11px] font-semibold border transition ${
-                          aiTool === tool
-                            ? "bg-[#0095f6] border-[#0095f6] text-white"
-                            : "bg-surface border-border text-text-secondary hover:border-text-muted hover:text-text"
-                        }`}
-                      >
-                        {tool}
-                      </button>
-                    ))}
+                <div className="pt-2 border-t border-border/60 space-y-3 animate-fade-in">
+                  {/* Type */}
+                  <div>
+                    <label className="text-[10px] font-bold text-text-secondary uppercase tracking-wider block mb-1.5">
+                      Media Type
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { id: "image", label: "AI Image / Art" },
+                        { id: "video", label: "AI Video" },
+                        { id: "voice", label: "Voice Clone" },
+                        { id: "avatar", label: "Avatar" },
+                        { id: "full", label: "Fully Generated" },
+                      ].map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => {
+                            triggerHaptic("selection");
+                            setAiContentType(t.id);
+                          }}
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition cursor-pointer ${
+                            aiContentType === t.id
+                              ? "bg-purple-600 text-white border-purple-600 shadow-sm"
+                              : "bg-surface border-border text-text-secondary hover:text-text hover:bg-surface-hover"
+                          }`}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+
+                  {/* Tool */}
+                  <div>
+                    <label className="text-[10px] font-bold text-text-secondary uppercase tracking-wider block mb-1.5">
+                      AI Tool Used
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {POPULAR_AI_TOOLS.map((tool) => (
+                        <button
+                          key={tool}
+                          type="button"
+                          onClick={() => {
+                            triggerHaptic("selection");
+                            setAiTool(aiTool === tool ? "" : tool);
+                          }}
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition cursor-pointer ${
+                            aiTool === tool
+                              ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white border-transparent shadow-sm"
+                              : "bg-surface border-border text-text-secondary hover:text-text hover:bg-surface-hover"
+                          }`}
+                        >
+                          {tool}
+                        </button>
+                      ))}
+                    </div>
+
+                    <input
+                      type="text"
+                      placeholder="Or enter custom tool name..."
+                      value={aiTool}
+                      onChange={(e) => setAiTool(e.target.value)}
+                      className="w-full bg-surface-inset border border-border text-text text-xs rounded-xl px-3.5 py-2 mt-2 focus:border-purple-500 outline-none"
+                    />
+                  </div>
+
+                  {/* Policy Preview Trigger */}
+                  <button
+                    type="button"
+                    onClick={() => setShowAIInfoModal(true)}
+                    className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1 cursor-pointer pt-1"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Preview "Made with AI" info sheet</span>
+                  </button>
                 </div>
               )}
             </div>
           </div>
         </motion.div>
       </motion.div>
+
+      {/* AI Transparency Disclosure Modal Preview */}
+      <AIInfoModal
+        isOpen={showAIInfoModal}
+        onClose={() => setShowAIInfoModal(false)}
+        aiLabel={{
+          isAIGenerated: true,
+          tool: aiTool || "AI Tool",
+          contentType: aiContentType,
+        }}
+        authorName="You"
+      />
     </AnimatePresence>
   );
 };
