@@ -1,4 +1,3 @@
-import { useSelector } from "react-redux";
 import dp from "../assets/dp3.png";
 import { useNavigate } from "react-router-dom";
 import { Lock } from "lucide-react";

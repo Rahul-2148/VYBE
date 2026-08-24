@@ -51,3 +51,35 @@ export const getAuthCookieOptions = (rememberMe = true) => ({
 export const getClearCookieOptions = () => ({
   ...buildBaseCookieOptions(),
 });
+
+// ============================
+// Admin Panel Cookie Options
+// Separate namespace to isolate admin sessions from user sessions.
+// ============================
+
+const buildAdminCookieOptions = () => ({
+  ...buildBaseCookieOptions(),
+  path: "/api/v1/admin", // Scoped to admin API routes only
+});
+
+// Admin Access Token Cookie (7 Days)
+export const getAdminAccessTokenCookieOptions = (rememberMe = true) => ({
+  ...buildAdminCookieOptions(),
+  maxAge: rememberMe ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000,
+});
+
+// Admin Refresh Token Cookie (30 Days)
+export const getAdminRefreshTokenCookieOptions = (rememberMe = true) => ({
+  ...buildAdminCookieOptions(),
+  maxAge: rememberMe ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000,
+});
+
+// Admin Legacy Token Cookie (30 Days)
+export const getAdminAuthCookieOptions = (rememberMe = true) => ({
+  ...buildAdminCookieOptions(),
+  maxAge: rememberMe ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000,
+});
+
+export const getAdminClearCookieOptions = () => ({
+  ...buildAdminCookieOptions(),
+});

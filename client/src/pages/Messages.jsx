@@ -121,7 +121,7 @@ export const Messages = () => {
   const [contextMenu, setContextMenu] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
 
-  const fetchConversations = async () => {
+  const fetchConversations = useCallback(async () => {
     try {
       setLoading(true);
       const res = await api.get("/message/conversations");
@@ -134,7 +134,7 @@ export const Messages = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [dispatch]);
 
   useEffect(() => {
     let active = true;
@@ -145,7 +145,7 @@ export const Messages = () => {
     return () => {
       active = false;
     };
-  }, []);
+  }, [fetchConversations]);
 
   // Sync active conversation from URL parameter
   useEffect(() => {
@@ -201,7 +201,7 @@ export const Messages = () => {
         );
       }
     }).catch(() => {});
-  }, [conversationId, conversations, currentUserId, dispatch]);
+  }, [conversationId, conversations, currentUserId, dispatch, selectedChatUser?.conversationId, selectedChatUser?.user?.userName]);
 
   // Filter conversations
   const filteredConversations = useMemo(() => {
@@ -332,10 +332,7 @@ export const Messages = () => {
         <div className="px-4 pt-3.5 pb-2.5 flex items-center justify-between bg-bg/95 backdrop-blur-xl z-10 border-b border-border select-none">
           <div className="flex items-center gap-2.5 min-w-0">
             <button
-              onClick={() => {
-                if (window.history.length > 1) navigate(-1);
-                else navigate("/");
-              }}
+              onClick={() => navigate("/")}
               className="p-1.5 rounded-full hover:bg-surface-hover transition cursor-pointer md:hidden text-text-secondary hover:text-text shrink-0"
               title="Go back"
             >

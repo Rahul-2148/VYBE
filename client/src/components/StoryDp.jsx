@@ -9,7 +9,7 @@ import { setUserData } from "../redux/features/userSlice";
 import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
-const StoryDp = ({ userName, profileImage, storyGroup, userIndex }) => {
+const StoryDp = ({ userName, profileImage, storyGroup }) => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { userData } = useSelector((state) => state.user);

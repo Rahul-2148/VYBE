@@ -33,11 +33,17 @@ api.interceptors.response.use(
     const originalRequest = error.config;
 
     // Handle 401 Token Expiration & Silent Refresh
+    const isAuthEndpoint =
+      originalRequest?.url?.includes("/auth/signin") ||
+      originalRequest?.url?.includes("/auth/signup") ||
+      originalRequest?.url?.includes("/auth/refresh") ||
+      originalRequest?.url?.includes("/auth/2fa/challenge") ||
+      originalRequest?.url?.includes("/auth/magic-link");
+
     const isTokenExpired =
       error.response?.status === 401 &&
-      (error.response?.data?.code === "TOKEN_EXPIRED" ||
-        error.response?.data?.message?.toLowerCase().includes("expired") ||
-        error.response?.data?.message?.toLowerCase().includes("refresh required"));
+      !isAuthEndpoint &&
+      !originalRequest?._retry;
 
     if (isTokenExpired && !originalRequest._retry) {
       if (isRefreshing) {

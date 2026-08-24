@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from "react"
 import {
   Loader2, LucideImage, Search, SendHorizonal, X, Phone, Video, Mic, MapPin,
   Edit3, Smile, Users, ArrowLeft, Info, CheckCheck, Check, Clock, CornerUpRight,
-  Pin, Image, FileText, Link2, ChevronDown, Reply, Heart, Sparkles, BadgeCheck, Minimize2, User, Palette
+  Pin, Image, FileText, Link2, ChevronDown, ChevronUp, Reply, Heart, Sparkles, BadgeCheck, Minimize2, User, Palette,
+  Edit2, CornerUpLeft, ListFilter
 } from "lucide-react";
 import moment from "moment";
 import { snackbar } from "../lib/snackbar";
@@ -12,11 +13,14 @@ import dp from "../assets/dp3.png";
 import ReceiverMessage from "../components/ReceiverMessage";
 import SenderMessage from "../components/SenderMessage";
 import VoiceRecorder from "../components/VoiceRecorder";
+import VybeCallLogBubble from "../components/calls/VybeCallLogBubble";
 // VideoCallModal removed — call flow is handled by global CallManager
 import LocationPickerModal from "../components/LocationPickerModal";
 import SmartRepliesPill from "../components/SmartRepliesPill";
 import ChatInfoDrawer from "../components/ChatInfoDrawer";
 import ChatThemePickerModal from "../components/ChatThemePickerModal";
+import VybeExpressionPicker from "../components/VybeExpressionPicker";
+import ForwardMessageModal from "../components/ForwardMessageModal";
 import VerifiedBadge from "../components/VerifiedBadge";
 import useMessageSocketEvents from "../hooks/useMessageSocketEvents";
 import useTypingIndicator from "../hooks/useTypingIndicator";
@@ -29,7 +33,8 @@ import {
 import api from "../lib/axios";
 import { getSocket } from "../lib/socket";
 import { useTheme } from "../lib/themeContext";
-import { getChatThemeById } from "../lib/chatThemes";
+import { getChatThemeById, getResolvedThemeId } from "../lib/chatThemes";
+import { playMessageSentSound } from "../lib/sounds";
 
 const getDateLabel = (date) => {
   const d = moment(date);
@@ -68,21 +73,32 @@ const DeliveryStatus = ({ status }) => {
 };
 
 /* ============ SYSTEM MESSAGE ============ */
-const SystemMessage = ({ message }) => (
-  <div className="flex justify-center my-2 select-none">
-    <div className="bg-surface/90 border border-border/70 backdrop-blur-md px-4 py-1.5 rounded-full max-w-sm text-center shadow-xs">
-      <p className="text-[11px] text-text-muted font-medium">
-        {message.sender?.userName || "Someone"} {message.content?.text}
-      </p>
+const SystemMessage = ({ message, currentUserId }) => {
+  if (message.systemEvent?.startsWith("call_") || message.type === "call") {
+    return (
+      <div className="flex justify-center my-3 select-none">
+        <VybeCallLogBubble message={message} currentUserId={currentUserId} />
+      </div>
+    );
+  }
+  return (
+    <div className="flex justify-center my-2 select-none">
+      <div className="bg-surface/90 border border-border/70 backdrop-blur-md px-4 py-1.5 rounded-full max-w-sm text-center shadow-xs">
+        <p className="text-[11px] text-text-muted font-medium">
+          {message.content?.text || (message.sender?.userName ? `${message.sender.userName} ${message.content?.text || ""}` : "System notice")}
+        </p>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
-/* ============ DATE SEPARATOR ============ */
+/* ============ DATE SEPARATOR (WhatsApp / Instagram Direct Standard) ============ */
 const DateSeparator = ({ label }) => (
-  <div className="flex items-center justify-center my-3 select-none">
-    <div className="bg-surface/90 border border-border/80 backdrop-blur-md px-3.5 py-1 rounded-full shadow-xs">
-      <span className="text-[11px] font-semibold text-text-secondary">{label}</span>
+  <div className="flex items-center justify-center my-2.5 select-none relative z-10">
+    <div className="bg-surface/90 dark:bg-[#182229]/95 text-text-secondary dark:text-zinc-300 border border-border/60 dark:border-zinc-700/60 backdrop-blur-md px-2.5 py-0.5 rounded-md shadow-2xs transition-all">
+      <span className="text-[10px] font-semibold tracking-wider uppercase">
+        {label}
+      </span>
     </div>
   </div>
 );
@@ -103,14 +119,30 @@ const ScrollToBottomButton = ({ onClick, unreadBelow }) => (
 );
 
 export const MessageArea = () => {
-  const { selectedChatUser, messages, vanishMode, chatInfoOpen, conversations } = useSelector((s) => s.message);
+  const { selectedChatUser, messages, vanishMode, chatInfoOpen, conversations, onlineUsers = [], lastSeenMap = {} } = useSelector((s) => s.message);
   const { userData } = useSelector((s) => s.user);
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const currentUserId = userData?.user?._id || userData?._id;
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const tempIdCounter = useRef(0);
+  const [, setThemeVersion] = useState(0);
+
+  // Live Typing Indicators Hook
+  const { typingUsers, isAnyoneTyping, setTyping, stopTyping } = useTypingIndicator(
+    selectedChatUser?.conversationId,
+    userData?.user || userData
+  );
+
+  useEffect(() => {
+    const handleThemeChange = (e) => {
+      if (e.detail?.isGlobal || !e.detail?.conversationId || e.detail.conversationId === selectedChatUser?.conversationId) {
+        setThemeVersion((v) => v + 1);
+      }
+    };
+    window.addEventListener("chat-theme-changed", handleThemeChange);
+    return () => window.removeEventListener("chat-theme-changed", handleThemeChange);
+  }, [selectedChatUser?.conversationId]);
 
   const currentConv = conversations.find(
     (c) => (c._id || c.conversationId)?.toString() === selectedChatUser?.conversationId?.toString()
@@ -161,48 +193,190 @@ export const MessageArea = () => {
   const [input, setInput] = useState("");
   const [frontendFiles, setFrontendFiles] = useState([]);
   const [backendFiles, setBackendFiles] = useState([]);
-  const [search, setSearch] = useState("");
   const [hasMore, setHasMore] = useState(true);
   const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchType, setSearchType] = useState("all"); // "all" | "media" | "links" | "docs" | "voice"
+  const [searchResults, setSearchResults] = useState([]);
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  const [isSearching, setIsSearching] = useState(false);
+  const [highlightedMessageId, setHighlightedMessageId] = useState(null);
+  const [showSearchResultsList, setShowSearchResultsList] = useState(false);
+  const searchDebounceRef = useRef(null);
+
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(true);
   const [replyTo, setReplyTo] = useState(null);
-  const [searchResults, setSearchResults] = useState([]);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [showPicker, setShowPicker] = useState({ open: false, tab: "emojis" });
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
 
-  const handleSendSticker = async (stickerUrl) => {
-    setShowPicker({ open: false, tab: "emojis" });
-    const tempId = `temp_${tempIdCounter.current++}`;
-    const optimisticMessage = {
-      _id: tempId,
-      conversation: selectedChatUser.conversationId,
-      sender: { _id: currentUserId, userName: userData?.user?.userName, profileImage: userData?.user?.profileImage },
-      type: "image",
-      content: { media: [{ url: stickerUrl, type: "image" }] },
-      status: "sending",
-      createdAt: new Date().toISOString(),
-    };
-    dispatch(addOptimisticMessage(optimisticMessage));
-    scrollToBottom();
+  const messagesRef = useRef(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  const jumpToMessage = useCallback((msg) => {
+    if (!msg) return;
+    const existsLocally = messagesRef.current.some((m) => m._id === msg._id);
+    if (!existsLocally) {
+      dispatch(prependHistoricalMessages([msg]));
+    }
+
+    setTimeout(() => {
+      const el = document.getElementById(`msg-${msg._id}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        setHighlightedMessageId(msg._id);
+        setTimeout(() => setHighlightedMessageId((cur) => cur === msg._id ? null : cur), 2500);
+      }
+    }, 100);
+  }, [dispatch]);
+
+  const executeSearch = async (queryText, filterType) => {
+    const q = (queryText || "").trim();
+    if (!q && filterType === "all") {
+      setSearchResults([]);
+      setActiveMatchIndex(0);
+      setHighlightedMessageId(null);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+
+    // 1. Instant local search across loaded messages
+    const localMatches = messagesRef.current.filter((m) => {
+      if (m.type === "__date_separator" || m.deletedForEveryone) return false;
+
+      if (filterType === "media") {
+        const isMedia = ["image", "video", "gif"].includes(m.type) || m.content?.media?.some(x => ["image", "video"].includes(x.type));
+        if (!isMedia) return false;
+      } else if (filterType === "links") {
+        const hasLink = m.content?.linkPreview?.url || /https?:\/\//i.test(m.content?.text || "");
+        if (!hasLink) return false;
+      } else if (filterType === "docs") {
+        const isDoc = m.type === "file" || m.content?.media?.some(x => x.type === "document");
+        if (!isDoc) return false;
+      } else if (filterType === "voice") {
+        const isVoice = ["voice", "audio"].includes(m.type);
+        if (!isVoice) return false;
+      }
+
+      if (!q) return true;
+
+      const escaped = q.toLowerCase();
+      return (
+        m.content?.text?.toLowerCase().includes(escaped) ||
+        m.content?.media?.some(x => x.name?.toLowerCase().includes(escaped)) ||
+        m.content?.contactData?.name?.toLowerCase().includes(escaped) ||
+        m.content?.locationData?.name?.toLowerCase().includes(escaped) ||
+        m.content?.linkPreview?.title?.toLowerCase().includes(escaped)
+      );
+    });
+
+    setSearchResults(localMatches);
+    if (localMatches.length > 0) {
+      setActiveMatchIndex(0);
+      jumpToMessage(localMatches[0]);
+    }
+
+    // 2. Query backend to search through entire database history
     try {
-      const res = await api.post("/message/send", {
-        conversationId: selectedChatUser.conversationId,
-        messageType: "image",
-        sharedData: { mediaUrl: stickerUrl },
-        clientMessageId: tempId,
-      });
-      dispatch(replaceOptimisticMessage({ tempId, message: res.data.message }));
-    } catch {
-      dispatch(markOptimisticFailed({ tempId }));
+      const convId = selectedChatUser?.conversationId;
+      if (convId) {
+        const res = await api.get(`/message/search/${convId}`, {
+          params: { q, type: filterType, limit: 100 },
+        });
+        if (res.data?.success && Array.isArray(res.data.messages)) {
+          const serverMsgs = res.data.messages;
+          const combinedMap = new Map();
+          localMatches.forEach(m => combinedMap.set(m._id, m));
+          serverMsgs.forEach(m => combinedMap.set(m._id, m));
+          const allMatches = Array.from(combinedMap.values()).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+          setSearchResults(allMatches);
+          if (allMatches.length > 0 && localMatches.length === 0) {
+            setActiveMatchIndex(0);
+            jumpToMessage(allMatches[0]);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Backend search failed:", err);
+    } finally {
+      setIsSearching(false);
     }
   };
+
+  const handleSearchChange = (text) => {
+    setSearchQuery(text);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      executeSearch(text, searchType);
+    }, 250);
+  };
+
+  const handleSearchTypeChange = (type) => {
+    setSearchType(type);
+    executeSearch(searchQuery, type);
+  };
+
+  const handleNextMatch = () => {
+    if (searchResults.length === 0) return;
+    const nextIdx = (activeMatchIndex + 1) % searchResults.length;
+    setActiveMatchIndex(nextIdx);
+    jumpToMessage(searchResults[nextIdx]);
+  };
+
+  const handlePrevMatch = () => {
+    if (searchResults.length === 0) return;
+    const prevIdx = (activeMatchIndex - 1 + searchResults.length) % searchResults.length;
+    setActiveMatchIndex(prevIdx);
+    jumpToMessage(searchResults[prevIdx]);
+  };
+
+  const handleCloseSearch = () => {
+    setShowSearch(false);
+    setSearchQuery("");
+    setSearchResults([]);
+    setActiveMatchIndex(0);
+    setHighlightedMessageId(null);
+    setShowSearchResultsList(false);
+    setIsSearching(false);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setShowSearch(true);
+      } else if (e.key === "Escape" && showSearch) {
+        handleCloseSearch();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showSearch]);
+
   const [editingMessage, setEditingMessage] = useState(null);
+
+  const handleSetReplyTo = (msg) => {
+    setEditingMessage(null);
+    setReplyTo(msg);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const handleSetEditMessage = (msg) => {
+    setReplyTo(null);
+    setEditingMessage(msg);
+    setInput(msg.content?.text || "");
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
   const [showScrollBtn, setShowScrollBtn] = useState(false);
-  const [callState, setCallState] = useState({
+  const [_callState, setCallState] = useState({
     isOpen: false,
     callType: "video",
     isIncoming: false,
@@ -224,17 +398,32 @@ export const MessageArea = () => {
   }, []);
 
   const isGroup = Boolean(selectedChatUser?.user?.isGroup || selectedChatUser?.isGroup);
-  const otherUser = isGroup ? null : selectedChatUser?.user;
+  const rawOtherUser = isGroup ? null : (selectedChatUser?.user || selectedChatUser?.participant || selectedChatUser);
+  const otherUser = useMemo(() => {
+    if (isGroup) return null;
+    if (rawOtherUser && rawOtherUser._id && rawOtherUser._id !== selectedChatUser?.conversationId && rawOtherUser._id !== currentUserId) {
+      return rawOtherUser;
+    }
+    const match = selectedChatUser?.participants?.find(
+      (p) => (p?._id || p)?.toString() !== currentUserId?.toString()
+    );
+    if (match) return match;
+    return rawOtherUser;
+  }, [isGroup, rawOtherUser, selectedChatUser, currentUserId]);
 
-  const fetchMessages = async (pageNo = 1, prepend = false) => {
+  const otherUserIdStr = (otherUser?._id || otherUser?.id || otherUser)?.toString();
+  const isOtherUserOnline = !isGroup && otherUserIdStr && (Boolean(otherUser?.isOnline) || onlineUsers.includes(otherUserIdStr));
+  const otherUserLastSeen = otherUserIdStr ? (lastSeenMap[otherUserIdStr] || otherUser?.lastSeen) : otherUser?.lastSeen;
+
+  const fetchMessages = useCallback(async (pageNo = 1, prepend = false) => {
     if (!selectedChatUser?.conversationId) return;
     try {
       if (pageNo === 1) setLoadingMessages(true);
       if (pageNo > 1) setLoadingMore(true);
 
       let url = `/message/${selectedChatUser.conversationId}?limit=30`;
-      if (prepend && messages.length > 0) {
-        const oldestMsg = messages[0];
+      if (prepend && messagesRef.current.length > 0) {
+        const oldestMsg = messagesRef.current[0];
         url += `&before=${encodeURIComponent(oldestMsg.createdAt)}`;
       } else {
         url += `&page=${pageNo}`;
@@ -257,16 +446,16 @@ export const MessageArea = () => {
       setLoadingMore(false);
       setLoadingMessages(false);
     }
-  };
+  }, [selectedChatUser?.conversationId, dispatch]);
 
-  const markConversationSeen = async () => {
+  const markConversationSeen = useCallback(async () => {
     try {
       if (!selectedChatUser?.conversationId) return;
       await api.post(`/message/seen/${selectedChatUser.conversationId}`);
     } catch (e) {
       console.warn("MessageArea: markConversationSeen failed", e);
     }
-  };
+  }, [selectedChatUser?.conversationId]);
 
   useEffect(() => {
     if (!selectedChatUser?.conversationId) return;
@@ -275,14 +464,14 @@ export const MessageArea = () => {
       scrollToBottom("auto");
       await markConversationSeen();
     })();
-  }, [selectedChatUser?.conversationId]);
+  }, [selectedChatUser?.conversationId, fetchMessages, markConversationSeen, scrollToBottom]);
 
   // WebRTC call listener
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
 
-    const handleIncomingCall = ({ from, callerName, callerAvatar, callType }) => {
+    const handleIncomingCall = ({ callerName, callerAvatar, callType }) => {
       setCallState({
         isOpen: true,
         callType: callType || "video",
@@ -296,7 +485,7 @@ export const MessageArea = () => {
     return () => socket.off("incoming-call", handleIncomingCall);
   }, []);
 
-  const scrollToMessage = (id) => {
+  const _scrollToMessage = (id) => {
     const el = messageRefs.current[id];
     if (!el) return;
     el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -311,8 +500,8 @@ export const MessageArea = () => {
       isPaginationRef.current = false;
       return;
     }
-    if (messages.length && !search) scrollToBottom();
-  }, [messages.length]);
+    if (messages.length && !showSearch) scrollToBottom();
+  }, [messages.length, showSearch, scrollToBottom]);
 
   const handleScroll = async () => {
     const container = containerRef.current;
@@ -340,23 +529,6 @@ export const MessageArea = () => {
     }
   };
 
-  const handleSearch = async (q) => {
-    setSearch(q);
-    if (!q) {
-      setSearchResults([]);
-      return;
-    }
-    try {
-      const res = await api.get(`/message/search/${selectedChatUser.conversationId}?q=${q}`);
-      setSearchResults(res.data.messages || []);
-      if (res.data.messages?.length > 0) {
-        scrollToMessage(res.data.messages[0]._id);
-      }
-    } catch {
-      snackbar.error("Search failed");
-    }
-  };
-
   const visibleMessages = useMemo(() => {
     const list = Array.isArray(messages) ? messages : [];
     const filtered = list.filter((m) => m && !m.deletedFor?.includes(currentUserId));
@@ -372,9 +544,8 @@ export const MessageArea = () => {
       deduplicated.push(m);
     }
 
-    const result = search ? (searchResults || []) : deduplicated;
-    return groupMessages(result);
-  }, [messages, searchResults, search, currentUserId]);
+    return groupMessages(deduplicated);
+  }, [messages, currentUserId]);
 
 
   // Insert date separators
@@ -395,6 +566,7 @@ export const MessageArea = () => {
   /* ============ SEND MESSAGE (with optimistic update) ============ */
   const handleSendMessage = async (e) => {
     e?.preventDefault();
+    stopTyping();
     if (!input.trim() && backendFiles.length === 0 && !editingMessage) return;
 
     // EDIT MODE
@@ -436,6 +608,7 @@ export const MessageArea = () => {
     };
 
     dispatch(addOptimisticMessage(optimisticMessage));
+    playMessageSentSound();
     scrollToBottom();
 
     const savedInput = input;
@@ -535,14 +708,101 @@ export const MessageArea = () => {
     }
   };
 
-  const startCall = (type) => {
-    if (!otherUser) {
+  const handleSendSticker = async (stickerPayload) => {
+    const stickerUrl = typeof stickerPayload === "string" ? stickerPayload : stickerPayload?.url || stickerPayload?.dataUrl;
+    if (!stickerUrl) return;
+
+    setShowPicker({ open: false, tab: "stickers" });
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    const optimisticMessage = {
+      _id: tempId,
+      conversation: selectedChatUser.conversationId,
+      sender: { _id: currentUserId, userName: userData?.user?.userName, profileImage: userData?.user?.profileImage },
+      type: "sticker",
+      content: {
+        text: "",
+        media: [{ url: stickerUrl, type: "sticker" }],
+      },
+      replyTo: replyTo || null,
+      status: "sending",
+      createdAt: new Date().toISOString(),
+      reactions: [],
+    };
+
+    dispatch(addOptimisticMessage(optimisticMessage));
+    playMessageSentSound();
+    scrollToBottom();
+
+    try {
+      const res = await api.post("/message/send", {
+        conversationId: selectedChatUser.conversationId,
+        type: "sticker",
+        messageType: "sticker",
+        stickerUrl,
+        mediaUrl: stickerUrl,
+        vanish: vanishMode,
+        clientMessageId: tempId,
+        replyTo: replyTo?._id || undefined,
+      });
+
+      if (res.data.success) {
+        dispatch(replaceOptimisticMessage({ tempId, message: res.data.message }));
+        dispatch(
+          updateConversationLastMessage({
+            conversationId: selectedChatUser.conversationId,
+            message: res.data.message,
+            currentUserId,
+          })
+        );
+      }
+    } catch (err) {
+      dispatch(markOptimisticFailed({ tempId }));
+      snackbar.error(err.response?.data?.message || "Failed to send sticker");
+    }
+  };
+
+  const startCall = async (type) => {
+    if (isGroup) {
       snackbar.error("Calling groups/communities can be done directly from voice/video channels.");
       return;
     }
+    let target = otherUser;
+    const convId = selectedChatUser?.conversationId || selectedChatUser?._id;
+
+    // Guarantee resolution of actual user ID if optimistic or missing
+    if (!target || !target._id || target._id === convId || target._id === currentUserId) {
+      try {
+        if (convId) {
+          const res = await api.get(`/conversation/details/${convId}`);
+          if (res.data?.conversation?.participant) {
+            target = res.data.conversation.participant;
+          } else if (res.data?.conversation?.participants) {
+            target = res.data.conversation.participants.find(
+              (p) => (p?._id || p)?.toString() !== currentUserId?.toString()
+            );
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch participant for call:", err);
+      }
+    }
+
+    if (!target) {
+      snackbar.error("User not found for calling");
+      return;
+    }
+
+    const resolvedTargetId = (target?._id || target?.id || target)?.toString();
+    console.log("📞 [MessageArea] Initiating call to target user:", resolvedTargetId, target);
     window.dispatchEvent(
       new CustomEvent("vybe:initiate-call", {
-        detail: { type, user: otherUser, conversationId: selectedChatUser?.conversationId },
+        detail: {
+          type,
+          user: target,
+          targetUserId: resolvedTargetId,
+          conversationId: convId,
+        },
       })
     );
   };
@@ -551,7 +811,6 @@ export const MessageArea = () => {
     dispatch(setForwardModal({ open: true, message }));
   };
 
-  const { typingUsers, setTyping, stopTyping, isAnyoneTyping } = useTypingIndicator(selectedChatUser?.conversationId);
   useMessageSocketEvents(selectedChatUser?.conversationId);
 
   if (!selectedChatUser?.conversationId) {
@@ -570,7 +829,8 @@ export const MessageArea = () => {
     );
   }
 
-  const activeThemeObj = getChatThemeById(currentConv?.theme || "default");
+  const activeThemeId = getResolvedThemeId(currentUserId, selectedChatUser?.conversationId, currentConv?.theme);
+  const activeThemeObj = getChatThemeById(activeThemeId);
   const bgStyles = currentConv?.vanishMode
     ? {
         backgroundImage: isDark
@@ -582,21 +842,21 @@ export const MessageArea = () => {
   return (
     <div className="w-full h-full bg-bg flex flex-col relative overflow-hidden transition-colors duration-300 min-w-0" style={bgStyles}>
       {/* ===== CHAT HEADER ===== */}
-      <div className="flex items-center gap-2.5 px-3 md:px-6 h-[60px] border-b border-border bg-bg/95 backdrop-blur-xl shrink-0 z-10 select-none pt-[env(safe-area-inset-top)] w-full">
-        <button
-          onClick={() => {
-            dispatch(clearSelectedChatUser());
-            navigate("/messages");
-          }}
-          className="p-2 rounded-full text-text-secondary hover:text-text hover:bg-surface-hover transition cursor-pointer md:hidden shrink-0"
-          title="Back to messages"
-        >
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-
-        {/* Avatar & User Details */}
-        {!showSearch && (
+      <div className="flex items-center gap-2 px-3 md:px-5 h-[60px] border-b border-border bg-bg/95 backdrop-blur-xl shrink-0 z-20 select-none pt-[env(safe-area-inset-top)] w-full">
+        {/* NORMAL MODE HEADER */}
+        {!showSearch ? (
           <>
+            <button
+              onClick={() => {
+                dispatch(clearSelectedChatUser());
+                navigate("/messages", { replace: true });
+              }}
+              className="p-2 rounded-full text-text-secondary hover:text-text hover:bg-surface-hover transition cursor-pointer md:hidden shrink-0"
+              title="Back to messages"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+
             <div className="flex items-center gap-3 flex-1 min-w-0 py-1">
               {isGroup ? (
                 <div
@@ -618,13 +878,13 @@ export const MessageArea = () => {
                   title={`View @${otherUser?.userName}'s profile`}
                 >
                   <div className={`w-10 h-10 rounded-full p-[2px] ${
-                    otherUser?.isOnline
+                    isOtherUserOnline
                       ? "bg-gradient-to-br from-green-400 to-emerald-500"
                       : "bg-surface-hover"
                   }`}>
                     <img src={otherUser?.profileImage?.url || dp} className="w-full h-full rounded-full object-cover border border-bg" alt="" />
                   </div>
-                  {otherUser?.isOnline && (
+                  {isOtherUserOnline && (
                     <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-bg rounded-full shadow-xs">
                       <div className="w-full h-full rounded-full bg-green-400 animate-pulse" />
                     </div>
@@ -661,10 +921,10 @@ export const MessageArea = () => {
                     </span>
                   ) : isGroup ? (
                     <span className="text-text-muted">{selectedChatUser.user?.participants?.length || 0} members</span>
-                  ) : otherUser?.isOnline ? (
+                  ) : isOtherUserOnline ? (
                     <span className="text-green-500 font-medium">Active now</span>
-                  ) : otherUser?.lastSeen ? (
-                    <span className="text-text-muted">Active {moment(otherUser.lastSeen).fromNow()}</span>
+                  ) : otherUserLastSeen ? (
+                    <span className="text-text-muted">Active {moment(otherUserLastSeen).fromNow()}</span>
                   ) : (
                     <span className="text-text-muted">Offline</span>
                   )}
@@ -684,6 +944,16 @@ export const MessageArea = () => {
                   </button>
                 </>
               )}
+              {/* In-Chat Search Button */}
+              <button
+                type="button"
+                onClick={() => setShowSearch(true)}
+                className="p-2 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer"
+                title="Search in conversation (Ctrl+F)"
+              >
+                <Search className="w-4.5 h-4.5" />
+              </button>
+
               {/* Theme & Wallpaper Picker */}
               <button
                 type="button"
@@ -716,23 +986,190 @@ export const MessageArea = () => {
               </button>
             </div>
           </>
-        )}
+        ) : (
+          /* SEARCH MODE ACTIVE HEADER (WhatsApp Web / Instagram Direct Standard) */
+          <div className="flex-1 flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-150 min-w-0">
+            <button
+              type="button"
+              onClick={handleCloseSearch}
+              className="p-2 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-black dark:text-white border border-zinc-300/80 dark:border-zinc-700 transition cursor-pointer shrink-0 shadow-2xs"
+              title="Close search (Esc)"
+            >
+              <ArrowLeft className="w-4.5 h-4.5 stroke-[2.5]" />
+            </button>
 
-        {showSearch && (
-          <div className="flex-1 flex items-center gap-2">
-            <input
-              autoFocus
-              value={search}
-              onChange={(e) => handleSearch(e.target.value)}
-              placeholder="Search in conversation..."
-              className="flex-1 bg-surface px-4 py-1.5 rounded-xl text-sm text-text outline-none border border-border focus:border-primary transition"
-            />
-            <button onClick={() => { setSearch(""); setShowSearch(false); setSearchResults([]); }} className="p-2 text-text-secondary hover:text-text">
-              <X className="w-5 h-5" />
+            {/* Crisp High-Contrast Search Pill */}
+            <div className="flex-1 flex items-center gap-2.5 bg-white dark:bg-zinc-800 border-2 border-zinc-300 dark:border-zinc-700 rounded-full px-3.5 py-1.5 focus-within:border-black dark:focus-within:border-white focus-within:ring-2 focus-within:ring-black/10 dark:focus-within:ring-white/10 transition-all min-w-0 shadow-xs">
+              <Search className="w-4 h-4 text-black dark:text-white stroke-[2.5] shrink-0" />
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    if (e.shiftKey) handlePrevMatch();
+                    else handleNextMatch();
+                  } else if (e.key === "Escape") {
+                    handleCloseSearch();
+                  }
+                }}
+                placeholder="Search messages, links, files..."
+                className="flex-1 bg-transparent text-xs sm:text-sm text-black dark:text-white font-medium outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 min-w-0"
+              />
+              {isSearching ? (
+                <Loader2 className="w-4 h-4 text-rose-500 animate-spin shrink-0" />
+              ) : searchQuery ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery("");
+                    executeSearch("", searchType);
+                  }}
+                  className="w-4.5 h-4.5 rounded-full bg-zinc-800 hover:bg-black dark:bg-zinc-200 dark:hover:bg-white text-white dark:text-black flex items-center justify-center transition p-0.5"
+                  title="Clear text"
+                >
+                  <X className="w-3 h-3 stroke-[2.5]" />
+                </button>
+              ) : null}
+            </div>
+
+            {/* Match Counter & Prev/Next Arrows */}
+            {(searchQuery || searchType !== "all") && (
+              <div className="flex items-center gap-1 shrink-0">
+                {searchResults.length > 0 ? (
+                  <div className="flex items-center gap-1 bg-white dark:bg-zinc-800 border-2 border-zinc-300 dark:border-zinc-700 rounded-full px-3 py-1 shadow-xs">
+                    <span className="text-[11.5px] font-black text-black dark:text-white whitespace-nowrap">
+                      {activeMatchIndex + 1} of {searchResults.length}
+                    </span>
+                    <div className="flex items-center gap-0.5 ml-1">
+                      <button
+                        type="button"
+                        onClick={handlePrevMatch}
+                        className="p-1 rounded-full text-black dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700 transition cursor-pointer"
+                        title="Previous match (Shift+Enter)"
+                      >
+                        <ChevronUp className="w-3.5 h-3.5 stroke-[3]" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleNextMatch}
+                        className="p-1 rounded-full text-black dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700 transition cursor-pointer"
+                        title="Next match (Enter)"
+                      >
+                        <ChevronDown className="w-3.5 h-3.5 stroke-[3]" />
+                      </button>
+                    </div>
+                  </div>
+                ) : !isSearching && searchQuery ? (
+                  <span className="text-[11px] font-bold text-rose-600 dark:text-rose-400 px-2.5 py-1 bg-rose-50 dark:bg-rose-950/40 rounded-full border border-rose-200 dark:border-rose-800/50">
+                    0 matches
+                  </span>
+                ) : null}
+              </div>
+            )}
+
+            {/* Toggle Results List Button */}
+            {searchResults.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowSearchResultsList(!showSearchResultsList)}
+                className={`p-2 rounded-full transition cursor-pointer shrink-0 shadow-2xs ${
+                  showSearchResultsList
+                    ? "bg-gradient-to-r from-[#833ab4] via-[#fd1d1d] to-[#fcb045] text-white shadow-xs shadow-pink-500/25 border border-transparent"
+                    : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-black dark:text-white border border-zinc-300/80 dark:border-zinc-700"
+                }`}
+                title={showSearchResultsList ? "Hide results list" : "Show all results in list"}
+              >
+                <ListFilter className="w-4.5 h-4.5 stroke-[2.5]" />
+              </button>
+            )}
+
+            {/* Exit Search Button */}
+            <button
+              type="button"
+              onClick={handleCloseSearch}
+              className="p-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-black dark:text-white border border-zinc-300/80 dark:border-zinc-700 rounded-full transition cursor-pointer shrink-0 shadow-2xs"
+              title="Close search (Esc)"
+            >
+              <X className="w-4.5 h-4.5 stroke-[2.5]" />
             </button>
           </div>
         )}
       </div>
+
+      {/* ===== IN-CHAT SUB-HEADER FILTER BAR (Instagram Direct Standard) ===== */}
+      {showSearch && (
+        <div className="bg-white/95 dark:bg-[#121212]/95 backdrop-blur-xl border-b border-zinc-200/80 dark:border-zinc-800/80 px-3 md:px-6 py-1.5 flex items-center gap-2 overflow-x-auto hide-scrollbar z-10 shrink-0 select-none animate-in fade-in slide-in-from-top-1 duration-150">
+          {[
+            { id: "all", label: "All" },
+            { id: "media", label: "🖼️ Photos & Videos" },
+            { id: "links", label: "🔗 Links" },
+            { id: "docs", label: "📄 Documents" },
+            { id: "voice", label: "🎙️ Voice Notes" },
+          ].map((pill) => (
+            <button
+              key={pill.id}
+              type="button"
+              onClick={() => handleSearchTypeChange(pill.id)}
+              className={`text-[11.5px] font-bold px-3.5 py-1 rounded-full transition cursor-pointer shrink-0 flex items-center gap-1 active:scale-95 shadow-2xs ${
+                searchType === pill.id
+                  ? "bg-gradient-to-r from-[#833ab4] via-[#fd1d1d] to-[#fcb045] text-white shadow-xs shadow-pink-500/25 border border-transparent"
+                  : "bg-white dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-300 dark:border-zinc-700"
+              }`}
+            >
+              <span>{pill.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ===== INSTAGRAM / WHATSAPP STYLE SEARCH RESULTS DRAWER ===== */}
+      {showSearch && showSearchResultsList && searchResults.length > 0 && (
+        <div className="bg-white dark:bg-[#18181b] border-b-2 border-zinc-300 dark:border-zinc-800 px-3 md:px-6 py-2.5 max-h-56 overflow-y-auto custom-scrollbar z-20 shrink-0 shadow-xl animate-in slide-in-from-top-2 duration-150">
+          <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-zinc-200 dark:border-zinc-800 text-[11px] font-black text-black dark:text-white">
+            <span>{searchResults.length} {searchResults.length === 1 ? "match" : "matches"} found</span>
+            <button
+              onClick={() => setShowSearchResultsList(false)}
+              className="text-zinc-500 hover:text-black dark:hover:text-white text-[10.5px] font-bold cursor-pointer"
+            >
+              Hide list
+            </button>
+          </div>
+          <div className="space-y-1.5">
+            {searchResults.map((m, idx) => (
+              <div
+                key={m._id}
+                onClick={() => {
+                  setActiveMatchIndex(idx);
+                  jumpToMessage(m);
+                }}
+                className={`flex items-start gap-2.5 p-2 rounded-xl border-2 transition cursor-pointer ${
+                  activeMatchIndex === idx
+                    ? "bg-rose-50 dark:bg-rose-500/15 border-rose-500 shadow-xs"
+                    : "bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-zinc-200 dark:border-zinc-800"
+                }`}
+              >
+                <img
+                  src={m.sender?.profileImage?.url || dp}
+                  alt=""
+                  className="w-7 h-7 rounded-full object-cover shrink-0 mt-0.5 border border-zinc-300 dark:border-zinc-700"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-black dark:text-white">
+                    <span className="truncate">{m.sender?.name || m.sender?.userName || "User"}</span>
+                    <span className="text-[10px] text-zinc-500 font-semibold ml-2 shrink-0">
+                      {moment(m.createdAt).format("MMM D, h:mm A")}
+                    </span>
+                  </div>
+                  <p className="text-[11.5px] text-zinc-800 dark:text-zinc-200 font-medium line-clamp-2 mt-0.5">
+                    {m.content?.text || (m.type === "image" ? "📷 Photo" : m.type === "video" ? "🎥 Video" : m.type === "voice" ? "🎙️ Voice note" : "📎 Attachment")}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ===== DISAPPEARING MESSAGES BANNER ===== */}
       {currentConv?.disappearingMessages?.enabled && (
@@ -758,35 +1195,6 @@ export const MessageArea = () => {
           <p className="text-[11px] text-rose-500 font-medium">
             Vanish mode is active · Seen messages disappear when you exit the chat.
           </p>
-        </div>
-      )}
-
-      {/* ===== EDITING / REPLY BANNER ===== */}
-      {editingMessage && (
-        <div className="bg-surface border-b border-border px-4 py-2.5 flex items-center gap-3 shrink-0 shadow-xs">
-          <div className="w-1 h-8 bg-primary rounded-full shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-[11px] font-bold text-primary">Editing message</p>
-            <p className="text-xs text-text-secondary truncate">{editingMessage.content?.text}</p>
-          </div>
-          <button onClick={() => { setEditingMessage(null); setInput(""); }} className="p-1.5 hover:bg-surface-hover rounded-full transition cursor-pointer text-text-muted hover:text-text">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {replyTo && (
-        <div className="bg-surface border-b border-border px-4 py-2.5 flex items-center gap-3 shrink-0 shadow-xs">
-          <div className="w-1 h-8 bg-primary rounded-full shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-[11px] font-bold text-primary">
-              Replying to {replyTo.sender?.userName || "message"}
-            </p>
-            <p className="text-xs text-text-secondary truncate">{replyTo.content?.text?.slice(0, 60) || "Media"}</p>
-          </div>
-          <button onClick={() => setReplyTo(null)} className="p-1.5 hover:bg-surface-hover rounded-full transition cursor-pointer text-text-muted hover:text-text">
-            <X className="w-4 h-4" />
-          </button>
         </div>
       )}
 
@@ -821,12 +1229,12 @@ export const MessageArea = () => {
             <>
               {/* Top Profile Intro Card (Compact & Sleek) */}
               {!isGroup && otherUser && (
-                <div className="flex flex-col items-center justify-center text-center pt-4 pb-6 px-4 select-none animate-in fade-in duration-200">
+                <div className="flex flex-col items-center justify-center text-center pt-3 pb-3 px-4 mb-2 select-none animate-in fade-in duration-200">
                   <div 
                     onClick={() => navigate(`/profile/${otherUser.userName}`)}
                     className="relative group cursor-pointer"
                   >
-                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full p-[2px] bg-gradient-to-tr from-amber-400 via-rose-500 to-purple-600 shadow-md group-hover:scale-105 transition-transform duration-200">
+                    <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full p-[2px] bg-gradient-to-tr from-amber-400 via-rose-500 to-purple-600 shadow-md group-hover:scale-105 transition-transform duration-200">
                       <img
                         src={otherUser.profileImage?.url || dp}
                         alt=""
@@ -835,19 +1243,19 @@ export const MessageArea = () => {
                     </div>
                   </div>
 
-                  <div className="mt-2.5 space-y-0.5">
+                  <div className="mt-1.5 space-y-0.5">
                     <h3 
                       onClick={() => navigate(`/profile/${otherUser.userName}`)}
-                      className="text-sm sm:text-base font-bold text-text hover:underline cursor-pointer flex items-center justify-center gap-1"
+                      className="text-xs sm:text-sm font-bold text-text hover:underline cursor-pointer flex items-center justify-center gap-1"
                     >
                       <span>{otherUser.name || otherUser.userName}</span>
                       {otherUser.isVerified && (
                         <VerifiedBadge size="xs" />
                       )}
                     </h3>
-                    <p className="text-[11px] text-text-secondary font-medium">@{otherUser.userName} · VYBE</p>
+                    <p className="text-[10px] text-text-secondary font-medium">@{otherUser.userName} · VYBE</p>
                     {otherUser.bio && (
-                      <p className="text-[11px] text-text-muted max-w-xs line-clamp-2 mt-0.5 mx-auto leading-relaxed">
+                      <p className="text-[10px] text-text-muted max-w-xs line-clamp-1 mt-0.5 mx-auto leading-relaxed">
                         {otherUser.bio}
                       </p>
                     )}
@@ -856,7 +1264,7 @@ export const MessageArea = () => {
                   <button
                     type="button"
                     onClick={() => navigate(`/profile/${otherUser.userName}`)}
-                    className="mt-2.5 inline-flex items-center gap-1 px-3.5 py-1 rounded-xl bg-surface-hover hover:bg-surface border border-border text-[11px] font-semibold text-text transition cursor-pointer active:scale-95 shadow-2xs hover:border-primary/40"
+                    className="mt-1.5 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-surface-hover hover:bg-surface border border-border text-[10px] font-semibold text-text transition cursor-pointer active:scale-95 shadow-2xs hover:border-primary/40"
                   >
                     <User className="w-3 h-3 text-primary" />
                     <span>View Profile</span>
@@ -866,23 +1274,23 @@ export const MessageArea = () => {
 
               {/* Group Intro Card */}
               {isGroup && (
-                <div className="flex flex-col items-center justify-center text-center pt-4 pb-6 px-4 select-none animate-in fade-in duration-200">
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 p-[2px] shadow-md mb-2">
+                <div className="flex flex-col items-center justify-center text-center pt-3 pb-3 px-4 mb-2 select-none animate-in fade-in duration-200">
+                  <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 p-[2px] shadow-md mb-1.5">
                     <div className="w-full h-full rounded-full bg-surface flex items-center justify-center">
-                      <Users className="w-8 h-8 text-purple-300" />
+                      <Users className="w-6 h-6 text-purple-300" />
                     </div>
                   </div>
-                  <h3 className="text-sm sm:text-base font-bold text-text">
+                  <h3 className="text-xs sm:text-sm font-bold text-text">
                     {selectedChatUser.user?.groupName || "Group Chat"}
                   </h3>
-                  <p className="text-[11px] text-text-secondary mt-0.5">
+                  <p className="text-[10px] text-text-secondary mt-0.5">
                     {selectedChatUser.user?.participants?.length || 0} members
                   </p>
                 </div>
               )}
 
-              {/* Chronological Messages Stream */}
-              <div className="flex-1 flex flex-col justify-end space-y-0.5 min-h-[40px]">
+              {/* Chronological Messages Stream (with mt-auto to naturally push to bottom without overlapping hero) */}
+              <div className="mt-auto flex flex-col space-y-1 w-full min-h-[40px]">
                 {messagesWithDates.map((m) => {
                   if (m.type === "__date_separator") {
                     return <DateSeparator key={m._id} label={m.dateLabel} />;
@@ -906,17 +1314,21 @@ export const MessageArea = () => {
                           message={m}
                           isGrouped={m.isGrouped}
                           isLastInGroup={m.isLastInGroup}
-                          setReplyTo={setReplyTo}
-                          onEditMessage={(msg) => { setEditingMessage(msg); setInput(msg.content?.text || ""); }}
+                          setReplyTo={handleSetReplyTo}
+                          onEditMessage={handleSetEditMessage}
                           onForwardMessage={handleForwardMessage}
+                          isHighlighted={highlightedMessageId === m._id}
+                          searchQuery={searchQuery}
                         />
                       ) : (
                         <ReceiverMessage
                           message={m}
                           isGrouped={m.isGrouped}
                           isLastInGroup={m.isLastInGroup}
-                          setReplyTo={setReplyTo}
+                          setReplyTo={handleSetReplyTo}
                           onForwardMessage={handleForwardMessage}
+                          isHighlighted={highlightedMessageId === m._id}
+                          searchQuery={searchQuery}
                         />
                       )}
                     </div>
@@ -994,6 +1406,89 @@ export const MessageArea = () => {
       ) : (
         <div className="px-3.5 md:px-6 py-2.5 border-t border-border/80 bg-bg/95 backdrop-blur-xl shrink-0 pb-[calc(0.6rem+env(safe-area-inset-bottom))] w-full">
           <div className="w-full max-w-4xl mx-auto">
+            {/* ===== EDITING PREVIEW BANNER (Right above input pill) ===== */}
+            {editingMessage && (
+              <div className="mb-2 bg-surface dark:bg-zinc-850 border border-primary/40 dark:border-primary/50 rounded-2xl px-3.5 py-2 flex items-center justify-between gap-3 shadow-md backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-150">
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div className="p-1.5 rounded-xl bg-primary/15 text-primary shrink-0">
+                    <Edit2 className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-primary">Editing message</span>
+                      <span className="text-[10px] text-text-muted font-normal">(Press Esc to cancel)</span>
+                    </div>
+                    <p className="text-xs text-text-secondary truncate font-medium mt-0.5">
+                      {editingMessage.content?.text || "Message"}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingMessage(null);
+                    setInput("");
+                  }}
+                  className="p-1.5 hover:bg-surface-hover dark:hover:bg-zinc-700/80 rounded-full transition cursor-pointer text-text-muted hover:text-text shrink-0"
+                  title="Cancel edit (Esc)"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {/* ===== LIVE TYPING INDICATOR PILL (WhatsApp / Instagram / iMessage style) ===== */}
+            {isAnyoneTyping && (
+              <div className="mb-2 w-fit max-w-[85%] bg-surface dark:bg-zinc-850 border border-border/80 rounded-2xl px-3.5 py-1.5 flex items-center gap-2.5 shadow-sm backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-150">
+                {/* 3 Bouncing Dots in Bubble */}
+                <div className="flex items-center gap-1 bg-primary/10 dark:bg-primary/20 px-2 py-1 rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" />
+                </div>
+                <span className="text-xs text-text font-medium truncate">
+                  <span className="font-semibold text-primary">
+                    {typingUsers.length === 1
+                      ? `@${typingUsers[0].userName}`
+                      : typingUsers.length === 2
+                      ? `@${typingUsers[0].userName} & @${typingUsers[1].userName}`
+                      : `@${typingUsers[0].userName} + ${typingUsers.length - 1} others`}
+                  </span>{" "}
+                  <span className="text-text-secondary">is typing...</span>
+                </span>
+              </div>
+            )}
+
+            {/* ===== REPLY PREVIEW BANNER (Right above input pill) ===== */}
+            {replyTo && (
+              <div className="mb-2 bg-surface dark:bg-zinc-850 border border-border/90 rounded-2xl px-3.5 py-2 flex items-center justify-between gap-3 shadow-md backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-150">
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div className="p-1.5 rounded-xl bg-primary/15 text-primary shrink-0">
+                    <CornerUpLeft className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-primary">
+                        Replying to @{replyTo.sender?.userName || "user"}
+                      </span>
+                      <span className="text-[10px] text-text-muted font-normal">(Press Esc to cancel)</span>
+                    </div>
+                    <p className="text-xs text-text-secondary truncate font-medium mt-0.5">
+                      {replyTo.content?.text || (replyTo.type === "image" ? "📷 Photo" : replyTo.type === "video" ? "🎥 Video" : "Media")}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReplyTo(null)}
+                  className="p-1.5 hover:bg-surface-hover dark:hover:bg-zinc-700/80 rounded-full transition cursor-pointer text-text-muted hover:text-text shrink-0"
+                  title="Cancel reply (Esc)"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
             {isRecordingVoice ? (
               <VoiceRecorder onSendVoiceNote={handleSendVoiceNote} onCancel={() => setIsRecordingVoice(false)} />
             ) : (
@@ -1030,6 +1525,7 @@ export const MessageArea = () => {
                   {/* Left: Emoji Button */}
                   <button
                     type="button"
+                    data-expression-trigger="true"
                     onClick={() => setShowPicker((prev) => ({ open: !prev.open, tab: "emojis" }))}
                     className="p-1 text-text-secondary hover:text-text transition cursor-pointer shrink-0"
                     title="Emojis"
@@ -1046,9 +1542,20 @@ export const MessageArea = () => {
                       if (e.target.value.trim()) setTyping();
                       else stopTyping();
                     }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        if (editingMessage) {
+                          setEditingMessage(null);
+                          setInput("");
+                        }
+                        if (replyTo) {
+                          setReplyTo(null);
+                        }
+                      }
+                    }}
                     onBlur={stopTyping}
-                    placeholder={editingMessage ? "Edit message..." : "Message..."}
-                    className="flex-1 bg-transparent text-sm text-text outline-none placeholder:text-text-muted min-w-0"
+                    placeholder={editingMessage ? "Edit message (Enter to save, Esc to cancel)..." : replyTo ? "Type a reply (Esc to cancel)..." : "Message..."}
+                    className="flex-1 bg-transparent text-sm text-text outline-none placeholder:text-text-muted min-w-0 selection:bg-primary selection:text-white"
                   />
 
                   {/* Right Side Icons inside Input Pill */}
@@ -1074,6 +1581,7 @@ export const MessageArea = () => {
 
                       <button
                         type="button"
+                        data-expression-trigger="true"
                         onClick={() => setShowPicker({ open: true, tab: "stickers" })}
                         className="p-1.5 text-text-secondary hover:text-rose-400 transition cursor-pointer rounded-full hover:bg-surface-hover"
                         title="Stickers & GIFs"
@@ -1122,6 +1630,7 @@ export const MessageArea = () => {
           isOpen={showThemePicker}
           onClose={() => setShowThemePicker(false)}
           conversationId={selectedChatUser?.conversationId}
+          chatName={isGroup ? (selectedChatUser?.user?.groupName || "Group") : otherUser?.userName}
           currentTheme={currentConv?.theme || "default"}
           onThemeChanged={(newTheme) => {
             dispatch(
@@ -1133,6 +1642,9 @@ export const MessageArea = () => {
           }}
         />
       )}
+
+      {/* ===== FORWARD MESSAGE MODAL ===== */}
+      <ForwardMessageModal />
     </div>
   );
 };

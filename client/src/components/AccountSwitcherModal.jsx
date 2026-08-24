@@ -9,7 +9,6 @@ import { setUserData } from "../redux/features/userSlice";
 import {
   getLinkedAccounts,
   removeLinkedAccount,
-  getActiveAccountId,
   setActiveAccountId,
   addLinkedAccount,
 } from "../lib/accountManager";
@@ -21,17 +20,19 @@ const AccountSwitcherModal = ({ isOpen, onClose }) => {
   const { userData } = useSelector((state) => state.user);
   const currentUserId = userData?.user?._id || userData?._id;
 
-  const [accounts, setAccounts] = useState([]);
+  const [accounts, setAccounts] = useState(() => getLinkedAccounts());
   const [switching, setSwitching] = useState(null); // userId being switched to
   const [removingId, setRemovingId] = useState(null);
 
   // Load linked accounts when modal opens
   useEffect(() => {
     if (isOpen) {
-      const linked = getLinkedAccounts();
-      setAccounts(linked);
-      setSwitching(null);
-      setRemovingId(null);
+      const timer = setTimeout(() => {
+        setAccounts(getLinkedAccounts());
+        setSwitching(null);
+        setRemovingId(null);
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [isOpen]);
 
@@ -211,13 +212,17 @@ const AccountSwitcherModal = ({ isOpen, onClose }) => {
                         <Loader2 className="w-4.5 h-4.5 text-accent animate-spin" />
                       )}
                       {!isActive && !isSwitching && (
-                        <button
-                          onClick={(e) => handleRemoveAccount(e, account.userId)}
-                          className="p-1.5 rounded-full opacity-0 group-hover:opacity-100 hover:bg-red-500/10 text-text-muted hover:text-red-500 transition-all cursor-pointer"
-                          title="Remove from list"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        removingId === account.userId ? (
+                          <Loader2 className="w-3.5 h-3.5 text-red-500 animate-spin" />
+                        ) : (
+                          <button
+                            onClick={(e) => handleRemoveAccount(e, account.userId)}
+                            className="p-1.5 rounded-full opacity-0 group-hover:opacity-100 hover:bg-red-500/10 text-text-muted hover:text-red-500 transition-all cursor-pointer"
+                            title="Remove from list"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )
                       )}
                     </div>
                   </div>

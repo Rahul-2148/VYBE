@@ -51,7 +51,12 @@ app.use(compression());
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      if (
+        !origin ||
+        allowedOrigins.length === 0 ||
+        allowedOrigins.includes(origin) ||
+        /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin)
+      ) {
         return callback(null, true);
       }
       return callback(new Error("Not allowed by CORS"));
@@ -70,8 +75,12 @@ app.get("/health", (req, res) => {
 });
 
 import noteRouter from "./routes/note.route.js";
+import adminRouter from "./routes/admin.route.js";
+
+import meetingRouter from "./routes/meeting.route.js";
 
 // using Routes
+app.use("/api/v1/admin", adminRouter);
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/user", userRouter);
 app.use("/api/v1/post", postRouter);
@@ -89,6 +98,7 @@ app.use("/api/v1/live", liveRouter);
 app.use("/api/v1/monetization", monetizationRouter);
 app.use("/api/v1/community", communityRouter);
 app.use("/api/v1/call", callRouter);
+app.use("/api/v1/meet", meetingRouter);
 app.use("/api/v1/music", musicRouter);
 
 // Default home route

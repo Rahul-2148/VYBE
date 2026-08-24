@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useRef } from "react";
-import { Search, Compass, Heart, MessageCircle, Play, ArrowLeft, TrendingUp, Grid3X3, Film, Bookmark, Users, Eye, Sparkles } from "lucide-react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
+import { Search, Compass, Heart, MessageCircle, Play, ArrowLeft, TrendingUp, Grid3X3, Film, Bookmark, Users, Eye, Sparkles, Radio } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { snackbar } from "../lib/snackbar";
 import SearchModal from "../components/SearchModal";
 import FollowButton from "../components/FollowButton";
@@ -79,9 +79,9 @@ const ExploreMediaCard = ({ post, index, activeTab, navigate, formatCount, getVi
     sessionStorage.setItem("explore_scroll_pos", window.scrollY.toString());
     sessionStorage.setItem("explore_active_tab", activeTab);
     if (isVideo) {
-      navigate(`/reels?reelId=${post._id}`, { state: { from: "/explore" } });
+      navigate(`/reel/${post._id}`, { state: { from: "/explore" } });
     } else {
-      navigate(`/?postId=${post._id}`, { state: { from: "/explore" } });
+      navigate(`/post/${post._id}`, { state: { from: "/explore" } });
     }
   };
 
@@ -98,54 +98,39 @@ const ExploreMediaCard = ({ post, index, activeTab, navigate, formatCount, getVi
       onTouchCancel={isVideo ? handlePause : undefined}
       className={`relative overflow-hidden bg-surface cursor-pointer group ${
         activeTab === "reels"
-          ? "aspect-[9/16] rounded-lg"
+          ? "aspect-[9/16]"
           : isLarge
           ? "col-span-2 row-span-2 aspect-square"
           : "aspect-square"
       }`}
     >
       {isVideo ? (
-        <video
-          ref={videoRef}
-          src={post.media?.url || post.audioUrl}
-          className="w-full h-full object-cover"
-          muted
-          onEnded={(e) => { e.target.currentTime = 0; e.target.play().catch(() => null); }}
-          playsInline
-          preload="metadata"
-          poster={thumbnail || undefined}
-        />
+        <>
+          <video
+            ref={videoRef}
+            src={post.media?.url || post.audioUrl}
+            poster={thumbnail || undefined}
+            playsInline
+            muted
+            loop
+            preload="metadata"
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute top-2 right-2 p-1.5 rounded-full bg-black/40 backdrop-blur-sm z-10 text-white">
+            <Play className="w-3.5 h-3.5 fill-white" />
+          </div>
+        </>
       ) : (
         <img
-          src={getOptimizedImageUrl(post.media?.url)}
+          src={getOptimizedImageUrl(post.media?.url || post.image?.url || post.mediaUrl)}
           alt=""
-          className="w-full h-full object-cover"
+          loading="lazy"
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
         />
       )}
 
-      {/* Video/Reel indicator with view count */}
-      {isVideo && (
-        <div className="absolute bottom-2 left-2 flex items-center gap-1 z-10">
-          <Play className="w-3.5 h-3.5 text-text fill-white drop-shadow-lg" />
-          {(post.views || post.plays) && (
-            <span className="text-[11px] text-text font-semibold drop-shadow-lg">
-              {formatCount(post.views || post.plays)}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Multi-image indicator */}
-      {post.carouselMedia?.length > 1 && (
-        <div className="absolute top-2 right-2 z-10">
-          <svg className="w-5 h-5 text-text drop-shadow-lg" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M4 6h12v12H4V6zm14-2H6V2h14v14h-2V4z" />
-          </svg>
-        </div>
-      )}
-
-      {/* Hover Overlay with Stats */}
-      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-5 font-bold text-sm z-20 text-white">
+      {/* Hover Overlay */}
+      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-6 text-white text-sm font-bold z-10">
         <div className="flex items-center gap-1.5">
           <Heart className="w-5 h-5 fill-white text-white" />
           <span>{formatCount(post.likes?.length)}</span>
@@ -161,21 +146,44 @@ const ExploreMediaCard = ({ post, index, activeTab, navigate, formatCount, getVi
 
 export const Explore = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get("tab");
 
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [activeTab, setActiveTab] = useState(
-    () => sessionStorage.getItem("explore_active_tab") || "grid"
+    () => tabFromUrl || sessionStorage.getItem("explore_active_tab") || "grid"
   );
   const [posts, setPosts] = useState([]);
   const [reels, setReels] = useState([]);
   const [suggestedUsers, setSuggestedUsers] = useState([]);
+  const [activeLives, setActiveLives] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showSearchModal, setShowSearchModal] = useState(false);
+
+  useEffect(() => {
+    if (tabFromUrl && ["grid", "reels", "accounts"].includes(tabFromUrl)) {
+      const timer = setTimeout(() => setActiveTab(tabFromUrl), 0);
+      return () => clearTimeout(timer);
+    }
+  }, [tabFromUrl]);
+
+  const handleTabChange = (tabId) => {
+    setActiveTab(tabId);
+    sessionStorage.setItem("explore_active_tab", tabId);
+    setSearchParams(tabId === "grid" ? {} : { tab: tabId }, { replace: true });
+  };
 
   const cacheRef = useRef({});
   const categoryScrollRef = useRef(null);
 
-  const fetchExploreFeed = async () => {
+  const fetchExploreFeed = useCallback(async () => {
+    // Fetch active lives alongside explore feed
+    api.get("/live/active").then((res) => {
+      if (res.data?.success) {
+        setActiveLives(res.data.lives || []);
+      }
+    }).catch(() => {});
+
     if (cacheRef.current[selectedCategory]) {
       setPosts(cacheRef.current[selectedCategory].posts);
       setReels(cacheRef.current[selectedCategory].reels);
@@ -198,8 +206,9 @@ export const Explore = () => {
     } finally {
       setLoading(false);
     }
-  };
-  const fetchSuggestedUsers = async () => {
+  }, [selectedCategory]);
+
+  const fetchSuggestedUsers = useCallback(async () => {
     try {
       setLoading(true);
       const res = await api.get(`/user/suggested?category=${selectedCategory}`);
@@ -212,7 +221,7 @@ export const Explore = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedCategory]);
 
   useEffect(() => {
     let mounted = true;
@@ -227,7 +236,7 @@ export const Explore = () => {
     return () => {
       mounted = false;
     };
-  }, [selectedCategory, activeTab]);
+  }, [selectedCategory, activeTab, fetchExploreFeed, fetchSuggestedUsers]);
 
   useEffect(() => {
     const savedPos = sessionStorage.getItem("explore_scroll_pos");
@@ -324,6 +333,49 @@ export const Explore = () => {
 
       {/* Content Area */}
       <div className="max-w-6xl mx-auto px-1 sm:px-2 pb-20 md:pb-8">
+        {/* LIVE NOW DISCOVERY REEL */}
+        {activeLives.length > 0 && (
+          <div className="my-3 p-3 bg-gradient-to-r from-rose-950/40 via-purple-950/30 to-pink-950/40 border border-rose-500/30 rounded-3xl space-y-2.5 shadow-lg">
+            <div className="flex items-center justify-between px-1">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+                <span className="text-xs font-black uppercase tracking-wider text-rose-400">Live Broadcasters Now</span>
+              </div>
+              <span className="text-[11px] text-zinc-400 font-semibold">{activeLives.length} live</span>
+            </div>
+
+            <div className="flex items-center gap-3 overflow-x-auto pb-1 hide-scrollbar">
+              {activeLives.map((stream) => (
+                <div
+                  key={stream._id}
+                  onClick={() => navigate(`/live/${stream._id}`)}
+                  className="flex items-center gap-3 p-2.5 rounded-2xl bg-black/60 border border-white/10 hover:border-rose-500/50 transition cursor-pointer shrink-0 group min-w-[200px]"
+                >
+                  <div className="relative">
+                    <img
+                      src={stream.host?.profileImage?.url || dp}
+                      alt=""
+                      className="w-11 h-11 rounded-full object-cover border-2 border-rose-500"
+                    />
+                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-1.5 py-0.2 bg-rose-600 text-white text-[8px] font-black uppercase rounded-xs tracking-wider">
+                      LIVE
+                    </span>
+                  </div>
+                  <div className="overflow-hidden">
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs font-bold text-white group-hover:text-rose-400 transition truncate">
+                        @{stream.host?.userName || "Creator"}
+                      </span>
+                      {stream.host?.isVerified && <VerifiedBadge size="xs" />}
+                    </div>
+                    <p className="text-[10px] text-zinc-400 truncate mt-0.5">{stream.title || "Live broadcast"}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Tab Bar */}
         <div className="flex items-center border-b border-border/80 mt-1">
           {TABS.map((tab) => {
@@ -331,7 +383,7 @@ export const Explore = () => {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabChange(tab.id)}
                 className={`flex-1 flex items-center justify-center gap-2 py-3 text-xs font-semibold uppercase tracking-wider transition border-b-2 cursor-pointer ${
                   activeTab === tab.id
                     ? "border-current text-text"

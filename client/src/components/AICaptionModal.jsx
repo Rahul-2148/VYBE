@@ -25,7 +25,7 @@ export const AICaptionModal = ({ isOpen, onClose, onApplyCaption }) => {
         setGeneratedHashtags(res.data.hashtags || []);
         setGeneratedAltText(res.data.altText || "");
       }
-    } catch (err) {
+    } catch {
       snackbar.error("Failed to generate AI caption.");
     } finally {
       setLoading(false);

@@ -11,8 +11,6 @@ export const RemixReelModal = ({ isOpen, onClose, originalReel, onSuccess }) => 
   const [caption, setCaption] = useState("");
   const [loading, setLoading] = useState(false);
 
-  if (!isOpen || !currentOriginal) return null;
-
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -56,13 +54,39 @@ export const RemixReelModal = ({ isOpen, onClose, originalReel, onSuccess }) => 
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-surface-overlay backdrop-blur-md">
+      {isOpen && currentOriginal && (
         <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          className="relative w-full max-w-xl bg-surface border border-border rounded-3xl p-6 text-text shadow-2xl space-y-6"
+          key="remix-reel-backdrop"
+          onClick={onClose}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.22 }}
+          className="fixed inset-0 z-[5000] flex items-end justify-center p-0 bg-black/60 backdrop-blur-[3px] select-none"
         >
+          <motion.div
+            key="remix-reel-sheet"
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ type: "spring", damping: 28, stiffness: 300 }}
+            drag="y"
+            dragConstraints={{ top: 0 }}
+            dragElastic={{ top: 0, bottom: 0.4 }}
+            dragSnapToOrigin
+            onDragEnd={(e, info) => {
+              if (info.offset.y > 80 || info.velocity.y > 400) {
+                onClose();
+              }
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="relative z-10 w-full max-w-lg md:max-w-xl bg-surface/98 backdrop-blur-2xl border-t border-x border-border rounded-t-[28px] md:rounded-t-[32px] rounded-b-none shadow-[0_-12px_45px_rgba(0,0,0,0.85)] p-5 text-text max-h-[85vh] overflow-y-auto flex flex-col space-y-5"
+          >
+            {/* Top Drag Notch */}
+            <div
+              className="w-10 h-1 rounded-full bg-border-strong mx-auto mb-1 shrink-0 opacity-60 cursor-pointer hover:opacity-100 transition"
+              onClick={onClose}
+            />
           <div className="flex items-center justify-between border-b border-border pb-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-rose-600 flex items-center justify-center text-text shadow">
@@ -125,8 +149,9 @@ export const RemixReelModal = ({ isOpen, onClose, originalReel, onSuccess }) => 
               )}
             </button>
           </form>
+          </motion.div>
         </motion.div>
-      </div>
+      )}
     </AnimatePresence>
   );
 };

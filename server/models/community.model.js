@@ -13,14 +13,37 @@ const communitySchema = new mongoose.Schema(
       default: "",
       maxlength: 500,
     },
+    category: {
+      type: String,
+      enum: ["Gaming", "Technology", "Music", "Education", "Entertainment", "Creator", "General"],
+      default: "General",
+      index: true,
+    },
+    tags: {
+      type: [String],
+      default: [],
+    },
     owner: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
     },
     image: {
       url: { type: String, default: "" },
       public_id: { type: String, default: "" },
+    },
+    icon: {
+      url: { type: String, default: "" },
+      public_id: { type: String, default: "" },
+    },
+    banner: {
+      url: { type: String, default: "" },
+      public_id: { type: String, default: "" },
+    },
+    welcomeMessage: {
+      type: String,
+      default: "Welcome to the community! Feel free to introduce yourself.",
     },
     members: [
       {
@@ -60,16 +83,23 @@ const communitySchema = new mongoose.Schema(
     isPrivate: {
       type: Boolean,
       default: false,
+      index: true,
     },
     inviteCode: {
       type: String,
       unique: true,
       sparse: true,
     },
+    memberCount: {
+      type: Number,
+      default: 1,
+      index: true,
+    },
   },
   { timestamps: true }
 );
 
 communitySchema.index({ "members.user": 1 });
+communitySchema.index({ name: "text", description: "text", tags: "text" });
 
 export const Community = mongoose.model("Community", communitySchema);

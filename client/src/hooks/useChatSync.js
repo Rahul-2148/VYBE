@@ -9,6 +9,7 @@ import {
   markMessagesAsSeenInRedux,
   updateConversationLastMessage,
   updateUserPresenceInRedux,
+  setOnlineUsersListInRedux,
   setTypingUsersInRedux,
 } from "../redux/features/messageSlice";
 
@@ -27,7 +28,9 @@ export const useChatSync = () => {
 
     // 1. Join user room & active chat on connect/reconnect
     const handleConnect = () => {
-      console.log("🔌 ChatSync connected/reconnected. Registering rooms...");
+      console.log("🔌 ChatSync connected/reconnected. Registering rooms & sync presence...");
+      socket.emit("register-user", { userId: currentUserId });
+      socket.emit("get-online-users");
       if (selectedChatUser?.conversationId) {
         socket.emit("join-conversation", { conversationId: selectedChatUser.conversationId });
       }
@@ -97,6 +100,11 @@ export const useChatSync = () => {
     };
 
     // 7. Presence updates
+    const handleOnlineUsersList = (data) => {
+      const list = Array.isArray(data) ? data : data?.onlineUsers || [];
+      dispatch(setOnlineUsersListInRedux(list));
+    };
+
     const handleUserOnline = (data) => {
       dispatch(
         updateUserPresenceInRedux({
@@ -134,6 +142,7 @@ export const useChatSync = () => {
     socket.on("message-edited", handleMessageEdited);
     socket.on("message-deleted-everyone", handleMessageDeletedEveryone);
     socket.on("message-reaction-updated", handleMessageReactionUpdated);
+    socket.on("online-users-list", handleOnlineUsersList);
     socket.on("user-online", handleUserOnline);
     socket.on("user-offline", handleUserOffline);
     socket.on("user-typing", handleUserTyping);
@@ -146,6 +155,7 @@ export const useChatSync = () => {
       socket.off("message-edited", handleMessageEdited);
       socket.off("message-deleted-everyone", handleMessageDeletedEveryone);
       socket.off("message-reaction-updated", handleMessageReactionUpdated);
+      socket.off("online-users-list", handleOnlineUsersList);
       socket.off("user-online", handleUserOnline);
       socket.off("user-offline", handleUserOffline);
       socket.off("user-typing", handleUserTyping);

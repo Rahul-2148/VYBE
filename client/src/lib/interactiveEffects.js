@@ -3,6 +3,25 @@
  * Provides enterprise-tier sensory feedback, micro-haptics, pleasant audio chimes, and particle dynamics.
  */
 
+let hapticsEnabled = typeof window !== "undefined" ? localStorage.getItem("vybe_haptics_enabled") !== "false" : true;
+let soundEffectsEnabled = typeof window !== "undefined" ? localStorage.getItem("vybe_sound_effects_enabled") !== "false" : true;
+
+export const getHapticsEnabled = () => hapticsEnabled;
+export const setHapticsEnabled = (val) => {
+  hapticsEnabled = Boolean(val);
+  if (typeof window !== "undefined") {
+    localStorage.setItem("vybe_haptics_enabled", hapticsEnabled ? "true" : "false");
+  }
+};
+
+export const getSoundEffectsEnabled = () => soundEffectsEnabled;
+export const setSoundEffectsEnabled = (val) => {
+  soundEffectsEnabled = Boolean(val);
+  if (typeof window !== "undefined") {
+    localStorage.setItem("vybe_sound_effects_enabled", soundEffectsEnabled ? "true" : "false");
+  }
+};
+
 // Web Audio API Synthesizer (Zero asset dependency, zero lag)
 class MicroAudioSynthesizer {
   constructor() {
@@ -10,6 +29,7 @@ class MicroAudioSynthesizer {
   }
 
   getAudioContext() {
+    if (!soundEffectsEnabled) return null;
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (AudioCtx) {
@@ -23,6 +43,7 @@ class MicroAudioSynthesizer {
   }
 
   playPop() {
+    if (!soundEffectsEnabled) return;
     try {
       const ctx = this.getAudioContext();
       if (!ctx) return;
@@ -165,6 +186,7 @@ export const microAudio = new MicroAudioSynthesizer();
  * Trigger micro-haptics across devices (Android, iOS web, haptic touchpads)
  */
 export const triggerHaptic = (type = "light") => {
+  if (!hapticsEnabled) return;
   if (typeof window === "undefined" || !window.navigator?.vibrate) return;
   try {
     switch (type) {

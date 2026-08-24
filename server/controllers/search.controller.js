@@ -9,9 +9,9 @@ const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // 1. Universal Search (Users & Hashtags)
 export const searchAll = async (req, res) => {
   try {
-    const { q } = req.query;
+    const q = req.query.q || req.query.query;
     if (!q || !q.trim()) {
-      return res.status(200).json({ success: true, users: [], hashtags: [] });
+      return res.status(200).json({ success: true, users: [], hashtags: [], locations: [] });
     }
 
     const query = q.trim().replace(/^#/, "");
@@ -51,10 +51,31 @@ export const searchAll = async (req, res) => {
       count: tagCounts[tag],
     }));
 
+    // Search Locations in Posts & Reels
+    const locationPosts = await Post.find({
+      author: { $nin: blockedUserIds },
+      location: { $regex: safeRegex, $options: "i" },
+      isArchived: { $ne: true },
+    }).select("location");
+
+    const locationCounts = {};
+    locationPosts.forEach((post) => {
+      if (post.location && post.location.toLowerCase().includes(query.toLowerCase())) {
+        const clean = post.location.trim();
+        locationCounts[clean] = (locationCounts[clean] || 0) + 1;
+      }
+    });
+
+    const places = Object.keys(locationCounts).map((loc) => ({
+      name: loc,
+      count: locationCounts[loc],
+    }));
+
     return res.status(200).json({
       success: true,
       users,
       hashtags,
+      places,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: `searchAll error: ${error.message}` });
@@ -268,7 +289,58 @@ export const removeSearchHistoryItem = async (req, res) => {
   }
 };
 
-// 7. Get location posts/reels details
+// 7. Search Places / Locations Endpoint
+export const searchPlaces = async (req, res) => {
+  try {
+    const { q } = req.query;
+    const query = (q || "").trim();
+    const blockedUserIds = await getBlockedUserIds(req.userId);
+
+    let filter = {
+      author: { $nin: blockedUserIds },
+      location: { $exists: true, $ne: "" },
+      isArchived: { $ne: true },
+    };
+
+    if (query) {
+      filter.location = { $regex: escapeRegex(query), $options: "i" };
+    }
+
+    const posts = await Post.find(filter).select("location media createdAt").limit(100);
+    const reels = await Reel.find({
+      author: { $nin: blockedUserIds },
+      location: query ? { $regex: escapeRegex(query), $options: "i" } : { $exists: true, $ne: "" },
+    }).select("location media").limit(100);
+
+    const placeMap = {};
+    [...posts, ...reels].forEach((item) => {
+      if (item.location) {
+        const loc = item.location.trim();
+        if (!placeMap[loc]) {
+          placeMap[loc] = {
+            name: loc,
+            title: loc.split(",")[0] || loc,
+            subtitle: loc.split(",").slice(1).join(", ").trim(),
+            count: 0,
+            thumbnail: item.media?.url || (Array.isArray(item.media) ? item.media[0]?.url : null) || "",
+          };
+        }
+        placeMap[loc].count += 1;
+      }
+    });
+
+    const places = Object.values(placeMap).sort((a, b) => b.count - a.count);
+
+    return res.status(200).json({
+      success: true,
+      places,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: `searchPlaces error: ${error.message}` });
+  }
+};
+
+// 8. Get location posts/reels details
 export const getLocationDetails = async (req, res) => {
   try {
     const { locationName } = req.params;
@@ -295,11 +367,32 @@ export const getLocationDetails = async (req, res) => {
       .sort({ createdAt: -1 })
       .populate("author", "name userName profileImage isVerified");
 
+    // Top posts sorted by likes count
+    const topPosts = [...posts].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0)).slice(0, 9);
+
+    // Extract unique creator avatars
+    const creatorMap = new Map();
+    [...posts, ...reels].forEach((item) => {
+      if (item.author?._id && !creatorMap.has(item.author._id.toString())) {
+        creatorMap.set(item.author._id.toString(), {
+          _id: item.author._id,
+          userName: item.author.userName,
+          name: item.author.name,
+          profileImage: item.author.profileImage,
+        });
+      }
+    });
+
+    const creators = Array.from(creatorMap.values()).slice(0, 8);
+
     return res.status(200).json({
       success: true,
       location: cleanLocation,
       postCount: posts.length,
       reelCount: reels.length,
+      creatorsCount: creators.length,
+      creators,
+      topPosts,
       posts,
       reels,
     });

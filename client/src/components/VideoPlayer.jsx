@@ -18,14 +18,16 @@ const VideoPlayer = ({ media }) => {
   };
 
   useEffect(() => {
+    const currentVideo = videoTag.current;
+    if (!currentVideo) return;
+
     const observer = new IntersectionObserver(
       ([entry]) => {
-        const video = videoTag.current;
         if (entry.isIntersecting) {
-          video.play();
+          currentVideo.play().catch(() => null);
           setIsPlaying(true);
         } else {
-          video.pause();
+          currentVideo.pause();
           setIsPlaying(false);
         }
       },
@@ -34,38 +36,39 @@ const VideoPlayer = ({ media }) => {
       }
     );
 
-    if (videoTag.current) {
-      observer.observe(videoTag.current);
-    }
+    observer.observe(currentVideo);
 
     return () => {
-      if (videoTag.current) {
-        observer.unobserve(videoTag.current);
-      }
+      observer.unobserve(currentVideo);
     };
   }, []);
 
   return (
-    <div className="h-[100%] relative cursor-pointer max-w-full rounded-2xl overflow-hidden">
+    <div onClick={handleClick} className="h-[100%] relative cursor-pointer max-w-full rounded-2xl overflow-hidden select-none">
       <video
         ref={videoTag}
         src={getOptimizedMediaUrl(media, "video")}
         preload="metadata"
-        onEnded={(e) => { e.target.currentTime = 0; e.target.play().catch(() => null); }}
+        playsInline
+        loop
         muted={mute}
-        className="h-[100%] cursor-pointer w-full rounded-2xl object-cover"
-        onClick={handleClick}
+        className="h-[100%] cursor-pointer w-full rounded-2xl object-cover pointer-events-none"
       />
-      <div
-        className="absolute bottom-[10px] right-[10px]"
-        onClick={() => setMute((prev) => !prev)}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setMute((prev) => !prev);
+        }}
+        className="absolute bottom-3 right-3 p-2 rounded-full bg-black/70 hover:bg-black/90 backdrop-blur-md border border-white/10 text-white transition cursor-pointer z-30 interactive-tap shadow-lg"
+        title={mute ? "Unmute" : "Mute"}
       >
         {!mute ? (
-          <FiVolume2 className="w-[20px] h-[20px] text-text font-semibold" />
+          <FiVolume2 className="w-4 h-4 text-white" />
         ) : (
-          <FiVolumeX className="w-[20px] h-[20px] text-text font-semibold" />
+          <FiVolumeX className="w-4 h-4 text-zinc-300" />
         )}
-      </div>
+      </button>
     </div>
   );
 };

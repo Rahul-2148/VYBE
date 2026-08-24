@@ -17,7 +17,7 @@ const StoryVideoPlayer = ({ media, isPaused, onProgress, onEnd }) => {
 
   useEffect(() => {
     if (onProgress) onProgress(0);
-  }, [media]);
+  }, [media, onProgress]);
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;

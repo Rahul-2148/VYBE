@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import dp from "../assets/dp3.png";
 import { useSelector, useDispatch } from "react-redux";
@@ -41,7 +41,7 @@ import ShareSheet from "./ShareSheet";
 import StoryHighlighterModal from "./StoryHighlighterModal";
 import StoryViewersDrawer from "./StoryViewersDrawer";
 import moment from "moment";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 
 const STORY_IMAGE_DURATION = 6500; // 6.5s per image duration
 
@@ -97,7 +97,7 @@ export const StoryCard = () => {
   const [showViewers, setShowViewers] = useState(false);
   const [replyText, setReplyText] = useState("");
   const [isLiked, setIsLiked] = useState(false);
-  const [likesCount, setLikesCount] = useState(0);
+  const [, setLikesCount] = useState(0);
   const [showShareSheet, setShowShareSheet] = useState(false);
   const [showHighlightModal, setShowHighlightModal] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
@@ -122,7 +122,7 @@ export const StoryCard = () => {
   const isSwipeRef = useRef(false);
 
   // Helper to find first unseen story
-  const getFirstUnseenIndex = (userGroup) => {
+  const getFirstUnseenIndex = useCallback((userGroup) => {
     if (!userGroup || !userGroup.stories || userGroup.stories.length === 0) return 0;
     const currentUserId = userData?.user?._id;
     const idx = userGroup.stories.findIndex((s) => {
@@ -131,7 +131,7 @@ export const StoryCard = () => {
       );
     });
     return idx === -1 ? 0 : idx;
-  };
+  }, [userData?.user?._id]);
 
   // Populate Feed
   useEffect(() => {
@@ -139,27 +139,33 @@ export const StoryCard = () => {
 
     if (location.state?.stories && location.state.stories.length > 0) {
       const storiesList = location.state.stories;
-      setFeed([
-        {
-          author: storiesList[0]?.author || { userName: "Highlight" },
-          stories: storiesList,
-          isCurrentUser: storiesList[0]?.author?._id === userData?.user?._id,
-        },
-      ]);
-      setCurrentUserIndex(0);
-      setCurrentStoryIndex(0);
-      setInitialized(true);
+      const timer = setTimeout(() => {
+        setFeed([
+          {
+            author: storiesList[0]?.author || { userName: "Highlight" },
+            stories: storiesList,
+            isCurrentUser: storiesList[0]?.author?._id === userData?.user?._id,
+          },
+        ]);
+        setCurrentUserIndex(0);
+        setCurrentStoryIndex(0);
+        setInitialized(true);
+      }, 0);
+      return () => clearTimeout(timer);
     } else if (reduxFeed && reduxFeed.length > 0) {
-      setFeed(reduxFeed);
       const initialUserIdx = location.state?.initialUserIndex ?? 0;
       const startUserIdx = Math.min(Math.max(0, initialUserIdx), reduxFeed.length - 1);
-      setCurrentUserIndex(startUserIdx);
-      if (reduxFeed[startUserIdx]) {
-        setCurrentStoryIndex(getFirstUnseenIndex(reduxFeed[startUserIdx]));
-      }
-      setInitialized(true);
+      const timer = setTimeout(() => {
+        setFeed(reduxFeed);
+        setCurrentUserIndex(startUserIdx);
+        if (reduxFeed[startUserIdx]) {
+          setCurrentStoryIndex(getFirstUnseenIndex(reduxFeed[startUserIdx]));
+        }
+        setInitialized(true);
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [location.state?.stories, reduxFeed, userData, initialized]);
+  }, [location.state?.stories, location.state?.initialUserIndex, reduxFeed, userData, initialized, getFirstUnseenIndex]);
 
   const activeGroup = feed[currentUserIndex] || null;
   const storiesList = activeGroup?.stories || [];
@@ -172,18 +178,21 @@ export const StoryCard = () => {
   useEffect(() => {
     if (story) {
       const currentUserId = userData?.user?._id;
-      setIsLiked(story.likes?.some((id) => id === currentUserId || id._id === currentUserId));
-      setLikesCount(story.likes?.length || 0);
+      const timer = setTimeout(() => {
+        setIsLiked(Boolean(story.likes?.some((id) => id === currentUserId || id._id === currentUserId)));
+        setLikesCount(story.likes?.length || 0);
 
-      if (story.mediaType === "image" && !story.caption && imgRef.current && imgRef.current.complete) {
-        setMediaLoading(false);
-      } else if (story.mediaType === "text" || (story.mediaType === "image" && story.caption)) {
-        setMediaLoading(false);
-      } else {
-        setMediaLoading(true);
-      }
+        if (story.mediaType === "image" && !story.caption && imgRef.current && imgRef.current.complete) {
+          setMediaLoading(false);
+        } else if (story.mediaType === "text" || (story.mediaType === "image" && story.caption)) {
+          setMediaLoading(false);
+        } else {
+          setMediaLoading(true);
+        }
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [story, userData]);
+  }, [story, userData?.user?._id]);
 
   // Mark Story Viewed
   useEffect(() => {
@@ -240,7 +249,7 @@ export const StoryCard = () => {
         storyAudioRef.current.pause();
       }
     };
-  }, [story?._id]);
+  }, [story?._id, story?.music, isMuted, isPaused, mediaLoading, showViewers, showShareSheet, showHighlightModal, showOptionsMenu]);
 
   // Sync play/pause/mute state
   useEffect(() => {
@@ -263,7 +272,7 @@ export const StoryCard = () => {
   }, [isPaused, isMuted, mediaLoading, showViewers, showShareSheet, showHighlightModal, showOptionsMenu]);
 
   // Navigation Logic
-  const handleNextUser = () => {
+  const handleNextUser = useCallback(() => {
     if (currentUserIndex < feed.length - 1) {
       const nextUserIdx = currentUserIndex + 1;
       setCurrentUserIndex(nextUserIdx);
@@ -271,32 +280,32 @@ export const StoryCard = () => {
     } else {
       navigate(-1);
     }
-  };
+  }, [currentUserIndex, feed, navigate, getFirstUnseenIndex]);
 
-  const handlePrevUser = () => {
+  const handlePrevUser = useCallback(() => {
     if (currentUserIndex > 0) {
       const prevUserIdx = currentUserIndex - 1;
       setCurrentUserIndex(prevUserIdx);
       const prevGroup = feed[prevUserIdx];
-      setCurrentStoryIndex(Math.max(0, (prevGroup.stories?.length || 1) - 1));
+      setCurrentStoryIndex(Math.max(0, (prevGroup?.stories?.length || 1) - 1));
     }
-  };
+  }, [currentUserIndex, feed]);
 
-  const handleNextStory = () => {
+  const handleNextStory = useCallback(() => {
     if (currentStoryIndex < storiesList.length - 1) {
       setCurrentStoryIndex((prev) => prev + 1);
     } else {
       handleNextUser();
     }
-  };
+  }, [currentStoryIndex, storiesList.length, handleNextUser]);
 
-  const handlePrevStory = () => {
+  const handlePrevStory = useCallback(() => {
     if (currentStoryIndex > 0) {
       setCurrentStoryIndex((prev) => prev - 1);
     } else {
       handlePrevUser();
     }
-  };
+  }, [currentStoryIndex, handlePrevUser]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -312,11 +321,10 @@ export const StoryCard = () => {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentStoryIndex, currentUserIndex, feed, storiesList]);
+  }, [handleNextStory, handlePrevStory, navigate]);
 
   // Progress Timer
   useEffect(() => {
-    setProgress(0);
     clearInterval(intervalRef.current);
 
     if ((story?.mediaType === "image" || story?.mediaType === "text" || story?.caption) && !mediaLoading) {
@@ -334,10 +342,48 @@ export const StoryCard = () => {
     }
 
     return () => clearInterval(intervalRef.current);
-  }, [currentStoryIndex, currentUserIndex, isPaused, mediaLoading, story, showViewers, showShareSheet, showHighlightModal, showOptionsMenu]);
+  }, [currentStoryIndex, currentUserIndex, isPaused, mediaLoading, story, showViewers, showShareSheet, showHighlightModal, showOptionsMenu, handleNextStory]);
+
+  // Floating Emoji Burst Particle
+  const addFloatingEmoji = useCallback((emoji) => {
+    const id = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const randomX = Math.random() * 60 - 30; // -30px to +30px jitter
+    setFloatingEmojis((prev) => [...prev, { id, emoji, x: randomX }]);
+    setTimeout(() => {
+      setFloatingEmojis((prev) => prev.filter((item) => item.id !== id));
+    }, 1800);
+  }, []);
+
+  // Like Toggle
+  const handleToggleLike = useCallback(async () => {
+    if (!story?._id) return;
+    const prevLiked = isLiked;
+    setIsLiked(!prevLiked);
+    setLikesCount((c) => (prevLiked ? Math.max(0, c - 1) : c + 1));
+
+    if (!prevLiked) {
+      addFloatingEmoji("❤️");
+    }
+
+    try {
+      const res = await api.post(`/story/like/${story._id}`);
+      if (res.data?.success) {
+        dispatch(
+          toggleStoryLikeInRedux({
+            storyId: story._id,
+            userId: userData?.user?._id,
+            isLiked: res.data.isLiked,
+          })
+        );
+      }
+    } catch {
+      setIsLiked(prevLiked);
+      setLikesCount((c) => (prevLiked ? c + 1 : Math.max(0, c - 1)));
+    }
+  }, [story, isLiked, addFloatingEmoji, dispatch, userData]);
 
   // Touch / Pointer Gestures
-  const handlePointerDown = (e) => {
+  const handlePointerDown = useCallback((e) => {
     if (isInteractiveTarget(e.target)) return;
     pointerDownTime.current = Date.now();
     isHolding.current = true;
@@ -350,9 +396,9 @@ export const StoryCard = () => {
     startYRef.current = clientY;
     setIsPaused(true);
     setIsHoldingState(true);
-  };
+  }, []);
 
-  const handlePointerMove = (e) => {
+  const handlePointerMove = useCallback((e) => {
     if (!isHolding.current) return;
     const clientX = e.clientX || (e.touches && e.touches[0].clientX);
     const clientY = e.clientY || (e.touches && e.touches[0].clientY);
@@ -363,9 +409,9 @@ export const StoryCard = () => {
     if (Math.abs(diffX) > 15 || Math.abs(diffY) > 15) {
       isSwipeRef.current = true;
     }
-  };
+  }, []);
 
-  const handlePointerUp = (e) => {
+  const handlePointerUp = useCallback((e) => {
     if (!isHolding.current) return;
     isHolding.current = false;
     setIsPaused(false);
@@ -410,45 +456,7 @@ export const StoryCard = () => {
         }
       }
     }
-  };
-
-  // Like Toggle
-  const handleToggleLike = async () => {
-    if (!story?._id) return;
-    const prevLiked = isLiked;
-    setIsLiked(!prevLiked);
-    setLikesCount((c) => (prevLiked ? Math.max(0, c - 1) : c + 1));
-
-    if (!prevLiked) {
-      addFloatingEmoji("❤️");
-    }
-
-    try {
-      const res = await api.post(`/story/like/${story._id}`);
-      if (res.data?.success) {
-        dispatch(
-          toggleStoryLikeInRedux({
-            storyId: story._id,
-            userId: userData?.user?._id,
-            isLiked: res.data.isLiked,
-          })
-        );
-      }
-    } catch {
-      setIsLiked(prevLiked);
-      setLikesCount((c) => (prevLiked ? c + 1 : Math.max(0, c - 1)));
-    }
-  };
-
-  // Floating Emoji Burst Particle
-  const addFloatingEmoji = (emoji) => {
-    const id = Date.now() + Math.random();
-    const randomX = Math.random() * 60 - 30; // -30px to +30px jitter
-    setFloatingEmojis((prev) => [...prev, { id, emoji, x: randomX }]);
-    setTimeout(() => {
-      setFloatingEmojis((prev) => prev.filter((item) => item.id !== id));
-    }, 1800);
-  };
+  }, [navigate, handleNextUser, handlePrevUser, isLiked, handleToggleLike, handlePrevStory, handleNextStory]);
 
   // Quick Emoji Reaction
   const handleEmojiReaction = async (emoji, e) => {

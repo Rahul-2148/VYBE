@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import {
   X, Calendar, Mail, Phone, MapPin, ShieldCheck, CheckCircle2,
-  Copy, ExternalLink, Users, Link2, Sparkles, AlertCircle, Info,
-  Send, Loader2, Lock
+  Copy, ExternalLink, Link2, Info,
+  Send, Loader2
 } from "lucide-react";
 import { snackbar } from "../lib/snackbar";
 import moment from "moment";
@@ -11,10 +11,10 @@ import dp from "../assets/dp3.png";
 import api from "../lib/axios";
 
 const AboutAccountModal = ({ isOpen, onClose, user, isOwnProfile = false }) => {
-  if (!isOpen || !user) return null;
-
   const [requesting, setRequesting] = useState(false);
   const [requested, setRequested] = useState(false);
+
+  if (!isOpen || !user) return null;
 
   const avatarUrl = user.profileImage?.url || user.avatarUrl || dp;
   const joinedDate = user.createdAt ? moment(user.createdAt).format("MMMM YYYY") : "Recently";

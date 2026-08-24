@@ -7,11 +7,21 @@ import path from "path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  server: {
+    port: 5173,
+    strictPort: false,
+    host: true,
+    hmr: {
+      overlay: true,
+    },
+  },
   resolve: {
-    dedupe: ["react", "react-dom"],
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+    dedupe: ["react", "react-dom", "react-router-dom", "react-redux", "@reduxjs/toolkit"],
   },
   build: {
     chunkSizeWarningLimit: 1200,
@@ -46,6 +56,6 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ["react", "react-dom", "@mui/material", "@emotion/react", "@emotion/styled"],
+    include: ["react", "react-dom", "react-router-dom", "react-redux", "@mui/material", "@emotion/react", "@emotion/styled"],
   },
 });

@@ -8,4 +8,8 @@ noteRouter.post("/", isAuthenticated, createOrUpdateNote);
 noteRouter.get("/", isAuthenticated, getActiveNotes);
 noteRouter.delete("/", isAuthenticated, deleteNote);
 
+noteRouter.post("", isAuthenticated, createOrUpdateNote);
+noteRouter.get("", isAuthenticated, getActiveNotes);
+noteRouter.delete("", isAuthenticated, deleteNote);
+
 export default noteRouter;

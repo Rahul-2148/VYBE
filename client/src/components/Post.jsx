@@ -1,6 +1,6 @@
-import { Check, Archive, FolderPlus, Tag, VolumeX, Volume2, BadgeCheck, Sparkles, Info, Bot, X, Music } from "lucide-react";
+import { Check, Archive, FolderPlus, Tag, VolumeX, Volume2, BadgeCheck, Sparkles, Info, Bot, X, Music, MapPin } from "lucide-react";
 import moment from "moment";
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { snackbar } from "../lib/snackbar";
 import { GoBookmark, GoBookmarkFill, GoHeart, GoHeartFill } from "react-icons/go";
 import { IoSendSharp } from "react-icons/io5";
@@ -9,9 +9,8 @@ import { RxCross2 } from "react-icons/rx";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { ClipLoader } from "react-spinners";
-import { SERVER_URL } from "../App";
 import dp from "../assets/dp3.png";
-import { deleteCommentFromPost, editCommentInPost, setPostData } from "../redux/features/postSlice";
+import { setPostData } from "../redux/features/postSlice";
 import { setUserData } from "../redux/features/userSlice";
 import FollowButton from "./FollowButton";
 import VideoPlayer from "./VideoPlayer";
@@ -24,6 +23,8 @@ import ShareSheet from "./ShareSheet";
 import EditPostModal from "./EditPostModal";
 import HeartExplosion from "./HeartExplosion";
 import AIInfoModal from "./AIInfoModal";
+import LikersModal from "./LikersModal";
+import CommentsModal from "./CommentsModal";
 import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
 import api from "../lib/axios";
 import { useToggleArchivePostMutation, useDeletePostMutation } from "../redux/api/apiSlice";
@@ -83,14 +84,9 @@ const Post = ({ post }) => {
   const [toggleArchivePost] = useToggleArchivePostMutation();
   const [deletePostMutation] = useDeletePostMutation();
 
-  const [showComments, setShowComments] = useState(false);
-  const [message, setMessage] = useState("");
-  const [commentLoading, setCommentLoading] = useState(false);
+  const [showLikersModal, setShowLikersModal] = useState(false);
+  const [showCommentsModal, setShowCommentsModal] = useState(false);
   const [deletePostLoading, setDeletePostLoading] = useState(false);
-  const [deleteCommentId, setDeleteCommentId] = useState(null);
-  const [editingCommentId, setEditingCommentId] = useState(null);
-  const [editingMessage, setEditingMessage] = useState("");
-  const [editLoadingId, setEditLoadingId] = useState(null);
   const [showHeartAnim, setShowHeartAnim] = useState(false);
   const [showTags, setShowTags] = useState(false);
 
@@ -134,7 +130,7 @@ const Post = ({ post }) => {
         audioRef.current.pause();
       }
     };
-  }, [parsedMusic?.audioUrl]);
+  }, [parsedMusic?.audioUrl, musicMuted]);
 
   useEffect(() => {
     if (audioRef.current) {
@@ -146,53 +142,151 @@ const Post = ({ post }) => {
     }
   }, [musicMuted]);
 
-
-  // Collections & Share Modal states
+  // Modals state
   const [showCollectionsModal, setShowCollectionsModal] = useState(false);
   const [showShareSheet, setShowShareSheet] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAIInfoModal, setShowAIInfoModal] = useState(false);
 
-  const handlePostUpdated = (updatedPost) => {
-    if (!updatedPost) return;
-    const updatedPosts = postData?.map((p) => (p._id === updatedPost._id ? updatedPost : p));
-    dispatch(setPostData(updatedPosts));
-  };
+  const [localLikes, setLocalLikes] = useState(post?.likes || []);
 
-  const handleLike = async () => {
+  useEffect(() => {
+    const timer = setTimeout(() => setLocalLikes(post?.likes || []), 0);
+    return () => clearTimeout(timer);
+  }, [post?.likes]);
+
+  const currentUserId = (userData?.user?._id || userData?._id)?.toString();
+  const isLiked = Boolean(
+    currentUserId &&
+    localLikes?.some((like) => {
+      const id = (like?._id || like)?.toString();
+      return id === currentUserId;
+    })
+  );
+
+  // Instagram-style Priority Preview Comments Ranking:
+  // 1. Pinned comment -> 2. Friends / Followed users -> 3. Most likes -> 4. Recent
+  const followingList = useMemo(() => {
+    return userData?.user?.following || userData?.following || [];
+  }, [userData?.user?.following, userData?.following]);
+
+  const previewComments = useMemo(() => {
+    if (!post?.comments || post.comments.length === 0 || post.allowComments === false) return [];
+    const sorted = [...post.comments].sort((a, b) => {
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+
+      const aAuthorId = (a.author?._id || a.author)?.toString();
+      const bAuthorId = (b.author?._id || b.author)?.toString();
+
+      const aIsFollowing = followingList.some((id) => (id?._id || id)?.toString() === aAuthorId);
+      const bIsFollowing = followingList.some((id) => (id?._id || id)?.toString() === bAuthorId);
+
+      if (aIsFollowing && !bIsFollowing) return -1;
+      if (!aIsFollowing && bIsFollowing) return 1;
+
+      const aLikes = a.likes?.length || 0;
+      const bLikes = b.likes?.length || 0;
+      if (bLikes !== aLikes) return bLikes - aLikes;
+
+      return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+    });
+    return sorted.slice(0, 2);
+  }, [post, followingList]);
+
+  // Inline like/unlike comment directly from post card
+  const handleInlineLikeComment = useCallback(async (commentId) => {
+    if (!currentUserId) {
+      snackbar.error("Please login to like comments");
+      return;
+    }
+    triggerHaptic("like");
+    microAudio.playPop();
     try {
-      const isLiked = post?.likes?.includes(userData?.user?._id);
-      if (!isLiked) {
-        triggerHaptic("like");
-        microAudio.playPop();
-      } else {
-        triggerHaptic("light");
+      const res = await api.post(`/post/comment/like/${post._id}/${commentId}`);
+      if (res.data?.post) {
+        const updated = postData?.map((p) => (p._id === post._id ? res.data.post : p));
+        dispatch(setPostData(updated));
       }
-      const result = await api.post(`/post/like/${post?._id}`, { action: isLiked ? "unlike" : "like" });
-      const updatedPost = result.data.post;
-      const updatedPosts = postData?.map((p) => (p._id === post._id ? updatedPost : p));
-      dispatch(setPostData(updatedPosts));
+    } catch {
+      snackbar.error("Failed to like comment");
+    }
+  }, [currentUserId, post._id, postData, dispatch]);
+
+  const handleLike = useCallback(async () => {
+    if (!currentUserId) {
+      snackbar.error("Please login to like posts");
+      return;
+    }
+    const nextLiked = !isLiked;
+    if (nextLiked) {
+      triggerHaptic("like");
+      microAudio.playPop();
+    } else {
+      triggerHaptic("light");
+    }
+
+    const previousLikes = [...localLikes];
+    const optimisticLikes = nextLiked
+      ? [...previousLikes, currentUserId]
+      : previousLikes.filter((like) => (like?._id || like)?.toString() !== currentUserId);
+
+    setLocalLikes(optimisticLikes);
+
+    const updatedPost = { ...post, likes: optimisticLikes };
+    const updatedPosts = postData?.map((p) => (p._id === post._id ? updatedPost : p));
+    dispatch(setPostData(updatedPosts));
+
+    try {
+      const result = await api.post(`/post/like/${post?._id}`, { action: nextLiked ? "like" : "unlike" });
+      if (result.data?.post) {
+        const serverPost = result.data.post;
+        setLocalLikes(serverPost.likes || []);
+        const syncedPosts = postData?.map((p) => (p._id === serverPost._id ? serverPost : p));
+        dispatch(setPostData(syncedPosts));
+      }
     } catch (error) {
+      setLocalLikes(previousLikes);
+      const revertedPost = { ...post, likes: previousLikes };
+      dispatch(setPostData(postData?.map((p) => (p._id === post._id ? revertedPost : p))));
       snackbar.error(error.response?.data?.message || "Like failed");
     }
-  };
+  }, [currentUserId, isLiked, localLikes, post, postData, dispatch]);
 
-  const handleComment = async () => {
-    if (!message.trim()) return;
-    try {
-      setCommentLoading(true);
-      triggerHaptic("light");
-      microAudio.playBubble();
-      const result = await api.post(`/post/comment/${post?._id}`, { message });
-      const updatedPost = result.data.post;
-      const updatedPosts = postData.map((p) => (p._id === post._id ? updatedPost : p));
+  const lastTapRef = useRef(0);
+  const singleTapTimerRef = useRef(null);
 
-      dispatch(setPostData(updatedPosts));
-      setMessage("");
-    } catch (error) {
-      snackbar.error("Failed to add comment");
-    } finally {
-      setCommentLoading(false);
+  const handleMediaTap = (e) => {
+    // If clicking an interactive button/pill, do not intercept
+    if (e.target.closest("button") || e.target.closest("a") || e.target.closest(".interactive-tap")) return;
+
+    const now = Date.now();
+    const DOUBLE_TAP_DELAY = 350;
+
+    if (now - lastTapRef.current < DOUBLE_TAP_DELAY) {
+      // Double Tap Detected!
+      if (singleTapTimerRef.current) {
+        clearTimeout(singleTapTimerRef.current);
+        singleTapTimerRef.current = null;
+      }
+      lastTapRef.current = 0;
+
+      if (!isLiked) {
+        handleLike();
+      } else {
+        triggerHaptic("like");
+        microAudio.playLikeBurst();
+      }
+      setShowHeartAnim(true);
+      setTimeout(() => setShowHeartAnim(false), 900);
+    } else {
+      lastTapRef.current = now;
+      singleTapTimerRef.current = setTimeout(() => {
+        if (post?.taggedUsers && post.taggedUsers.length > 0) {
+          setShowTags((prev) => !prev);
+        }
+        singleTapTimerRef.current = null;
+      }, DOUBLE_TAP_DELAY);
     }
   };
 
@@ -212,7 +306,7 @@ const Post = ({ post }) => {
       setDeletePostLoading(true);
       const result = await deletePostMutation(post?._id).unwrap();
       snackbar.success(result.message || "Post deleted");
-      const updatedPosts = postData.filter((p) => p._id !== post._id);
+      const updatedPosts = postData?.filter((p) => p._id !== post._id);
       dispatch(setPostData(updatedPosts));
     } catch (error) {
       snackbar.error(error?.data?.message || "Delete failed");
@@ -226,9 +320,8 @@ const Post = ({ post }) => {
       const res = await toggleArchivePost(post?._id).unwrap();
       if (res.success) {
         snackbar.success(res.message);
-        // Remove from feed state immediately
         if (res.isArchived) {
-          const updatedPosts = postData.filter((p) => p._id !== post._id);
+          const updatedPosts = postData?.filter((p) => p._id !== post._id);
           dispatch(setPostData(updatedPosts));
         }
       }
@@ -237,57 +330,26 @@ const Post = ({ post }) => {
     }
   };
 
-  const handleDeleteComment = async (commentId) => {
-    try {
-      setDeleteCommentId(commentId);
-      const res = await api.delete(`/post/comment/${post._id}/${commentId}`);
-      dispatch(deleteCommentFromPost({ postId: post._id, commentId }));
-      snackbar.success(res.data.message);
-    } catch (error) {
-      snackbar.error("Failed to delete comment");
-    } finally {
-      setDeleteCommentId(null);
-    }
-  };
-
-  const handleEditComment = async (commentId) => {
-    if (!editingMessage.trim()) return;
-    try {
-      setEditLoadingId(commentId);
-      const res = await api.put(`/post/comment/${post._id}/${commentId}`, {
-        message: editingMessage,
-      });
-      dispatch(
-        editCommentInPost({
-          postId: post._id,
-          comment: res.data.comment,
-        })
-      );
-      setEditingCommentId(null);
-      setEditingMessage("");
-      snackbar.success(res.data.message);
-    } catch (error) {
-      snackbar.error("Failed to edit comment");
-    } finally {
-      setEditLoadingId(null);
-    }
+  const handlePostUpdated = (updatedPost) => {
+    const updated = postData?.map((p) => (p._id === updatedPost._id ? updatedPost : p));
+    dispatch(setPostData(updated));
   };
 
   return (
     <div id={`post-${post?._id}`} className="w-full flex flex-col bg-surface-inset/90 border border-border/80 shadow-2xl rounded-2xl overflow-hidden my-3 transition-all duration-300">
       {/* POST HEADER */}
-      <div className="w-full h-14 flex justify-between items-center px-4 border-b border-border/80 bg-bg/40">
+      <div className="w-full min-h-[56px] py-2 flex justify-between items-center px-4 border-b border-border/80 bg-bg/40">
         <div className="flex items-center gap-3">
           <div
-            className="w-9 h-9 rounded-full border border-border cursor-pointer overflow-hidden shadow"
+            className="w-10 h-10 rounded-full border border-border cursor-pointer overflow-hidden shadow shrink-0"
             onClick={() => navigate(`/profile/${post?.author?.userName}`)}
           >
             <img src={post?.author?.profileImage?.url || dp} alt="" className="w-full h-full object-cover" />
           </div>
 
-          <div className="flex flex-col">
+          <div className="flex flex-col min-w-0">
             <span
-              className="font-bold text-xs text-text cursor-pointer hover:underline truncate max-w-[150px] flex items-center gap-1"
+              className="font-bold text-xs text-text cursor-pointer hover:underline truncate max-w-[150px] sm:max-w-[200px] flex items-center gap-1"
               onClick={() => navigate(`/profile/${post?.author?.userName}`)}
             >
               {post?.author?.userName}
@@ -295,6 +357,7 @@ const Post = ({ post }) => {
                 <VerifiedBadge size="sm" />
               )}
             </span>
+
             <div className="flex items-center gap-1.5 text-[10px] text-text-muted font-medium flex-wrap">
               <span>{moment(post?.createdAt).fromNow()}</span>
               {post?.isEdited && (
@@ -308,34 +371,46 @@ const Post = ({ post }) => {
                     triggerHaptic("light");
                     setShowAIInfoModal(true);
                   }}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-purple-500/15 via-pink-500/10 to-purple-500/15 border border-purple-500/30 text-[10px] font-semibold text-purple-300 hover:bg-purple-500/25 active:scale-95 transition-all shadow-sm cursor-pointer"
-                  title="Content made or modified with AI • Click for info"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-[9px] font-bold text-purple-300 active:scale-95 transition-all shadow-xs cursor-pointer ml-1"
+                  title="Made with AI • Click for info"
                 >
                   <Sparkles className="w-2.5 h-2.5 text-purple-400 fill-purple-400/20 animate-pulse" />
-                  <span>Made with AI</span>
+                  <span>AI info</span>
                 </button>
               )}
             </div>
+
+            {/* Audio Track Attribution displayed cleanly below username (Instagram Style) */}
+            {post?.music && !["1:1", "4:5", "16:9", "original", "none"].includes(post.music) && (
+              <span 
+                className="text-[10px] text-rose-400 font-semibold flex items-center gap-1 mt-0.5 hover:underline cursor-pointer truncate max-w-[180px] sm:max-w-[240px]"
+                onClick={() => {
+                  const trackId = typeof post.music === "object" ? post.music.id || post.music.title : post.music;
+                  navigate(`/audio/${encodeURIComponent(trackId)}`, {
+                    state: { music: parsedMusic },
+                  });
+                }}
+              >
+                <Music className="w-2.5 h-2.5 shrink-0" />
+                <span className="truncate">
+                  {typeof post.music === "object" ? `${post.music.title} • ${post.music.artist}` : post.music}
+                </span>
+              </span>
+            )}
+
             {post?.location && (
               <span
                 onClick={() => navigate(`/explore/location/${encodeURIComponent(post.location)}`)}
-                className="text-[10px] text-rose-400 font-semibold cursor-pointer hover:underline flex items-center gap-0.5 mt-0.5"
+                className="text-[10px] text-rose-400 font-bold cursor-pointer hover:underline flex items-center gap-1 mt-0.5 truncate interactive-btn"
               >
-                📍 {post.location}
-              </span>
-            )}
-            {post?.music && (
-              <span 
-                className="text-[10px] text-text-secondary font-semibold flex items-center gap-1 mt-0.5 hover:text-text cursor-pointer"
-                onClick={() => navigate(`/audio/${encodeURIComponent(typeof post.music === 'object' ? post.music.id || post.music.title : post.music)}`)}
-              >
-                🎵 {typeof post.music === 'object' ? `${post.music.title} • ${post.music.artist}` : post.music}
+                <MapPin className="w-2.5 h-2.5 shrink-0 text-rose-500" />
+                <span className="truncate">{post.location}</span>
               </span>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {userData?.user?._id === post?.author?._id ? (
             <div className="flex items-center gap-1">
               <button
@@ -373,22 +448,8 @@ const Post = ({ post }) => {
 
       {/* MEDIA CONTAINER */}
       <div 
-        onClick={(e) => {
-          // Handle single vs double click separating tags toggle from heart animation
-          if (e.detail === 1) {
-            window.postClickTimeout = setTimeout(() => {
-              setShowTags((prev) => !prev);
-            }, 250);
-          } else if (e.detail === 2) {
-            clearTimeout(window.postClickTimeout);
-            if (!post?.likes?.includes(userData?.user?._id)) {
-              handleLike();
-            }
-            setShowHeartAnim(true);
-            setTimeout(() => setShowHeartAnim(false), 900);
-          }
-        }}
-        className="relative w-full bg-bg flex items-center justify-center overflow-hidden min-h-[300px] cursor-pointer"
+        onClick={handleMediaTap}
+        className="relative w-full bg-bg flex items-center justify-center overflow-hidden min-h-[300px] cursor-pointer select-none"
       >
         {post?.mediaType === "carousel" ? (
           <PostCarousel mediaList={post?.carouselMedia || []} />
@@ -404,98 +465,69 @@ const Post = ({ post }) => {
         {/* Particle Heart Burst on double tap */}
         <HeartExplosion show={showHeartAnim} onComplete={() => setShowHeartAnim(false)} />
 
-        {/* Floating Soundtrack Pill */}
-        {post?.music && (
-          <div
-            className="absolute bottom-3 left-3 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/75 hover:bg-black/90 backdrop-blur-md text-white border border-white/20 shadow-xl transition cursor-pointer group select-none interactive-tap"
+        {/* Instagram-style Clean Top-Right Audio Mute/Unmute Button (Only if post has music) */}
+        {parsedMusic?.audioUrl && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              triggerHaptic("light");
+              setMusicMuted(!musicMuted);
+            }}
+            className="absolute top-3 right-3 z-30 p-2.5 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white border border-white/20 shadow-xl transition cursor-pointer hover:scale-105 active:scale-95 interactive-tap"
+            title={musicMuted ? "Unmute Audio" : "Mute Audio"}
           >
-            {/* Click to Navigate to Audio Detail Page */}
-            <div
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerHaptic("light");
-                const trackId = typeof post.music === "object" ? post.music.id || post.music.title : post.music;
-                navigate(`/audio/${encodeURIComponent(trackId)}`, {
-                  state: { music: parsedMusic },
-                });
-              }}
-              className="flex items-center gap-2 hover:opacity-90 transition"
-            >
-              <div className={`w-4 h-4 rounded-full bg-gradient-to-tr from-rose-500 to-purple-600 flex items-center justify-center shrink-0 ${!musicMuted && parsedMusic?.audioUrl ? "animate-spin-slow" : ""}`}>
-                <Music className="w-2.5 h-2.5 text-white" />
+            {!musicMuted ? (
+              <div className="flex items-center gap-1">
+                <Volume2 className="w-4 h-4 text-white animate-pulse" />
+                <div className="flex items-end gap-0.5 h-3">
+                  <span className="w-0.5 bg-rose-400 animate-sound-wave-1 rounded-full" />
+                  <span className="w-0.5 bg-rose-300 animate-sound-wave-2 rounded-full" />
+                  <span className="w-0.5 bg-rose-400 animate-sound-wave-3 rounded-full" />
+                </div>
               </div>
-              <span className="text-[10px] font-bold truncate max-w-[130px] sm:max-w-[190px] hover:underline">
-                {typeof post.music === "object" ? `${post.music.title} • ${post.music.artist}` : post.music}
-              </span>
-            </div>
-
-            {/* Click to Toggle Mute / Unmute */}
-            {parsedMusic?.audioUrl && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  triggerHaptic("light");
-                  setMusicMuted(!musicMuted);
-                }}
-                className="flex items-center gap-1 ml-1 border-l border-white/20 pl-1.5 cursor-pointer hover:scale-105 transition"
-                title={musicMuted ? "Unmute" : "Mute"}
-              >
-                {!musicMuted ? (
-                  <div className="flex items-end gap-0.5 h-3">
-                    <span className="w-0.5 bg-rose-400 animate-sound-wave-1 rounded-full" />
-                    <span className="w-0.5 bg-rose-300 animate-sound-wave-2 rounded-full" />
-                    <span className="w-0.5 bg-rose-400 animate-sound-wave-3 rounded-full" />
-                    <span className="w-0.5 bg-pink-400 animate-sound-wave-4 rounded-full" />
-                  </div>
-                ) : (
-                  <VolumeX className="w-3 h-3 text-zinc-400 group-hover:text-white" />
-                )}
-              </button>
+            ) : (
+              <VolumeX className="w-4 h-4 text-zinc-300" />
             )}
-          </div>
+          </button>
         )}
       </div>
 
       {/* ACTION BAR */}
       <div className="w-full h-12 flex justify-between items-center px-4 border-t border-border/80 bg-bg/40">
         <div className="flex items-center gap-5">
+          {/* Like Button */}
           <button 
             onClick={handleLike} 
-            className="flex items-center gap-1.5 text-text hover:text-rose-500 transition cursor-pointer interactive-tap"
+            className="text-text hover:text-rose-500 transition cursor-pointer interactive-tap"
+            title={isLiked ? "Unlike" : "Like"}
           >
-            {post?.likes?.includes(userData?.user?._id) ? (
+            {isLiked ? (
               <GoHeartFill className="w-5 h-5 text-rose-500 scale-110 animate-heart-burst" />
             ) : (
               <GoHeart className="w-5 h-5" />
             )}
-            {post?.likesHidden ? (
-              <span className="text-[11px] font-bold text-text">
-                {post?.likes?.includes(userData?.user?._id) ? "Liked by you & others" : "Liked by others"}
-              </span>
-            ) : (
-              <span className="text-xs font-semibold text-text">{post?.likes?.length || 0}</span>
-            )}
           </button>
 
+          {/* Comment Button (Opens Instagram-style Comments Sheet) */}
           {post?.allowComments !== false ? (
             <button 
               onClick={() => {
                 triggerHaptic("light");
-                setShowComments(!showComments);
+                setShowCommentsModal(true);
               }} 
-              className="flex items-center gap-1.5 text-text hover:text-rose-500 transition cursor-pointer interactive-tap"
+              className="text-text hover:text-rose-500 transition cursor-pointer interactive-tap"
+              title="View Comments"
             >
               <MdOutlineComment className="w-5 h-5" />
-              <span className="text-xs font-semibold text-text">{post?.comments?.length || 0}</span>
             </button>
           ) : (
-            <div className="flex items-center gap-1.5 text-text-muted cursor-not-allowed">
+            <div className="text-text-muted cursor-not-allowed">
               <MdOutlineComment className="w-5 h-5 opacity-40" />
-              <span className="text-[10px] font-extrabold uppercase tracking-tight">Comments Off</span>
             </div>
           )}
 
+          {/* Share Button */}
           <button 
             onClick={() => {
               triggerHaptic("light");
@@ -534,57 +566,124 @@ const Post = ({ post }) => {
         </div>
       </div>
 
-      {/* CAPTION & PARSED MENTIONS */}
-      {post?.caption && (
-        <div className="w-full px-4 pb-3 pt-1 space-y-1 bg-bg/20">
-          <div className="flex items-start gap-2 text-xs">
-            <span className="font-bold text-text cursor-pointer hover:underline flex items-center gap-0.5" onClick={() => navigate(`/profile/${post?.author?.userName}`)}>
-              @{post?.author?.userName}
-              {post?.author?.isVerified && (
-                <VerifiedBadge size="xs" />
-              )}
+      {/* CAPTION & INTERACTION SUMMARY (Exact Instagram Style) */}
+      <div className="w-full px-4 pb-3 pt-1 space-y-1.5 bg-bg/20">
+        {/* Same-line Compact Likes */}
+        {localLikes?.length > 0 && !post?.likesHidden && (
+          <div className="flex items-center gap-2 text-xs">
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                triggerHaptic("light");
+                setShowLikersModal(true);
+              }}
+              className="font-bold text-text cursor-pointer hover:underline transition select-none"
+              title="View people who liked this post"
+            >
+              {localLikes.length} {localLikes.length === 1 ? "like" : "likes"}
             </span>
-            <RenderParsedCaption caption={post.caption} onNavigate={navigate} />
           </div>
-          <AITranslateButton originalText={post.caption} />
-        </div>
+        )}
+
+        {/* Post Caption */}
+        {post?.caption && (
+          <div className="space-y-1">
+            <div className="flex items-start gap-2 text-xs">
+              <span className="font-bold text-text cursor-pointer hover:underline flex items-center gap-0.5 shrink-0" onClick={() => navigate(`/profile/${post?.author?.userName}`)}>
+                @{post?.author?.userName}
+                {post?.author?.isVerified && (
+                  <VerifiedBadge size="xs" />
+                )}
+              </span>
+              <RenderParsedCaption caption={post.caption} onNavigate={navigate} />
+            </div>
+            <AITranslateButton originalText={post.caption} />
+          </div>
+        )}
+
+        {/* Instagram "View all X comments" Row */}
+        {post?.allowComments !== false && post?.comments && post.comments.length > 1 && (
+          <p
+            onClick={() => {
+              triggerHaptic("light");
+              setShowCommentsModal(true);
+            }}
+            className="text-xs text-text-secondary hover:text-text cursor-pointer hover:underline font-medium transition select-none pt-0.5"
+          >
+            View all {post.comments.length} comments
+          </p>
+        )}
+
+        {/* Instagram-style Top Priority Preview Comments (Friends / Pinned / Top Liked) */}
+        {previewComments.length > 0 && (
+          <div className="space-y-1 pt-0.5">
+            {previewComments.map((c) => {
+              const isCommentLiked = Boolean(
+                currentUserId &&
+                c.likes?.some((id) => (id?._id || id)?.toString() === currentUserId)
+              );
+
+              return (
+                <div key={c._id} className="flex items-center justify-between text-xs group/comment">
+                  <div className="flex items-baseline gap-1.5 min-w-0 pr-2 overflow-hidden">
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/profile/${c.author?.userName}`);
+                      }}
+                      className="font-bold text-text hover:underline cursor-pointer shrink-0"
+                    >
+                      @{c.author?.userName || "user"}
+                    </span>
+                    <span
+                      onClick={() => {
+                        triggerHaptic("light");
+                        setShowCommentsModal(true);
+                      }}
+                      className="text-text-secondary truncate cursor-pointer hover:text-text transition"
+                    >
+                      {c.message}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleInlineLikeComment(c._id);
+                    }}
+                    className="text-text-muted hover:text-rose-500 transition cursor-pointer shrink-0 p-0.5 active:scale-75"
+                    title={isCommentLiked ? "Unlike comment" : "Like comment"}
+                  >
+                    {isCommentLiked ? (
+                      <GoHeartFill className="w-3.5 h-3.5 text-rose-500 scale-110 animate-heart-burst drop-shadow-[0_0_6px_rgba(244,63,94,0.6)]" />
+                    ) : (
+                      <GoHeart className="w-3.5 h-3.5 opacity-60 group-hover/comment:opacity-100 hover:scale-110 transition-transform animate-heart-deflate" />
+                    )}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* INSTAGRAM-STYLE LIKERS MODAL */}
+      {showLikersModal && (
+        <LikersModal
+          isOpen={showLikersModal}
+          onClose={() => setShowLikersModal(false)}
+          postId={post?._id}
+        />
       )}
 
-      {/* COMMENTS SHEET */}
-      {showComments && post?.allowComments !== false && (
-        <div className="w-full border-t border-border p-4 space-y-3 bg-surface-inset">
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              className="flex-1 bg-surface border border-border rounded-full px-4 py-2 text-xs text-text outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition shadow-xs"
-              placeholder="Add a comment..."
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleComment();
-              }}
-            />
-            <button disabled={commentLoading} onClick={handleComment} className="p-2.5 bg-primary hover:bg-primary-hover text-white rounded-full transition cursor-pointer shadow-xs disabled:opacity-50">
-              {commentLoading ? <ClipLoader size={14} color="white" /> : <IoSendSharp className="w-3.5 h-3.5" />}
-            </button>
-          </div>
-
-          <div className="max-h-48 overflow-y-auto space-y-2">
-            {post?.comments?.map((comment) => (
-              <div key={comment._id} className="flex justify-between items-start text-xs p-2.5 rounded-xl bg-surface/60 border border-border/60">
-                <div className="flex items-start gap-2">
-                  <span className="font-bold text-text cursor-pointer hover:underline flex items-center gap-0.5" onClick={() => navigate(`/profile/${comment.author?.userName}`)}>
-                    @{comment.author?.userName}
-                    {comment.author?.isVerified && (
-                      <VerifiedBadge size="xs" />
-                    )}
-                  </span>
-                  <span className="text-text">{comment.message}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+      {/* INSTAGRAM-STYLE COMMENTS MODAL */}
+      {showCommentsModal && (
+        <CommentsModal
+          isOpen={showCommentsModal}
+          onClose={() => setShowCommentsModal(false)}
+          post={post}
+        />
       )}
 
       {/* Collections Modal */}

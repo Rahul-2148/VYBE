@@ -11,6 +11,7 @@ import {
   QrCode,
   Send,
   Disc,
+  Eye,
   EyeOff,
   HelpCircle,
   Flag,
@@ -25,6 +26,7 @@ import {
   Sparkles,
   Wifi,
   WifiOff,
+  Layers,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import QRCode from "react-qr-code";
@@ -42,13 +44,15 @@ export const ReelOptionsModal = ({
   isSaved,
   onToggleSave,
   onOpenRemix,
+  onOpenReshare,
   onOpenShare,
+  onOpenViewers,
   playbackSpeed,
   onChangePlaybackSpeed,
+  applySpeedToAll = false,
+  onToggleApplySpeedToAll = () => {},
   autoScroll,
   onToggleAutoScroll,
-  showCaptions,
-  onToggleCaptions,
   onDeleteReel,
   onNotInterested,
   onToggleComments,
@@ -61,8 +65,6 @@ export const ReelOptionsModal = ({
   const [isSubmittingTuning, setIsSubmittingTuning] = useState(false);
   const [showAIInfoModal, setShowAIInfoModal] = useState(false);
   const [dataSaver, setDataSaver] = useState(getDataSaverMode());
-
-  if (!isOpen || !reel) return null;
 
   const reelUrl = typeof window !== "undefined"
     ? `${window.location.origin}/reels?reelId=${reel._id}`
@@ -130,22 +132,62 @@ export const ReelOptionsModal = ({
   const speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
   return (
-    <div className="fixed inset-0 z-[5000] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/75 backdrop-blur-md animate-fade-in select-none">
-      <div
-        onClick={onClose}
-        className="absolute inset-0 z-0"
-        title="Close options"
-      />
+    <AnimatePresence>
+      {isOpen && reel && (
+        <motion.div
+          key="reel-options-backdrop"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (e.target === e.currentTarget) onClose();
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.22 }}
+          className="fixed inset-0 z-[5000] flex items-end justify-center p-0 bg-black/60 backdrop-blur-[3px] select-none"
+        >
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+            className="absolute inset-0 z-0"
+            title="Close options"
+          />
 
-      <motion.div
-        initial={{ y: "100%", opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        exit={{ y: "100%", opacity: 0 }}
-        transition={{ type: "spring", stiffness: 350, damping: 30 }}
-        className="relative z-10 w-full max-w-sm sm:max-w-md bg-surface border-t sm:border border-border rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
-      >
+          <motion.div
+            key="reel-options-sheet"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ type: "spring", damping: 28, stiffness: 300 }}
+            drag="y"
+            dragConstraints={{ top: 0 }}
+            dragElastic={{ top: 0, bottom: 0.4 }}
+            dragSnapToOrigin
+            onDragEnd={(e, info) => {
+              if (info.offset.y > 80 || info.velocity.y > 400) {
+                triggerHaptic("light");
+                onClose();
+              }
+            }}
+            className="relative z-10 w-full max-w-lg md:max-w-xl bg-surface/98 backdrop-blur-2xl border-t border-x border-border rounded-t-[28px] md:rounded-t-[32px] shadow-[0_-12px_40px_rgba(0,0,0,0.85)] overflow-hidden flex flex-col h-[70vh] max-h-[620px] text-text"
+          >
+            {/* TOP DRAG NOTCH / HANDLE */}
+            <div
+              className="w-10 h-1 rounded-full bg-border-strong mx-auto mt-2.5 mb-1 shrink-0 opacity-60 cursor-pointer hover:opacity-100 transition"
+              onClick={onClose}
+            />
+
         {/* MODAL HEADER */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border/70">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border/70 bg-surface-hover/20">
           <div className="flex items-center gap-2">
             {activeSubView !== "main" && (
               <button
@@ -220,42 +262,6 @@ export const ReelOptionsModal = ({
 
                 <div className="h-px bg-border/60" />
 
-                {/* CAPTIONS TOGGLE */}
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
-                      <Subtitles className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-text">Captions & Audio Transcript</div>
-                      <p className="text-[11px] text-text-secondary">
-                        Display subtitles when available
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={showCaptions}
-                    aria-label="Toggle captions and subtitles"
-                    onClick={() => {
-                      triggerHaptic("selection");
-                      onToggleCaptions();
-                    }}
-                    className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
-                      showCaptions ? "bg-blue-500" : "bg-surface-hover border border-border"
-                    }`}
-                  >
-                    <div
-                      className={`w-4 h-4 rounded-full bg-white transition-transform absolute top-1 ${
-                        showCaptions ? "right-1" : "left-1"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="h-px bg-border/60" />
-
                 {/* PLAYBACK SPEED BUTTON */}
                 <button
                   onClick={() => setActiveSubView("speed")}
@@ -266,9 +272,19 @@ export const ReelOptionsModal = ({
                       <Gauge className="w-5 h-5" />
                     </div>
                     <div>
-                      <div className="text-xs font-bold text-text">Playback Speed</div>
+                      <div className="text-xs font-bold text-text flex items-center gap-1.5">
+                        <span>Playback Speed</span>
+                        {applySpeedToAll && (
+                          <span className="text-[9px] font-semibold px-1.5 py-0.2 bg-purple-500/15 text-purple-400 border border-purple-500/30 rounded-full">
+                            All Reels
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[11px] text-text-secondary">
                         Current: <span className="font-semibold text-primary">{playbackSpeed}x</span>
+                        <span className="text-text-muted ml-1">
+                          {applySpeedToAll ? "(All reels)" : "(This reel only)"}
+                        </span>
                       </p>
                     </div>
                   </div>
@@ -333,6 +349,19 @@ export const ReelOptionsModal = ({
                   <span>{isSaved ? "Saved to Bookmarks" : "Save to Bookmarks"}</span>
                 </button>
 
+                {/* Reshare & Repost */}
+                <button
+                  onClick={() => {
+                    if (onOpenReshare) onOpenReshare();
+                    else if (onOpenRemix) onOpenRemix();
+                    onClose();
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-surface-hover text-text transition cursor-pointer text-xs font-semibold"
+                >
+                  <Repeat className="w-5 h-5 text-rose-400" />
+                  <span>Reshare & Repost</span>
+                </button>
+
                 {/* Remix */}
                 <button
                   onClick={() => {
@@ -341,8 +370,20 @@ export const ReelOptionsModal = ({
                   }}
                   className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-surface-hover text-text transition cursor-pointer text-xs font-semibold"
                 >
-                  <Repeat className="w-5 h-5 text-rose-400" />
+                  <Repeat className="w-5 h-5 text-purple-400" />
                   <span>Remix this Reel</span>
+                </button>
+
+                {/* Views & Insights */}
+                <button
+                  onClick={() => {
+                    if (onOpenViewers) onOpenViewers();
+                    onClose();
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-surface-hover text-text transition cursor-pointer text-xs font-semibold"
+                >
+                  <Eye className="w-5 h-5 text-blue-400" />
+                  <span>Views & Insights ({reel?.views || 0})</span>
                 </button>
 
                 {/* Copy Link */}
@@ -464,30 +505,93 @@ export const ReelOptionsModal = ({
 
           {/* ===================== PLAYBACK SPEED SUB-VIEW ===================== */}
           {activeSubView === "speed" && (
-            <div className="space-y-2">
-              <p className="text-xs text-text-secondary">
-                Select your preferred playback speed for video playback:
-              </p>
-              <div className="grid grid-cols-2 gap-2 pt-2">
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs font-semibold text-text">Select Playback Speed</p>
+                <p className="text-[11px] text-text-secondary mt-0.5">
+                  Adjust how fast or slow video & audio play:
+                </p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
                 {speedOptions.map((speed) => (
                   <button
                     key={speed}
                     onClick={() => {
                       triggerHaptic("selection");
                       onChangePlaybackSpeed(speed);
-                      setActiveSubView("main");
                     }}
-                    className={`py-3 px-4 rounded-2xl text-xs font-bold border transition flex items-center justify-between ${
+                    className={`py-2.5 px-3 rounded-2xl text-xs font-bold border transition flex items-center justify-between cursor-pointer ${
                       playbackSpeed === speed
-                        ? "bg-primary text-white border-primary shadow-md"
+                        ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white border-emerald-500 shadow-md shadow-emerald-500/20"
                         : "bg-surface-inset border-border text-text hover:bg-surface-hover"
                     }`}
                   >
-                    <span>{speed}x {speed === 1.0 && "(Normal)"}</span>
-                    {playbackSpeed === speed && <Check className="w-4 h-4" />}
+                    <span>{speed}x</span>
+                    {speed === 1.0 && <span className="text-[10px] opacity-75 font-normal ml-0.5">(1X)</span>}
+                    {playbackSpeed === speed && <Check className="w-3.5 h-3.5 shrink-0 ml-1" />}
                   </button>
                 ))}
               </div>
+
+              {/* APPLY TO ALL REELS TOGGLE */}
+              <div className="p-3.5 rounded-2xl bg-surface-inset border border-border space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0">
+                      <Layers className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-text flex items-center gap-1.5">
+                        <span>Apply to all reels</span>
+                        {applySpeedToAll && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-full">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-text-secondary leading-snug mt-0.5">
+                        {applySpeedToAll
+                          ? `All reels will play at ${playbackSpeed}x speed`
+                          : "Speed will only apply to this current reel"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={applySpeedToAll}
+                    aria-label="Toggle apply speed to all reels"
+                    onClick={() => {
+                      triggerHaptic("selection");
+                      const next = !applySpeedToAll;
+                      onToggleApplySpeedToAll(next);
+                      if (next) {
+                        snackbar.success(`Playback speed (${playbackSpeed}x) will apply to all reels ⏩`);
+                      } else {
+                        snackbar.info("Playback speed will only apply to this reel");
+                      }
+                    }}
+                    className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+                      applySpeedToAll ? "bg-purple-600" : "bg-surface-hover border border-border"
+                    }`}
+                  >
+                    <div
+                      className={`w-4 h-4 rounded-full bg-white transition-transform absolute top-1 ${
+                        applySpeedToAll ? "right-1" : "left-1"
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setActiveSubView("main")}
+                className="w-full py-2.5 bg-surface hover:bg-surface-hover border border-border text-text font-bold text-xs rounded-xl transition cursor-pointer"
+              >
+                Done
+              </button>
             </div>
           )}
 
@@ -598,14 +702,16 @@ export const ReelOptionsModal = ({
         </div>
       </motion.div>
 
-      {/* AI Transparency Disclosure Modal */}
-      <AIInfoModal
-        isOpen={showAIInfoModal}
-        onClose={() => setShowAIInfoModal(false)}
-        aiLabel={reel?.aiLabel}
-        authorName={reel?.author?.name || `@${reel?.author?.userName}` || "The creator"}
-      />
-    </div>
+          {/* AI Transparency Disclosure Modal */}
+          <AIInfoModal
+            isOpen={showAIInfoModal}
+            onClose={() => setShowAIInfoModal(false)}
+            aiLabel={reel?.aiLabel}
+            authorName={reel?.author?.name || `@${reel?.author?.userName}` || "The creator"}
+          />
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 };
 

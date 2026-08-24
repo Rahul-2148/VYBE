@@ -1,12 +1,9 @@
 import React, { useState } from "react";
-import { useSelector, useDispatch } from "react-redux";
+import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { BadgeCheck, Lock } from "lucide-react";
-import { snackbar } from "../lib/snackbar";
 import dp from "../assets/dp3.png";
 import OtherUsers from "./OtherUsers";
-import { setUserData } from "../redux/features/userSlice";
-import api from "../lib/axios";
 import GetSuggestedUsers from "../hooks/GetSuggestedUsers";
 import AccountSwitcherModal from "./AccountSwitcherModal";
 import VerifiedBadge from "./VerifiedBadge";
@@ -14,7 +11,6 @@ import VerifiedBadge from "./VerifiedBadge";
 const RightHome = () => {
   GetSuggestedUsers();
   const { userData, suggestedUsers } = useSelector((state) => state.user);
-  const dispatch = useDispatch();
   const navigate = useNavigate();
 
   const [showSwitcher, setShowSwitcher] = useState(false);
@@ -63,8 +59,8 @@ const RightHome = () => {
         <div className="flex items-center justify-between text-xs font-bold">
           <span className="text-text-secondary">Suggested for you</span>
           <button 
-            onClick={() => navigate("/explore")} 
-            className="text-text hover:text-rose-400 text-[11px] cursor-pointer transition"
+            onClick={() => navigate("/explore?tab=accounts")} 
+            className="text-text hover:text-rose-400 text-[11px] cursor-pointer transition font-semibold"
           >
             See All
           </button>

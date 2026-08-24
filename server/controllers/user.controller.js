@@ -1,5 +1,11 @@
 import uploadOnCloudinary from "../config/cloudinary.js";
 import { User } from "../models/user.model.js";
+import { Report } from "../models/report.model.js";
+import { VerificationRequest } from "../models/verificationRequest.model.js";
+import { SystemAnnouncement } from "../models/systemAnnouncement.model.js";
+import { Post } from "../models/post.model.js";
+import { Reel } from "../models/reel.model.js";
+import { Story } from "../models/story.model.js";
 import deleteFromCloudinary from "../config/deleteFromCloudinary.js";
 import QRCode from "qrcode";
 import { createNotificationHelper } from "./notification.controller.js";
@@ -9,6 +15,7 @@ import { Conversation } from "../models/conversation.model.js";
 import { Message } from "../models/message.model.js";
 import mongoose from "mongoose";
 import { Notification } from "../models/notification.model.js";
+import { getSocket } from "../socket.js";
 
 // Transaction Execution helper with standalone fallback
 export const runTransactionSafe = async (operationsFn) => {
@@ -45,11 +52,23 @@ export const runTransactionSafe = async (operationsFn) => {
 export const getCurrentUser = async (req, res) => {
   try {
     const userId = req.userId; // auth middleware
-    const user = await User.findById(userId).populate(
-      "posts reels posts.author posts.comments stories followers following followRequests"
-    );
+    const user = await User.findById(userId)
+      .select("-password -twoFactorSecret -twoFactorRecoveryCodes -pendingTwoFactorToken")
+      .populate("reels")
+      .populate("stories")
+      .populate("followers", "name userName profileImage isVerified")
+      .populate("following", "name userName profileImage isVerified")
+      .populate("followRequests", "name userName profileImage isVerified")
+      .populate({
+        path: "posts",
+        populate: [
+          { path: "author", select: "name userName profileImage isVerified" },
+          { path: "comments.author", select: "name userName profileImage isVerified" },
+        ],
+      });
+
     if (!user) {
-      return res.status(404).json({ message: "User not found!" });
+      return res.status(404).json({ success: false, error: true, message: "User not found!" });
     }
 
     return res.status(200).json({
@@ -60,7 +79,7 @@ export const getCurrentUser = async (req, res) => {
   } catch (error) {
     return res
       .status(500)
-      .json({ message: `getCurrentUser error: ${error.message}` });
+      .json({ success: false, error: true, message: `getCurrentUser error: ${error.message}` });
   }
 };
 
@@ -1208,5 +1227,148 @@ export const requestContactInfo = async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: `requestContactInfo error: ${err.message}` });
+  }
+};
+
+// 31. Unified Content & User Reporting Endpoint
+export const submitReport = async (req, res) => {
+  try {
+    const { targetType, targetId, reason, description } = req.body;
+    if (!targetType || !targetId || !reason) {
+      return res.status(400).json({ success: false, message: "Target type, target ID, and reason are required." });
+    }
+
+    let reportedUserId = null;
+
+    if (targetType === "post") {
+      const p = await Post.findById(targetId);
+      if (p) reportedUserId = p.author;
+    } else if (targetType === "reel") {
+      const r = await Reel.findById(targetId);
+      if (r) reportedUserId = r.author;
+    } else if (targetType === "story") {
+      const s = await Story.findById(targetId);
+      if (s) reportedUserId = s.author;
+    } else if (targetType === "user") {
+      reportedUserId = targetId;
+    }
+
+    const report = await Report.create({
+      reporter: req.userId,
+      reportedUser: reportedUserId,
+      targetType,
+      targetId,
+      reason,
+      description: description || "",
+      status: "pending",
+    });
+
+    const populatedReport = await Report.findById(report._id)
+      .populate("reporter", "name userName profileImage")
+      .populate("reportedUser", "name userName profileImage isVerified strikes");
+
+    const socket = getSocket();
+    if (socket) {
+      socket.to("admin_moderator").to("admin_admin").to("admin_superadmin").emit("report:new", populatedReport);
+      socket.to("admin_staff").emit("stats:report-count", { increment: 1 });
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Thank you for reporting. Our Trust & Safety team will review this promptly.",
+      reportId: report._id,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: `submitReport error: ${error.message}` });
+  }
+};
+
+// 32. Apply for Verified Badge (Meta Blue Check)
+export const applyForVerification = async (req, res) => {
+  try {
+    const { fullName, knownAs, category, documentType, socialLinks, additionalInfo } = req.body;
+
+    if (!fullName || !category || !documentType) {
+      return res.status(400).json({ success: false, message: "Full name, category, and document type are required." });
+    }
+
+    // Check if pending request exists
+    const existing = await VerificationRequest.findOne({ user: req.userId, status: "pending" });
+    if (existing) {
+      return res.status(400).json({
+        success: false,
+        message: "You already have a pending verification request under review.",
+      });
+    }
+
+    const documentImages = [];
+    if (req.file) {
+      const uploaded = await uploadOnCloudinary(req.file.path, "VYBE/verification-docs");
+      if (uploaded) {
+        documentImages.push({ url: uploaded.url, publicId: uploaded.public_id });
+      }
+    }
+
+    const parsedLinks = typeof socialLinks === "string" ? JSON.parse(socialLinks) : socialLinks || [];
+
+    const request = await VerificationRequest.create({
+      user: req.userId,
+      fullName,
+      knownAs: knownAs || "",
+      category,
+      documentType,
+      documentImages,
+      socialLinks: parsedLinks,
+      additionalInfo: additionalInfo || "",
+      status: "pending",
+    });
+
+    await User.findByIdAndUpdate(req.userId, { verificationStatus: "pending" });
+
+    const populatedRequest = await VerificationRequest.findById(request._id)
+      .populate("user", "name userName email profileImage followers createdAt");
+
+    const socket = getSocket();
+    if (socket) {
+      socket.to("admin_support").to("admin_admin").to("admin_superadmin").emit("verification:new", populatedRequest);
+      socket.to("admin_staff").emit("stats:verification-count", { increment: 1 });
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Verification application submitted! We will review your documents shortly.",
+      request,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: `applyForVerification error: ${error.message}` });
+  }
+};
+
+// 33. Get Verification Status
+export const getVerificationStatus = async (req, res) => {
+  try {
+    const request = await VerificationRequest.findOne({ user: req.userId }).sort({ createdAt: -1 });
+    return res.status(200).json({
+      success: true,
+      status: request ? request.status : "none",
+      request,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: `getVerificationStatus error: ${error.message}` });
+  }
+};
+
+// 34. Get Active System Announcements for Users
+export const getActiveAnnouncements = async (req, res) => {
+  try {
+    const now = new Date();
+    const announcements = await SystemAnnouncement.find({
+      isActive: true,
+      $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
+    }).sort({ createdAt: -1 });
+
+    return res.status(200).json({ success: true, announcements });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: `getActiveAnnouncements error: ${error.message}` });
   }
 };

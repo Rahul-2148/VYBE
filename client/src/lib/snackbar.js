@@ -1,2 +1,2 @@
-export { snackbar, useSnackbar, SnackbarProvider } from "../context/SnackbarContext";
-export { default } from "../context/SnackbarContext";
+export { snackbar, useSnackbar, SnackbarContext } from "../context/snackbarStore";
+export { SnackbarProvider, default } from "../context/SnackbarContext";

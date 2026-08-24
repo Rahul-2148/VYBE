@@ -1,67 +1,102 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, X, Bot, ShieldCheck, HelpCircle, Layers, ExternalLink, ChevronDown, CheckCircle2 } from "lucide-react";
+import {
+  Sparkles,
+  X,
+  Bot,
+  ShieldCheck,
+  HelpCircle,
+  Layers,
+  ChevronDown,
+  CheckCircle2,
+  Wand2,
+  AlertCircle,
+  Info,
+} from "lucide-react";
+import moment from "moment";
 import { triggerHaptic } from "../lib/interactiveEffects";
 
-const AIInfoModal = ({ isOpen, onClose, aiLabel, authorName = "The creator" }) => {
+export const AIInfoModal = ({
+  isOpen,
+  onClose,
+  aiLabel = {},
+  authorName = "The creator",
+}) => {
   const [showGuidelines, setShowGuidelines] = useState(false);
 
   if (!isOpen) return null;
-
-  const toolName = aiLabel?.tool || "Generative AI Tool";
-  const contentType = aiLabel?.contentType || "media";
-  const disclosedAt = aiLabel?.disclosedAt ? new Date(aiLabel.disclosedAt).toLocaleDateString() : null;
 
   const handleClose = () => {
     triggerHaptic("light");
     onClose();
   };
 
+  const toolName = aiLabel?.tool || "Generative AI";
+  const contentType = aiLabel?.contentType || "Image / Video";
+  const disclosedAt = aiLabel?.disclosedAt
+    ? moment(aiLabel.disclosedAt).format("MMM D, YYYY")
+    : null;
+
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center">
+      <div
+        key="ai-info-modal-wrapper"
+        onClick={(e) => e.stopPropagation()}
+        className="fixed inset-0 z-[5500] flex items-end sm:items-center justify-center font-sans select-none"
+      >
         {/* Backdrop */}
         <motion.div
+          key="ai-info-backdrop"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={handleClose}
-          className="fixed inset-0 bg-black/75 backdrop-blur-md transition-opacity"
+          className="fixed inset-0 bg-black/80 backdrop-blur-md transition-opacity"
         />
 
         {/* Sheet / Modal Container */}
         <motion.div
+          key="ai-info-sheet"
           initial={{ y: "100%", opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: "100%", opacity: 0 }}
-          transition={{ type: "spring", damping: 26, stiffness: 300 }}
-          onClick={(e) => e.stopPropagation()}
-          className="relative z-10 w-full sm:max-w-lg bg-bg border border-border/80 rounded-t-[28px] sm:rounded-3xl shadow-2xl overflow-hidden max-h-[88vh] flex flex-col"
+          transition={{ type: "spring", damping: 28, stiffness: 320 }}
+          drag="y"
+          dragConstraints={{ top: 0 }}
+          dragElastic={{ top: 0, bottom: 0.4 }}
+          dragSnapToOrigin
+          onDragEnd={(e, info) => {
+            if (info.offset.y > 80 || info.velocity.y > 400) {
+              handleClose();
+            }
+          }}
+          className="relative z-10 w-full sm:max-w-md bg-surface border border-border/80 rounded-t-[32px] sm:rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
         >
           {/* Mobile Drag Indicator */}
           <div className="w-full flex justify-center pt-3 pb-1 sm:hidden">
-            <div className="w-12 h-1.5 bg-border rounded-full" />
+            <div className="w-12 h-1.5 bg-border-strong rounded-full" />
           </div>
 
           {/* Header */}
-          <div className="px-6 pt-4 pb-3 flex items-center justify-between border-b border-border/60">
+          <div className="px-5 pt-3.5 pb-3 flex items-center justify-between border-b border-border/60">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-500 via-pink-500 to-amber-400 p-[1.5px] flex items-center justify-center shadow-md shadow-purple-500/20">
-                <div className="w-full h-full bg-bg rounded-[10px] flex items-center justify-center">
-                  <Sparkles className="w-5 h-5 text-purple-400 fill-purple-400/20 animate-pulse" />
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-purple-600 via-pink-500 to-amber-400 p-[1.5px] flex items-center justify-center shadow-md shadow-purple-500/20">
+                <div className="w-full h-full bg-surface rounded-[9px] flex items-center justify-center">
+                  <Sparkles className="w-4 h-4 text-purple-400 fill-purple-400/20 animate-pulse" />
                 </div>
               </div>
               <div>
-                <h3 className="text-base font-bold text-text flex items-center gap-1.5">
+                <h3 className="text-sm sm:text-base font-black text-text flex items-center gap-1.5">
                   Made with AI
                 </h3>
-                <p className="text-[11px] text-text-muted">AI Transparency Disclosure</p>
+                <p className="text-[10px] text-text-muted font-medium">AI Transparency & Disclosure</p>
               </div>
             </div>
 
             <button
+              type="button"
               onClick={handleClose}
-              className="p-2 rounded-full text-text-muted hover:text-text hover:bg-surface-hover active:scale-95 transition"
+              className="p-1.5 rounded-full text-text-muted hover:text-text hover:bg-surface-hover active:scale-95 transition cursor-pointer"
               title="Close"
             >
               <X className="w-5 h-5" />
@@ -69,72 +104,72 @@ const AIInfoModal = ({ isOpen, onClose, aiLabel, authorName = "The creator" }) =
           </div>
 
           {/* Content Body */}
-          <div className="px-6 py-5 overflow-y-auto space-y-5 text-sm hide-scrollbar">
+          <div className="px-5 py-4 overflow-y-auto space-y-4 text-sm hide-scrollbar">
             {/* Top Disclosure Notice Card */}
-            <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-surface border border-purple-500/20 space-y-2.5">
+            <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-surface-inset border border-purple-500/20 space-y-3">
               <div className="flex items-start gap-3">
                 <div className="p-2 rounded-xl bg-purple-500/20 text-purple-400 shrink-0 mt-0.5">
                   <Bot className="w-5 h-5" />
                 </div>
-                <div className="space-y-1">
-                  <p className="font-semibold text-text text-sm">
+                <div className="space-y-1 min-w-0 flex-1">
+                  <p className="font-bold text-text text-xs sm:text-sm">
                     {authorName} labeled this content as made with AI
                   </p>
-                  <p className="text-xs text-text-secondary leading-relaxed">
-                    This post contains synthetic or heavily modified media generated with artificial intelligence technology.
+                  <p className="text-[11px] text-text-secondary leading-relaxed">
+                    This media contains photorealistic imagery, synthetic voice, or scenes created or heavily modified using artificial intelligence.
                   </p>
                 </div>
               </div>
 
               {/* Tag / Tool Info Chips */}
               <div className="flex flex-wrap items-center gap-2 pt-1">
-                {aiLabel?.tool && (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/15 border border-purple-500/30 text-xs font-semibold text-purple-300">
-                    <Sparkles className="w-3 h-3 text-purple-400" />
-                    Tool: {aiLabel.tool}
+                {toolName && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-500/15 border border-purple-500/30 text-[11px] font-bold text-purple-300">
+                    <Wand2 className="w-3 h-3 text-purple-400" />
+                    <span>{toolName}</span>
                   </span>
                 )}
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface border border-border text-xs font-medium text-text-secondary capitalize">
-                  <Layers className="w-3 h-3 text-text-muted" />
-                  Type: {contentType}
-                </span>
+                {contentType && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface border border-border text-[11px] font-semibold text-text-secondary capitalize">
+                    <Layers className="w-3 h-3 text-text-muted" />
+                    <span>{contentType}</span>
+                  </span>
+                )}
                 {disclosedAt && (
-                  <span className="text-[11px] text-text-muted ml-auto">
-                    Disclosed {disclosedAt}
+                  <span className="text-[10px] text-text-muted ml-auto font-medium">
+                    Labeled on {disclosedAt}
                   </span>
                 )}
               </div>
             </div>
 
-            {/* Why This Label Matters */}
-            <div className="space-y-3">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-text-muted">
-                About AI on VYBE
+            {/* Why This Label Matters (Instagram Standard) */}
+            <div className="space-y-2.5">
+              <h4 className="text-[10px] font-black uppercase tracking-wider text-text-muted">
+                About AI Labels on VYBE
               </h4>
 
-              <div className="space-y-2.5">
-                {/* Point 1 */}
-                <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-surface border border-border/70">
+              <div className="space-y-2">
+                <div className="flex items-start gap-3 p-3 rounded-2xl bg-surface-inset border border-border/70">
                   <div className="p-1.5 rounded-lg bg-blue-500/15 text-blue-400 shrink-0 mt-0.5">
                     <ShieldCheck className="w-4 h-4" />
                   </div>
                   <div className="space-y-0.5">
-                    <p className="font-semibold text-xs text-text">Transparency for Community Trust</p>
+                    <p className="font-bold text-xs text-text">Community Trust & Authenticity</p>
                     <p className="text-[11px] text-text-secondary leading-relaxed">
-                      We help users know when images, videos, or voices aren't real captures. This prevents misinformation and deepfakes.
+                      We help you know when images, videos, or voices are AI-generated rather than real physical captures to prevent misinformation.
                     </p>
                   </div>
                 </div>
 
-                {/* Point 2 */}
-                <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-surface border border-border/70">
+                <div className="flex items-start gap-3 p-3 rounded-2xl bg-surface-inset border border-border/70">
                   <div className="p-1.5 rounded-lg bg-pink-500/15 text-pink-400 shrink-0 mt-0.5">
                     <Sparkles className="w-4 h-4" />
                   </div>
                   <div className="space-y-0.5">
-                    <p className="font-semibold text-xs text-text">Detection & Creator Self-Labeling</p>
+                    <p className="font-bold text-xs text-text">Self-Disclosure & Detection</p>
                     <p className="text-[11px] text-text-secondary leading-relaxed">
-                      Labels can be added by creators upon upload or detected automatically through industry-standard C2PA / SynthID metadata.
+                      Creators can label their content upon upload, or labels can be detected automatically via C2PA / SynthID metadata.
                     </p>
                   </div>
                 </div>
@@ -142,20 +177,24 @@ const AIInfoModal = ({ isOpen, onClose, aiLabel, authorName = "The creator" }) =
             </div>
 
             {/* Expandable Guidelines Accordion */}
-            <div className="border border-border/80 rounded-2xl overflow-hidden bg-surface/50">
+            <div className="border border-border rounded-2xl overflow-hidden bg-surface-inset">
               <button
                 type="button"
                 onClick={() => {
                   triggerHaptic("selection");
                   setShowGuidelines(!showGuidelines);
                 }}
-                className="w-full px-4 py-3 flex items-center justify-between text-left text-xs font-semibold text-text hover:bg-surface transition"
+                className="w-full px-3.5 py-2.5 flex items-center justify-between text-left text-xs font-bold text-text hover:bg-surface transition cursor-pointer"
               >
                 <span className="flex items-center gap-2">
                   <HelpCircle className="w-4 h-4 text-purple-400" />
-                  What counts as AI content?
+                  <span>What requires an AI label?</span>
                 </span>
-                <ChevronDown className={`w-4 h-4 text-text-muted transition-transform duration-200 ${showGuidelines ? "rotate-180" : ""}`} />
+                <ChevronDown
+                  className={`w-4 h-4 text-text-muted transition-transform duration-200 ${
+                    showGuidelines ? "rotate-180" : ""
+                  }`}
+                />
               </button>
 
               <AnimatePresence>
@@ -167,14 +206,18 @@ const AIInfoModal = ({ isOpen, onClose, aiLabel, authorName = "The creator" }) =
                     transition={{ duration: 0.2 }}
                     className="overflow-hidden"
                   >
-                    <div className="px-4 pb-4 pt-1 space-y-2 text-[11px] text-text-secondary border-t border-border/50">
+                    <div className="px-3.5 pb-3.5 pt-1 space-y-2 text-[11px] text-text-secondary border-t border-border/50">
                       <div className="flex items-start gap-2">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-                        <span><strong>Requires Label:</strong> Photorealistic humans, cloned synthetic voices, fully AI generated scenes, or face swaps.</span>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-purple-400 shrink-0 mt-0.5" />
+                        <span>
+                          <strong>Requires Label:</strong> Photorealistic people, synthetic voices, deepfakes, AI art, or fully generated videos.
+                        </span>
                       </div>
                       <div className="flex items-start gap-2">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-text-muted shrink-0 mt-0.5" />
-                        <span><strong>Does not require label:</strong> Basic color grading, noise reduction, standard beauty touch-ups, or text animations.</span>
+                        <AlertCircle className="w-3.5 h-3.5 text-text-muted shrink-0 mt-0.5" />
+                        <span>
+                          <strong>Does Not Require:</strong> Minor photo touch-ups, color correction, standard filters, or auto-captioning.
+                        </span>
                       </div>
                     </div>
                   </motion.div>
@@ -184,10 +227,11 @@ const AIInfoModal = ({ isOpen, onClose, aiLabel, authorName = "The creator" }) =
           </div>
 
           {/* Footer Actions */}
-          <div className="px-6 py-4 border-t border-border/70 bg-bg/90 backdrop-blur-md">
+          <div className="px-5 py-3.5 border-t border-border bg-surface shrink-0">
             <button
+              type="button"
               onClick={handleClose}
-              className="w-full py-3 bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 hover:opacity-95 active:scale-[0.99] text-white font-bold text-sm rounded-2xl shadow-lg shadow-purple-600/25 transition cursor-pointer"
+              className="w-full py-2.5 bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 hover:opacity-95 active:scale-[0.99] text-white font-black text-xs sm:text-sm rounded-2xl shadow-lg shadow-purple-600/25 transition cursor-pointer"
             >
               Got it
             </button>

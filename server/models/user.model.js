@@ -361,6 +361,67 @@ const userSchema = new mongoose.Schema(
         ref: "Conversation",
       },
     ],
+
+    // RBAC & Staff Management
+    role: {
+      type: String,
+      enum: ["user", "moderator", "support", "finance", "admin", "superadmin"],
+      default: "user",
+      index: true,
+    },
+    adminPermissions: [
+      {
+        type: String,
+      },
+    ],
+
+    // Moderation, Ban & Safety
+    isBanned: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    banReason: {
+      type: String,
+      default: "",
+    },
+    bannedAt: {
+      type: Date,
+      default: null,
+    },
+    bannedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    banExpiresAt: {
+      type: Date,
+      default: null,
+    },
+    isShadowBanned: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    strikes: {
+      type: Number,
+      default: 0,
+    },
+    strikeHistory: [
+      {
+        reason: { type: String, required: true },
+        issuedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        date: { type: Date, default: Date.now },
+        severity: { type: String, enum: ["low", "medium", "high", "critical"], default: "medium" },
+      },
+    ],
+
+    // Verification Workflow
+    verificationStatus: {
+      type: String,
+      enum: ["none", "pending", "verified", "rejected"],
+      default: "none",
+    },
   },
   {
     timestamps: true,

@@ -177,7 +177,7 @@ export const apiSlice = createApi({
     // 🎬 REELS ENDPOINTS
     // ==========================================
     getAllReels: builder.query({
-      query: () => ({ url: "/reel/get-all-reels" }),
+      query: (mode = "for-you") => ({ url: `/reel/get-all-reels?mode=${mode}` }),
       providesTags: (result) =>
         result?.reels
           ? [

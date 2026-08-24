@@ -36,6 +36,7 @@ import {
   Volume2
 } from "lucide-react";
 import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
+import { searchPlaces, reverseGeocode, getCurrentGPSLocation } from "../lib/locationService";
 import api from "../lib/axios";
 import dp from "../assets/dp3.png";
 
@@ -309,48 +310,36 @@ export const StoryStickersDrawer = ({ open, onClose, onAddSticker }) => {
     }
   }, [open]);
 
-  // Geolocation Real Search
-  useEffect(() => {
-    if (!locationQuery.trim()) {
-      setLocationResults([
-        { name: "Mumbai, India", desc: "City in Maharashtra" },
-        { name: "New Delhi, India", desc: "Capital of India" },
-        { name: "Bengaluru, India", desc: "Silicon Valley of India" },
-        { name: "New York, USA", desc: "United States" },
-        { name: "London, UK", desc: "United Kingdom" },
-        { name: "Dubai, UAE", desc: "United Arab Emirates" },
-        { name: "Paris, France", desc: "City of Light" },
-        { name: "Tokyo, Japan", desc: "Japan" },
-      ]);
-      return;
-    }
+  // Geolocation Real Search with high-accuracy searchPlaces
+  const [locationCategory, setLocationCategory] = useState("all");
 
+  useEffect(() => {
     const timer = setTimeout(async () => {
       setLocLoading(true);
       try {
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&limit=8&q=${encodeURIComponent(locationQuery)}`
+        const results = await searchPlaces(locationQuery, {
+          category: locationCategory !== "all" ? locationCategory : undefined,
+          limit: 10,
+        });
+        setLocationResults(
+          results.map((item) => ({
+            name: item.title ? `${item.title}${item.subtitle ? ", " + item.subtitle : ""}` : item.name,
+            title: item.title || item.name,
+            desc: item.subtitle || item.category || "",
+            category: item.category || "Place",
+            lat: item.latitude,
+            lon: item.longitude,
+          }))
         );
-        const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
-          setLocationResults(
-            data.map((item) => ({
-              name: item.name || item.display_name.split(",")[0],
-              desc: item.display_name,
-            }))
-          );
-        } else {
-          setLocationResults([{ name: locationQuery, desc: "Custom Location" }]);
-        }
       } catch {
-        setLocationResults([{ name: locationQuery, desc: "Custom Location" }]);
+        setLocationResults([{ name: locationQuery || "Custom Location", title: locationQuery || "Custom Location", desc: "Custom Location" }]);
       } finally {
         setLocLoading(false);
       }
-    }, 350);
+    }, 280);
 
     return () => clearTimeout(timer);
-  }, [locationQuery]);
+  }, [locationQuery, locationCategory]);
 
   // Real User Mention Search
   useEffect(() => {
@@ -374,19 +363,14 @@ export const StoryStickersDrawer = ({ open, onClose, onAddSticker }) => {
     return () => clearTimeout(timer);
   }, [mentionQuery, activeView]);
 
-  // Music Genre Switch
-  useEffect(() => {
-    if (!musicQuery.trim()) {
-      setMusicResults(POPULAR_MUSIC_DATA[selectedMusicGenre] || POPULAR_MUSIC_DATA["🔥 Trending"]);
-    }
-  }, [selectedMusicGenre, musicQuery]);
-
-  // Real iTunes Music Search
+  // Real iTunes Music Search & Genre Switch
   useEffect(() => {
     if (activeView !== "music_sticker") return;
     if (!musicQuery.trim()) {
-      setMusicResults(POPULAR_MUSIC_DATA[selectedMusicGenre] || POPULAR_MUSIC_DATA["🔥 Trending"]);
-      return;
+      const timer = setTimeout(() => {
+        setMusicResults(POPULAR_MUSIC_DATA[selectedMusicGenre] || POPULAR_MUSIC_DATA["🔥 Trending"]);
+      }, 0);
+      return () => clearTimeout(timer);
     }
 
     const timer = setTimeout(async () => {
@@ -459,46 +443,33 @@ export const StoryStickersDrawer = ({ open, onClose, onAddSticker }) => {
     );
   };
 
-  const handleGetCurrentLocation = () => {
-    if (!navigator.geolocation) return;
+  const handleGetCurrentLocation = async () => {
     setLocLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const lat = pos.coords.latitude;
-          const lon = pos.coords.longitude;
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`
-          );
-          const data = await res.json();
-          if (data && data.address) {
-            const place =
-              data.address.city ||
-              data.address.town ||
-              data.address.suburb ||
-              data.address.village ||
-              data.address.county ||
-              "Current Location";
-            addAndClose({
-              type: "location",
-              location: { name: place, lat, lng: lon },
-              position: { x: 50, y: 30 },
-            });
-          }
-        } catch {
-          addAndClose({
-            type: "location",
-            location: { name: "Current Location" },
-            position: { x: 50, y: 30 },
-          });
-        } finally {
-          setLocLoading(false);
-        }
-      },
-      () => {
-        setLocLoading(false);
+    triggerHaptic("selection");
+    try {
+      const coords = await getCurrentGPSLocation();
+      const rev = await reverseGeocode(coords.latitude, coords.longitude);
+      if (rev) {
+        addAndClose({
+          type: "location",
+          location: {
+            name: rev.name || rev.title,
+            title: rev.title,
+            lat: coords.latitude,
+            lng: coords.longitude,
+          },
+          position: { x: 50, y: 30 },
+        });
       }
-    );
+    } catch {
+      addAndClose({
+        type: "location",
+        location: { name: "Current Location" },
+        position: { x: 50, y: 30 },
+      });
+    } finally {
+      setLocLoading(false);
+    }
   };
 
   const togglePlayPreview = (audioUrl) => {
@@ -601,7 +572,7 @@ export const StoryStickersDrawer = ({ open, onClose, onAddSticker }) => {
         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
         <input
           type="text"
-          placeholder="Search any place in the world..."
+          placeholder="Search places, cities, cafes, landmarks..."
           value={locationQuery}
           onChange={(e) => setLocationQuery(e.target.value)}
           className="w-full bg-zinc-900/90 border border-white/10 pl-10 pr-4 py-2.5 rounded-xl text-xs text-white outline-none focus:border-red-500 transition"
@@ -609,11 +580,38 @@ export const StoryStickersDrawer = ({ open, onClose, onAddSticker }) => {
         />
       </div>
 
+      {/* Category Chips */}
+      <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar pb-1">
+        {[
+          { id: "all", label: "🔥 All" },
+          { id: "city", label: "🏙️ Cities" },
+          { id: "cafe", label: "☕ Cafes" },
+          { id: "landmark", label: "🏛️ Landmarks" },
+          { id: "beach", label: "🏖️ Beaches" },
+        ].map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => {
+              triggerHaptic("selection");
+              setLocationCategory(c.id);
+            }}
+            className={`px-3 py-1 rounded-full text-[10px] font-bold border transition shrink-0 ${
+              locationCategory === c.id
+                ? "bg-red-600 text-white border-red-500 shadow-md"
+                : "bg-zinc-900 border-white/10 text-zinc-400 hover:text-white hover:bg-zinc-800"
+            }`}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
       {/* Real Current GPS Location Trigger */}
       <button
         onClick={handleGetCurrentLocation}
         disabled={locLoading}
-        className="w-full flex items-center justify-center gap-2 p-2.5 bg-red-500/15 border border-red-500/30 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/25 transition active:scale-[0.98]"
+        className="w-full flex items-center justify-center gap-2 p-2.5 bg-red-500/15 border border-red-500/30 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/25 transition active:scale-[0.98] cursor-pointer"
       >
         {locLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Navigation className="w-4 h-4" />}
         <span>Use Current GPS Location</span>
@@ -624,16 +622,33 @@ export const StoryStickersDrawer = ({ open, onClose, onAddSticker }) => {
         {locationResults.map((loc, idx) => (
           <button
             key={idx}
-            onClick={() => addAndClose({ type: "location", location: { name: loc.name } })}
-            className="w-full flex items-center gap-3 p-3 bg-zinc-900/60 border border-white/5 rounded-xl text-xs text-white hover:bg-zinc-800/80 transition cursor-pointer active:scale-[0.98] text-left"
+            onClick={() =>
+              addAndClose({
+                type: "location",
+                location: {
+                  name: loc.title || loc.name,
+                  fullAddress: loc.name,
+                  lat: loc.lat,
+                  lng: loc.lon,
+                },
+              })
+            }
+            className="w-full flex items-center justify-between p-3 bg-zinc-900/60 border border-white/5 rounded-xl text-xs text-white hover:bg-zinc-800/80 transition cursor-pointer active:scale-[0.98] text-left"
           >
-            <div className="p-2 rounded-full bg-red-500/20 text-red-400 shrink-0">
-              <MapPin className="w-4 h-4" />
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="p-2 rounded-full bg-red-500/20 text-red-400 shrink-0">
+                <MapPin className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-extrabold truncate text-white">{loc.title || loc.name}</p>
+                {loc.desc && <p className="text-[10px] text-zinc-400 truncate">{loc.desc}</p>}
+              </div>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="font-extrabold truncate text-white">{loc.name}</p>
-              {loc.desc && <p className="text-[10px] text-zinc-400 truncate">{loc.desc}</p>}
-            </div>
+            {loc.category && (
+              <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-white/10 shrink-0 ml-2">
+                {loc.category}
+              </span>
+            )}
           </button>
         ))}
       </div>

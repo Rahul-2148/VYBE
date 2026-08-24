@@ -1,21 +1,50 @@
-import { AlertTriangle, Check, CheckCheck, CornerUpLeft, Edit2, EllipsisVertical, SmilePlus, Trash2, MapPin, ExternalLink, Heart, CornerUpRight, Pin, Clock, Phone, Copy } from "lucide-react";
+import { AlertTriangle, Check, CheckCheck, CornerUpLeft, Edit2, EllipsisVertical, SmilePlus, Trash2, MapPin, ExternalLink, Heart, CornerUpRight, Pin, Clock, Phone, Copy, Plus } from "lucide-react";
 import moment from "moment";
 import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import api from "../lib/axios";
-import { removeMessage, updateMessage } from "../redux/features/messageSlice";
+import { removeMessage, updateMessage, updateMessageReactionInRedux } from "../redux/features/messageSlice";
 import SharedContentCard from "./SharedContentCard";
+import EmojiPickerPopover from "./EmojiPickerPopover";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import MediaLightboxModal from "./MediaLightboxModal";
+import VoiceNotePlayer from "./VoiceNotePlayer";
 import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
 
-import { getChatThemeById } from "../lib/chatThemes";
+import { getChatThemeById, getResolvedThemeId } from "../lib/chatThemes";
+import { getChatTypography, getActiveFontClasses } from "../lib/chatTypography";
+import VybeCallLogBubble from "./calls/VybeCallLogBubble";
+import MessageReactionsModal from "./MessageReactionsModal";
+import MessageReactionBadge from "./MessageReactionBadge";
 
-const EMOJIS = ["❤️", "😂", "🔥", "👍", "😢", "🙏", "👏", "🎉", "✨", "💯"];
+const EMOJIS = ["❤️", "👍", "😂", "😮", "😢", "🙏"];
 
-const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMessage, onForwardMessage }) => {
+const renderHighlightedText = (text, query) => {
+  if (!query || !query.trim() || !text) return text;
+  const escaped = query.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(${escaped})`, "gi");
+  const parts = text.split(regex);
+  return parts.map((part, i) =>
+    regex.test(part) ? (
+      <mark key={i} className="bg-amber-400 text-black font-semibold rounded-xs px-0.5 shadow-xs">
+        {part}
+      </mark>
+    ) : (
+      part
+    )
+  );
+};
+
+const SenderMessage = ({
+  message,
+  setReplyTo,
+  onEditMessage,
+  onForwardMessage,
+  isHighlighted,
+  searchQuery,
+}) => {
   const dispatch = useDispatch();
   const { userData } = useSelector((s) => s.user);
   const { conversations } = useSelector((s) => s.message);
@@ -24,17 +53,47 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
     ? message.conversation._id || message.conversation.id
     : message.conversation;
   const currentConv = conversations.find((c) => (c._id || c.conversationId)?.toString() === convId?.toString());
-  const activeTheme = currentConv?.theme || "default";
+  const currentUserId = userData?.user?._id || userData?._id;
+  const [activeTheme, setActiveTheme] = useState(() => getResolvedThemeId(currentUserId, convId, currentConv?.theme));
+
+  useEffect(() => {
+    const handleThemeChange = (e) => {
+      if (!e.detail) return;
+      if (e.detail.isGlobal) {
+        setActiveTheme(getResolvedThemeId(currentUserId, convId, currentConv?.theme));
+      } else if (!e.detail.conversationId || e.detail.conversationId === convId) {
+        setActiveTheme(e.detail.theme);
+      }
+    };
+    window.addEventListener("chat-theme-changed", handleThemeChange);
+    return () => window.removeEventListener("chat-theme-changed", handleThemeChange);
+  }, [convId, currentUserId, currentConv?.theme]);
+
   const themeObj = getChatThemeById(activeTheme);
-  const isGradientTheme = activeTheme !== "midnight";
+  const isGradientTheme = activeTheme !== "midnight" && activeTheme !== "classic_doodle";
   const bubbleThemeClass = themeObj.senderBubble || "bg-gradient-to-r from-purple-600 via-pink-600 to-rose-500 text-white shadow-md";
 
   const [showOptions, setShowOptions] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
+  const [showCustomEmojiPicker, setShowCustomEmojiPicker] = useState(false);
+  const [showReactionsModal, setShowReactionsModal] = useState(false);
   const [showHeart, setShowHeart] = useState(false);
   const [lightboxData, setLightboxData] = useState({ open: false, url: null, type: "image" });
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(message.content?.text || "");
+
+  // Dynamic Chat Typography State
+  const [typography, setTypography] = useState(() => getChatTypography());
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.detail) setTypography(e.detail);
+      else setTypography(getChatTypography());
+    };
+    window.addEventListener("vybe-chat-typography-changed", handler);
+    return () => window.removeEventListener("vybe-chat-typography-changed", handler);
+  }, []);
+
+  const activeFont = getActiveFontClasses(typography);
 
   const isContactRequest = message.type === "contact_request" || 
     (typeof message.content?.text === "string" && (
@@ -49,23 +108,11 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
   const isContactCard = message.type === "contact" || 
     Boolean(message.content?.contactData?.phone);
 
-  const handleDoubleClick = async () => {
-    triggerHaptic("like");
-    microAudio.playPop();
-    setShowHeart(true);
-    setTimeout(() => setShowHeart(false), 1000);
-    try {
-      const res = await api.post(`/message/react/${message._id}`, { emoji: "❤️" });
-      dispatch(updateMessage(res.data.message));
-    } catch (e) {
-      console.warn("SenderMessage: double-click react failed", e);
-    }
-  };
-
   // Refs
   const optionsRef = useRef(null);
   const reactionsRef = useRef(null);
   const reactionButtonRef = useRef(null);
+  const customEmojiPickerRef = useRef(null);
   const messageRef = useRef(null);
 
   const isSharedContent = Boolean(
@@ -75,17 +122,23 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
     message.sharedData
   );
 
+  const stickerUrl =
+    (message.content?.media?.[0]?.type === "sticker" ? message.content.media[0].url : null) ||
+    ((message.type === "sticker" || message.messageType === "sticker") ? (message.content?.mediaUrl || message.mediaUrl || message.content?.text) : null);
+
   const mediaList = isSharedContent
     ? []
-    : Array.isArray(message.content?.media)
+    : Array.isArray(message.content?.media) && message.content.media.length > 0
     ? message.content.media
     : message.content?.media
     ? [message.content.media]
-    : message.type === "sticker" && (message.content?.mediaUrl || message.mediaUrl)
-    ? [{ url: message.content?.mediaUrl || message.mediaUrl, type: "sticker" }]
+    : stickerUrl
+    ? [{ url: stickerUrl, type: "sticker" }]
     : [];
 
-  // Click outside handler
+  const isOnlySticker = (message.type === "sticker" || message.messageType === "sticker" || Boolean(stickerUrl) || (mediaList.length === 1 && mediaList[0]?.type === "sticker")) && !message.content?.text?.trim();
+
+  // Click outside handler with safe Portal & reaction protection
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (
@@ -96,28 +149,97 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
         setShowOptions(false);
       }
 
-      if (
-        reactionsRef.current &&
-        !reactionsRef.current.contains(event.target) &&
-        reactionButtonRef.current &&
-        !reactionButtonRef.current.contains(event.target)
-      ) {
+      // If click originated inside reaction controls or the emoji portal, do not close
+      const isInsideReactionArea =
+        reactionsRef.current?.contains(event.target) ||
+        reactionButtonRef.current?.contains(event.target) ||
+        Boolean(event.target.closest("[data-emoji-picker='true']")) ||
+        Boolean(event.target.closest("[data-reaction-bar='true']")) ||
+        Boolean(event.target.closest("[data-reaction-btn='true']"));
+
+      if (!isInsideReactionArea) {
         setShowReactions(false);
+        setShowCustomEmojiPicker(false);
       }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("touchstart", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
+    };
   }, []);
 
   const handleReact = async (emoji) => {
+    setShowReactions(false);
+    setShowCustomEmojiPicker(false);
+
+    // Optimistic Update to prevent UI fluctuation/delay
+    const currentReactions = Array.isArray(message.reactions) ? [...message.reactions] : [];
+    const myIdStr = currentUserId?.toString();
+    const existingIdx = currentReactions.findIndex(
+      (r) => (r.user?._id || r.user?.id || r.user || "").toString() === myIdStr
+    );
+
+    let updatedReactions;
+    if (existingIdx !== -1) {
+      if (currentReactions[existingIdx].emoji === emoji) {
+        // Toggle off
+        updatedReactions = currentReactions.filter((_, idx) => idx !== existingIdx);
+      } else {
+        // Switch emoji
+        updatedReactions = currentReactions.map((r, idx) =>
+          idx === existingIdx ? { ...r, emoji, reactedAt: new Date() } : r
+        );
+      }
+    } else {
+      // Add new reaction
+      updatedReactions = [
+        ...currentReactions,
+        {
+          user: {
+            _id: currentUserId,
+            userName: userData?.user?.userName || userData?.userName || "You",
+            name: userData?.user?.name || userData?.name,
+            profileImage: userData?.user?.profileImage || userData?.profileImage,
+          },
+          emoji,
+          reactedAt: new Date(),
+        },
+      ];
+    }
+
+    dispatch(
+      updateMessageReactionInRedux({
+        messageId: message._id,
+        reactions: updatedReactions,
+      })
+    );
+
     try {
       const res = await api.post(`/message/react/${message._id}`, { emoji });
-      dispatch(updateMessage(res.data.message));
-      setShowReactions(false);
+      if (res.data?.message) {
+        dispatch(updateMessage(res.data.message));
+      }
     } catch (e) {
       console.warn("SenderMessage: handleReact failed", e);
+      // Rollback on failure
+      dispatch(
+        updateMessageReactionInRedux({
+          messageId: message._id,
+          reactions: currentReactions,
+        })
+      );
     }
+  };
+
+  const handleDoubleClick = async () => {
+    triggerHaptic("like");
+    microAudio.playPop();
+    setShowHeart(true);
+    setTimeout(() => setShowHeart(false), 900);
+    handleReact("❤️");
   };
 
   const handleDelete = async (type) => {
@@ -188,8 +310,17 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
     );
   };
 
+  const myReaction = message.reactions?.find(
+    (r) => (r.user?._id || r.user?.id || r.user || "").toString() === currentUserId?.toString()
+  );
+
   return (
-    <div className="relative group/msg flex items-center justify-end my-0.5">
+    <div
+      id={`msg-${message._id}`}
+      className={`relative group/msg flex items-center justify-end ${
+        message.reactions?.length > 0 ? "pb-3 pt-0.5" : "py-0.5"
+      } ${isHighlighted ? "scale-[1.01]" : ""}`}
+    >
       {/* Floating double-tap Heart animation */}
       {showHeart && (
         <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
@@ -197,43 +328,238 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
         </div>
       )}
 
-      {/* Floating Emoji Reactions Bar (Responsive & Glassmorphic) */}
-      {showReactions && (
-        <div
-          ref={reactionsRef}
-          className="absolute -top-11 right-0 sm:right-auto sm:left-1/2 sm:-translate-x-1/2 z-50 bg-white/95 dark:bg-zinc-900/95 border border-zinc-200 dark:border-zinc-700/80 rounded-full shadow-[0_12px_32px_rgba(0,0,0,0.25)] backdrop-blur-xl px-2 py-1 flex items-center gap-1 max-w-[92vw] overflow-x-auto hide-scrollbar animate-in zoom-in-95 duration-150"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {EMOJIS.map((e, idx) => (
+      {/* FLOATING ACTION TOOLBAR (Beside the bubble on the left) */}
+      <div className="flex items-center gap-0.5 mr-2 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-150 relative select-none">
+        {/* OPTIONS DROPDOWN */}
+        {showOptions && (
+          <div
+            ref={optionsRef}
+            className="absolute top-8 right-0 bg-surface/98 dark:bg-zinc-900/98 rounded-2xl shadow-2xl text-xs z-50 overflow-hidden min-w-[165px] border border-border/80 py-1 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150 text-text"
+            onClick={(e) => e.stopPropagation()}
+          >
             <button
-              key={idx}
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                handleReact(e);
+              onClick={() => {
+                setReplyTo(message);
+                setShowOptions(false);
               }}
-              className="flex-shrink-0 text-xl hover:scale-130 active:scale-90 transition-transform duration-150 cursor-pointer p-1 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              style={{ minWidth: "30px", textAlign: "center" }}
+              className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text-secondary hover:text-text transition-colors cursor-pointer font-medium"
             >
-              {e}
+              <CornerUpLeft size={14} className="text-text-muted" /> Reply
             </button>
-          ))}
+            {message.type === "text" && (
+              <button
+                onClick={() => {
+                  if (onEditMessage) onEditMessage(message);
+                  setShowOptions(false);
+                }}
+                className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text-secondary hover:text-text transition-colors cursor-pointer font-medium"
+              >
+                <Edit2 size={14} className="text-text-muted" /> Edit
+              </button>
+            )}
+            {onForwardMessage && (
+              <button
+                onClick={() => {
+                  onForwardMessage(message);
+                  setShowOptions(false);
+                }}
+                className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text-secondary hover:text-text transition-colors cursor-pointer font-medium"
+              >
+                <CornerUpRight size={14} className="text-text-muted" /> Forward
+              </button>
+            )}
+            <button
+              onClick={async () => {
+                try {
+                  const res = await api.post(`/message/pin/${message._id}`);
+                  if (res.data.success) {
+                    dispatch(updateMessage({ ...message, isPinned: res.data.isPinned }));
+                  }
+                } catch (e) {
+                  console.warn("SenderMessage: pin/unpin failed", e);
+                }
+                setShowOptions(false);
+              }}
+              className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text hover:text-primary transition-colors cursor-pointer font-semibold"
+            >
+              <Pin size={15} strokeWidth={2.2} className="text-text-secondary" /> {message.isPinned ? "Unpin" : "Pin"}
+            </button>
+            <div className="border-t border-border/60 my-1" />
+            <button
+              onClick={() => {
+                handleDelete("me");
+                setShowOptions(false);
+              }}
+              className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text hover:text-text-secondary transition-colors cursor-pointer font-semibold"
+            >
+              <Trash2 size={15} strokeWidth={2.2} className="text-text-muted" /> Delete for me
+            </button>
+            <button
+              onClick={() => {
+                handleDelete("everyone");
+                setShowOptions(false);
+              }}
+              className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-red-500/15 w-full text-left text-red-500 transition-colors cursor-pointer font-semibold"
+            >
+              <AlertTriangle size={15} strokeWidth={2.2} /> Delete for everyone
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-center gap-0.5 bg-surface/98 dark:bg-zinc-900/98 border border-border/80 shadow-[0_4px_16px_rgba(0,0,0,0.12)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.6)] backdrop-blur-xl rounded-full px-1.5 py-1 text-text">
+          {/* 1. More Options Button */}
+          <button
+            data-options-trigger="true"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowOptions(!showOptions);
+            }}
+            className={`p-1.5 rounded-full text-text-secondary hover:text-text hover:bg-surface-hover hover:scale-110 active:scale-95 transition-all duration-150 cursor-pointer ${
+              showOptions ? "text-primary bg-primary/15 ring-1 ring-primary/40 scale-105" : ""
+            }`}
+            title="More options"
+          >
+            <EllipsisVertical size={16} strokeWidth={2.4} />
+          </button>
+
+          {/* 2. Forward Button */}
+          {onForwardMessage && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onForwardMessage(message);
+              }}
+              className="p-1.5 rounded-full text-slate-800 dark:text-zinc-100 hover:text-primary hover:bg-primary/10 dark:hover:bg-primary/20 hover:scale-110 active:scale-95 transition-all duration-150 cursor-pointer"
+              title="Forward"
+            >
+              <CornerUpRight size={16} strokeWidth={2.4} />
+            </button>
+          )}
+
+          {/* 3. Reply Button */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setReplyTo(message);
+            }}
+            className="p-1.5 rounded-full text-slate-800 dark:text-zinc-100 hover:text-primary hover:bg-primary/10 dark:hover:bg-primary/20 hover:scale-110 active:scale-95 transition-all duration-150 cursor-pointer"
+            title="Reply"
+          >
+            <CornerUpLeft size={16} strokeWidth={2.4} />
+          </button>
+
+          {/* 4. React Button */}
+          <button
+            ref={reactionButtonRef}
+            data-reaction-btn="true"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setShowReactions((prev) => !prev);
+              if (showReactions) setShowCustomEmojiPicker(false);
+            }}
+            className={`p-1.5 rounded-full text-slate-800 dark:text-zinc-100 hover:text-primary hover:bg-primary/10 dark:hover:bg-primary/20 hover:scale-110 active:scale-95 transition-all duration-150 cursor-pointer ${
+              showReactions ? "text-primary bg-primary/15 ring-1 ring-primary/40 scale-105" : ""
+            }`}
+            title="React"
+          >
+            <SmilePlus size={16} strokeWidth={2.4} />
+          </button>
         </div>
-      )}
+      </div>
 
       <div
         ref={messageRef}
         onDoubleClick={handleDoubleClick}
-        className={`relative ml-auto max-w-[88%] sm:max-w-[70%] md:max-w-[60%] px-4 py-2.5 rounded-3xl flex flex-col gap-1 cursor-pointer select-none transition-all duration-200 ${
-          highlight
-            ? "bg-yellow-500/20 rounded-3xl ring-2 ring-yellow-400"
-            : message.status === "failed"
-            ? "bg-red-600/20 border border-red-500/50 text-text rounded-3xl"
-            : message.status === "sending"
-            ? `${bubbleThemeClass} opacity-75`
-            : bubbleThemeClass
+        className={`relative max-w-[80%] sm:max-w-[65%] md:max-w-[55%] flex flex-col gap-0.5 cursor-pointer select-none transition-all duration-200 ${
+          isOnlySticker
+            ? "bg-transparent !p-0 !shadow-none !border-none text-text items-end"
+            : `${activeFont.bubblePadding || "px-3.5 py-2"} rounded-3xl ${
+                isHighlighted
+                  ? "ring-2 ring-primary ring-offset-2 ring-offset-bg shadow-xl animate-pulse"
+                  : highlight
+                  ? "bg-yellow-500/20 rounded-3xl ring-2 ring-yellow-400"
+                  : message.status === "failed"
+                  ? "bg-red-600/20 border border-red-500/50 text-text rounded-3xl"
+                  : message.status === "sending"
+                  ? `${bubbleThemeClass} opacity-75`
+                  : bubbleThemeClass
+              }`
         }`}
       >
+        {/* Floating Quick Emoji Reactions Bar (WhatsApp / Instagram Authentic) */}
+        {showReactions && (
+          <div
+            ref={reactionsRef}
+            data-reaction-bar="true"
+            className="absolute -top-11 right-0 z-[60] bg-surface/95 dark:bg-zinc-900/95 border border-border/80 shadow-[0_8px_30px_rgba(0,0,0,0.12)] dark:shadow-[0_10px_32px_rgba(0,0,0,0.5)] backdrop-blur-2xl rounded-full px-2 py-1 flex items-center gap-0.5 animate-in zoom-in-95 duration-150 select-none whitespace-nowrap text-text"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {EMOJIS.map((e, idx) => {
+              const isSelected = myReaction?.emoji === e;
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  data-reaction-btn="true"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    triggerHaptic("light");
+                    handleReact(e);
+                  }}
+                  className={`w-7.5 h-7.5 sm:w-8 sm:h-8 flex items-center justify-center rounded-full transition-all duration-150 cursor-pointer ${
+                    isSelected
+                      ? "bg-primary/20 ring-1 ring-primary/50 scale-105"
+                      : "hover:bg-black/5 dark:hover:bg-white/10"
+                  }`}
+                  title={`React ${e}`}
+                >
+                  <span className="inline-block text-lg sm:text-xl leading-none transition-transform duration-200 ease-out hover:scale-135 hover:-translate-y-1 active:scale-90 select-none">
+                    {e}
+                  </span>
+                </button>
+              );
+            })}
+
+            {/* Plus button to open full emoji reaction picker */}
+            <button
+              type="button"
+              data-reaction-btn="true"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onTouchStart={(e) => {
+                e.stopPropagation();
+              }}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                triggerHaptic("light");
+                setShowCustomEmojiPicker((prev) => !prev);
+              }}
+              className="w-7.5 h-7.5 sm:w-8 sm:h-8 flex items-center justify-center rounded-full bg-black/8 dark:bg-white/10 hover:bg-black/15 dark:hover:bg-white/20 hover:scale-105 active:scale-90 text-text-secondary hover:text-text transition-all duration-150 cursor-pointer ml-0.5"
+              title="More emojis"
+            >
+              <Plus className="w-4 h-4 pointer-events-none" />
+            </button>
+          </div>
+        )}
+
+        {/* Full Custom Emoji Picker for Reaction */}
+        {showCustomEmojiPicker && (
+          <EmojiPickerPopover
+            triggerRef={reactionsRef}
+            align="right"
+            onClose={() => setShowCustomEmojiPicker(false)}
+            onSelectEmoji={(emoji) => {
+              handleReact(emoji);
+              setShowCustomEmojiPicker(false);
+              setShowReactions(false);
+            }}
+          />
+        )}
         {/* Forwarded indicator */}
         {message.isForwarded && (
           <div className={`flex items-center gap-1 text-[10px] font-medium ${isGradientTheme ? "text-white/70" : "text-text-muted"}`}>
@@ -244,6 +570,11 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
 
         {/* REPLY PREVIEW */}
         {message.replyTo && renderReplyChain(message.replyTo)}
+
+        {/* CALL LOG EVENT (Sender View) */}
+        {(message.type === "call" || message.systemEvent?.startsWith("call_")) && (
+          <VybeCallLogBubble message={message} currentUserId={currentUserId} />
+        )}
 
         {/* CONTACT REQUEST CARD (Sender View) */}
         {isContactRequest && (
@@ -301,15 +632,39 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
           />
         )}
 
+        {/* VOICE NOTE PLAYER */}
+        {(message.type === "voice" || mediaList.some((m) => m.type === "audio")) && (() => {
+          const audioMedia = mediaList.find((m) => m.type === "audio") || mediaList[0];
+          const audioUrl = audioMedia?.url || message.content?.audioUrl || message.audioUrl;
+          return audioUrl ? (
+            <VoiceNotePlayer
+              audioUrl={audioUrl}
+              duration={message.content?.voiceDuration || message.voiceDuration || 0}
+              isSender={true}
+              isGradientTheme={isGradientTheme}
+            />
+          ) : null;
+        })()}
+
         {/* MEDIA PREVIEW */}
         {mediaList.map((m, i) => {
+          if (m.type === "audio" || message.type === "voice") {
+            return null; // Rendered by VoiceNotePlayer
+          }
           if (m.type === "sticker" || message.type === "sticker") {
+            const isAnimatedEmoji = m.url?.includes("Animated-Fluent-Emojis") || m.url?.includes(".webp") || m.category === "animated";
             return (
               <img
                 key={i}
                 src={m.url}
-                alt="Sticker"
-                className="w-36 h-36 object-contain drop-shadow-md select-none hover:scale-105 transition-transform my-1"
+                alt="Animated Expression"
+                className={`${isAnimatedEmoji ? "w-20 h-20 sm:w-24 sm:h-24 max-w-[90px] max-h-[90px]" : activeFont.stickerSizeClass || "w-20 h-20 sm:w-24 sm:h-24"} object-contain drop-shadow-md select-none hover:scale-105 transition-all my-1`}
+                style={{
+                  width: isAnimatedEmoji ? "84px" : activeFont.stickerDimension,
+                  height: isAnimatedEmoji ? "84px" : activeFont.stickerDimension,
+                  maxWidth: isAnimatedEmoji ? "90px" : undefined,
+                  maxHeight: isAnimatedEmoji ? "90px" : undefined,
+                }}
               />
             );
           }
@@ -363,15 +718,24 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
                   if (e.key === "Enter") handleEdit();
                   if (e.key === "Escape") setIsEditing(false);
                 }}
-                className={`bg-transparent outline-none border-b border-current pb-0.5 text-sm ${isGradientTheme ? "text-white" : "text-text"}`}
+                className="bg-transparent outline-none border-b border-current pb-0.5 text-sm text-inherit placeholder-current/50"
                 autoFocus
               />
             ) : (
               message.content?.text?.trim() && (
-                <p className={`text-sm break-words leading-relaxed ${isGradientTheme ? "text-white font-normal" : "text-text font-normal"}`}>
-                  {message.content?.text}
+                <p
+                  className="break-words text-inherit"
+                  style={{
+                    fontSize: activeFont.fontSize,
+                    lineHeight: activeFont.lineHeight,
+                    fontFamily: activeFont.fontFamily,
+                    fontWeight: activeFont.fontWeight || "normal",
+                    letterSpacing: activeFont.letterSpacing || "normal",
+                  }}
+                >
+                  {searchQuery ? renderHighlightedText(message.content?.text, searchQuery) : message.content?.text}
                   {message.edited && (
-                    <span className={`text-[10px] ml-1.5 italic ${isGradientTheme ? "opacity-75" : "text-text-muted"}`}>(edited)</span>
+                    <span className="text-[10px] ml-1.5 italic opacity-70">(edited)</span>
                   )}
                 </p>
               )
@@ -379,144 +743,48 @@ const SenderMessage = ({ message, setReplyTo, isGrouped, isLastInGroup, onEditMe
           </>
         )}
 
-        {/* REACTIONS DISPLAY */}
-        {message.reactions?.length > 0 && (
-          <div className="flex gap-1 flex-wrap mt-0.5">
-            {message.reactions.map((r, i) => (
-              <span
-                key={i}
-                className={`text-xs px-2 py-0.5 rounded-full border ${
-                  isGradientTheme
-                    ? "bg-black/25 text-white border-white/20"
-                    : "bg-surface-hover text-text border-border"
-                }`}
-              >
-                {r.emoji}
-              </span>
-            ))}
-          </div>
-        )}
-
         {/* TIME + DELIVERY STATUS */}
-        <div className="flex justify-end items-center gap-1 mt-0.5">
+        <div className="flex justify-end items-center gap-1 mt-0.5 opacity-80 text-inherit">
           {message.edited && (
-            <span className={`text-[9px] ${isGradientTheme ? "text-white/60" : "text-text-muted"}`}>edited</span>
+            <span className="text-[9px] opacity-70">edited</span>
           )}
-          <span className={`text-[10px] font-medium ${isGradientTheme ? "text-white/75" : "text-text-muted"}`}>
+          <span className={`${activeFont.timestampSize || "text-[10px]"} font-medium`}>
             {moment(message.createdAt).format("h:mm A")}
           </span>
           {message.status === "sending" ? (
-            <Clock size={12} className={isGradientTheme ? "text-white/60" : "text-text-muted"} />
+            <Clock size={12} className="opacity-70" />
           ) : message.status === "failed" ? (
             <span className="text-[10px] text-red-300 font-bold">!</span>
           ) : message.status === "seen" ? (
-            <CheckCheck size={14} className={isGradientTheme ? "text-cyan-200 font-bold" : "text-primary"} />
+            <CheckCheck size={14} className="text-cyan-300 font-bold" />
           ) : message.status === "delivered" ? (
-            <CheckCheck size={14} className={isGradientTheme ? "text-white/70" : "text-text-muted"} />
+            <CheckCheck size={14} className="opacity-70" />
           ) : (
-            <Check size={14} className={isGradientTheme ? "text-white/70" : "text-text-muted"} />
+            <Check size={14} className="opacity-70" />
           )}
           {message.isPinned && <Pin size={10} className="text-amber-300 transform rotate-45" />}
           {message.disappear?.enabled && <Clock size={10} className="text-amber-300" />}
         </div>
 
-        {/* REACTION BUTTON (visible on hover / active / touch) */}
-        <button
-          ref={reactionButtonRef}
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowReactions(!showReactions);
-          }}
-          className={`absolute -left-8 bottom-1 cursor-pointer bg-surface/90 hover:bg-surface border border-border p-1.5 rounded-full shadow-md transition-all duration-200 ${
-            showReactions
-              ? "text-primary scale-110 ring-2 ring-primary/40 opacity-100"
-              : "text-text-muted hover:text-text hover:scale-110 opacity-0 group-hover/msg:opacity-100 focus:opacity-100"
-          }`}
-          style={{ zIndex: 10 }}
-          title="React"
-        >
-          <SmilePlus size={14} />
-        </button>
-
-        {/* OPTIONS MENU BUTTON */}
-        <button
-          data-options-trigger
-          onClick={() => setShowOptions(!showOptions)}
-          className={`absolute top-1 right-2 text-xs hover:scale-110 transition-all duration-200 opacity-0 group-hover/msg:opacity-100 ${
-            isGradientTheme ? "text-white/80 hover:text-white" : "text-text-secondary hover:text-text"
-          }`}
-          title="More options"
-        >
-          <EllipsisVertical size={15} className="cursor-pointer" />
-        </button>
-
-        {/* OPTIONS DROPDOWN */}
-        {showOptions && (
-          <div
-            ref={optionsRef}
-            className="absolute top-6 right-2 bg-surface rounded-2xl shadow-2xl text-xs z-50 overflow-hidden min-w-[170px] border border-border py-1 animate-in fade-in zoom-in-95 duration-150"
-          >
-            <button
-              onClick={() => {
-                setReplyTo(message);
-                setShowOptions(false);
-              }}
-              className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text transition-colors cursor-pointer"
-            >
-              <CornerUpLeft size={14} className="text-text-secondary" /> Reply
-            </button>
-            {message.type === "text" && (
-              <button
-                onClick={() => {
-                  if (onEditMessage) onEditMessage(message);
-                  setShowOptions(false);
-                }}
-                className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text transition-colors cursor-pointer"
-              >
-                <Edit2 size={14} className="text-text-secondary" /> Edit
-              </button>
-            )}
-            <button
-              onClick={() => {
-                if (onForwardMessage) onForwardMessage(message);
-                setShowOptions(false);
-              }}
-              className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text transition-colors cursor-pointer"
-            >
-              <CornerUpRight size={14} className="text-text-secondary" /> Forward
-            </button>
-            <button
-              onClick={async () => {
-                try {
-                  const res = await api.post(`/message/pin/${message._id}`);
-                  if (res.data.success) {
-                    dispatch(updateMessage({ ...message, isPinned: res.data.isPinned }));
-                  }
-                } catch (e) {
-                  console.warn("SenderMessage: pin/unpin failed", e);
-                }
-                setShowOptions(false);
-              }}
-              className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text transition-colors cursor-pointer"
-            >
-              <Pin size={14} className="text-text-secondary" /> {message.isPinned ? "Unpin" : "Pin"}
-            </button>
-            <div className="border-t border-border my-1" />
-            <button
-              onClick={() => handleDelete("me")}
-              className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text-secondary hover:text-text transition-colors cursor-pointer"
-            >
-              <Trash2 size={14} /> Delete for me
-            </button>
-            <button
-              onClick={() => handleDelete("everyone")}
-              className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-red-500/10 w-full text-left text-red-500 transition-colors cursor-pointer font-medium"
-            >
-              <AlertTriangle size={14} /> Delete for everyone
-            </button>
-          </div>
-        )}
+        {/* WhatsApp / Instagram Style Floating Overlapping Reaction Capsule */}
+        <MessageReactionBadge
+          reactions={message.reactions}
+          currentUserId={currentUserId}
+          isSender={true}
+          onClick={() => setShowReactionsModal(true)}
+        />
       </div>
+
+      {/* WhatsApp / Instagram Style Reaction Details Modal */}
+      {showReactionsModal && (
+        <MessageReactionsModal
+          isOpen={showReactionsModal}
+          onClose={() => setShowReactionsModal(false)}
+          reactions={message.reactions || []}
+          currentUserId={currentUserId}
+          onRemoveReaction={handleReact}
+        />
+      )}
 
       {/* Full-Screen Media Lightbox Modal */}
       {lightboxData.open && (

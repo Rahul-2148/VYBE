@@ -6,18 +6,20 @@ import { useSelector } from "react-redux";
 
 const ConversationHeader = ({ chat }) => {
   const navigate = useNavigate();
-  const { onlineUsers, lastSeenMap } = useSelector((s) => s.message);
+  const { onlineUsers = [], lastSeenMap = {} } = useSelector((s) => s.message);
 
   const isGroup = chat?.isGroup;
   const otherUser = chat?.user;
+  const otherUserId = (otherUser?._id || otherUser?.id || otherUser)?.toString();
 
   const isOnline =
-    !isGroup && otherUser && onlineUsers.includes(otherUser._id);
+    !isGroup && otherUserId && (Boolean(otherUser?.isOnline) || onlineUsers.includes(otherUserId));
 
+  const resolvedLastSeen = otherUserId && (lastSeenMap[otherUserId] || otherUser?.lastSeen);
   const lastSeen =
     !isGroup &&
-    lastSeenMap[otherUser?._id] &&
-    moment(lastSeenMap[otherUser._id]).fromNow();
+    resolvedLastSeen &&
+    moment(resolvedLastSeen).fromNow();
 
   const handleProfileClick = (e) => {
     e.stopPropagation();

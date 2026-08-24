@@ -32,14 +32,17 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
 
   useEffect(() => {
     if (post) {
-      setCaption(post.caption || "");
-      setLocation(post.location || "");
-      setAltText(post.altText || "");
-      setAllowComments(post.allowComments !== false);
-      setLikesHidden(post.likesHidden || false);
-      setIsAIGenerated(post.aiLabel?.isAIGenerated || false);
-      setAiTool(post.aiLabel?.tool || "");
-      setAiContentType(post.aiLabel?.contentType || "image");
+      const timer = setTimeout(() => {
+        setCaption(post.caption || "");
+        setLocation(post.location || "");
+        setAltText(post.altText || "");
+        setAllowComments(post.allowComments !== false);
+        setLikesHidden(post.likesHidden || false);
+        setIsAIGenerated(post.aiLabel?.isAIGenerated || false);
+        setAiTool(post.aiLabel?.tool || "");
+        setAiContentType(post.aiLabel?.contentType || "image");
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [post]);
 

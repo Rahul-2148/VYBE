@@ -21,7 +21,7 @@ const userSlice = createSlice({
 
         if (userObj && (userObj._id || userObj.userName)) {
           // Destructure to prevent circular references
-          const { user, ...cleanUser } = userObj;
+          const { user: _omitted, ...cleanUser } = userObj;
           const userCopy = { ...cleanUser };
           state.userData = {
             ...userCopy,
@@ -42,7 +42,7 @@ const userSlice = createSlice({
         state.profileData = null;
       } else {
         let userObj = payload.user ? payload.user : payload;
-        const { user, ...cleanUser } = userObj;
+        const { user: _omitted, ...cleanUser } = userObj;
         state.profileData = {
           ...payload,
           user: { ...cleanUser },

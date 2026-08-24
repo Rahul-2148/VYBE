@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
   MessageCircle,
   X,
@@ -28,13 +28,17 @@ import {
   setFloatingDockOpen,
   setFloatingActiveConvo,
 } from "../redux/features/messageSlice";
+import { playMessageSentSound } from "../lib/sounds";
+import VoiceNotePlayer from "./VoiceNotePlayer";
+import VoiceRecorder from "./VoiceRecorder";
+import VybeExpressionPicker from "./VybeExpressionPicker";
 
 const FloatingMessagesDock = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const dispatch = useDispatch();
   const { userData } = useSelector((state) => state.user);
-  const { conversations, isFloatingDockOpen, floatingActiveConvo } = useSelector((state) => state.message);
+  const { conversations, isFloatingDockOpen, floatingActiveConvo, onlineUsers = [] } = useSelector((state) => state.message);
 
   const isMessagesPage =
     location.pathname.startsWith("/messages") ||
@@ -51,33 +55,122 @@ const FloatingMessagesDock = () => {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [showPicker, setShowPicker] = useState({ open: false, tab: "emojis" });
 
   const chatEndRef = useRef(null);
+  const inputRef = useRef(null);
+
+  const fetchConversations = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await api.get("/message/conversations");
+      if (res.data?.conversations) {
+        const convs = res.data.conversations || [];
+        dispatch(setConversations(convs));
+        const totalUnread = convs.reduce((acc, c) => {
+          if (c.unreadCount && typeof c.unreadCount === "object") {
+            const userId = userData?.user?._id;
+            return acc + (c.unreadCount[userId] || 0);
+          }
+          return acc + (c.unreadCount || 0);
+        }, 0);
+        setUnreadCount(totalUnread);
+      }
+    } catch (e) {
+      console.warn("FloatingMessagesDock: fetchConversations failed", e);
+    } finally {
+      setLoading(false);
+    }
+  }, [dispatch, userData?.user?._id]);
+
+  const fetchMessages = useCallback(async (convoId) => {
+    if (!convoId) return;
+    try {
+      setLoadingMessages(true);
+      const res = await api.get(`/message/${convoId}`);
+      if (res.data?.messages) {
+        setMessages(res.data.messages);
+        await api.post(`/message/seen/${convoId}`).catch(() => null);
+      }
+    } catch (e) {
+      console.warn("FloatingMessagesDock: fetchMessages failed", e);
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, []);
 
   // Sync Redux floating dock state
   useEffect(() => {
     if (isFloatingDockOpen) {
-      setIsOpen(true);
+      const timer = setTimeout(() => setIsOpen(true), 0);
+      return () => clearTimeout(timer);
     }
   }, [isFloatingDockOpen]);
 
   useEffect(() => {
     if (floatingActiveConvo) {
-      setActiveConvo(floatingActiveConvo);
+      const timer = setTimeout(() => setActiveConvo(floatingActiveConvo), 0);
+      return () => clearTimeout(timer);
     }
   }, [floatingActiveConvo]);
 
   useEffect(() => {
-    if (userData?.user?._id) {
-      fetchConversations();
-    }
-  }, [userData]);
+    if (!userData?.user?._id) return;
+    let isMounted = true;
+
+    api
+      .get("/message/conversations")
+      .then((res) => {
+        if (isMounted && res.data?.conversations) {
+          const convs = res.data.conversations || [];
+          dispatch(setConversations(convs));
+          const totalUnread = convs.reduce((acc, c) => {
+            if (c.unreadCount && typeof c.unreadCount === "object") {
+              const userId = userData?.user?._id;
+              return acc + (c.unreadCount[userId] || 0);
+            }
+            return acc + (c.unreadCount || 0);
+          }, 0);
+          setUnreadCount(totalUnread);
+        }
+      })
+      .catch((e) => {
+        if (isMounted) console.warn("FloatingMessagesDock: fetchConversations failed", e);
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [userData?.user?._id, dispatch]);
 
   useEffect(() => {
-    if (activeConvo?._id) {
-      fetchMessages(activeConvo._id);
-    }
-  }, [activeConvo]);
+    const convoId = activeConvo?._id;
+    if (!convoId) return;
+    let isMounted = true;
+
+    api
+      .get(`/message/${convoId}`)
+      .then(async (res) => {
+        if (isMounted && res.data?.messages) {
+          setMessages(res.data.messages);
+          await api.post(`/message/seen/${convoId}`).catch(() => null);
+        }
+      })
+      .catch((e) => {
+        if (isMounted) console.warn("FloatingMessagesDock: fetchMessages failed", e);
+      })
+      .finally(() => {
+        if (isMounted) setLoadingMessages(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeConvo?._id]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -119,45 +212,7 @@ const FloatingMessagesDock = () => {
       socket.off("message-received", handleNewMessage);
       socket.off("user-typing", handleTyping);
     };
-  }, [activeConvo, dispatch, userData]);
-
-  const fetchConversations = async () => {
-    try {
-      setLoading(true);
-      const res = await api.get("/message/conversations");
-      if (res.data?.conversations) {
-        const convs = res.data.conversations || [];
-        dispatch(setConversations(convs));
-        const totalUnread = convs.reduce((acc, c) => {
-          if (c.unreadCount && typeof c.unreadCount === "object") {
-            const userId = userData?.user?._id;
-            return acc + (c.unreadCount[userId] || 0);
-          }
-          return acc + (c.unreadCount || 0);
-        }, 0);
-        setUnreadCount(totalUnread);
-      }
-    } catch (e) {
-      console.warn("FloatingMessagesDock: fetchConversations failed", e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchMessages = async (convoId) => {
-    try {
-      setLoadingMessages(true);
-      const res = await api.get(`/message/${convoId}`);
-      if (res.data?.messages) {
-        setMessages(res.data.messages);
-        await api.post(`/message/seen/${convoId}`);
-      }
-    } catch (e) {
-      console.warn("FloatingMessagesDock: fetchMessages failed", e);
-    } finally {
-      setLoadingMessages(false);
-    }
-  };
+  }, [activeConvo, dispatch, userData, fetchMessages]);
 
   const handleSendMessage = async (e) => {
     e?.preventDefault();
@@ -165,6 +220,7 @@ const FloatingMessagesDock = () => {
 
     const textToSend = messageText.trim();
     setMessageText("");
+    playMessageSentSound();
 
     try {
       setSending(true);
@@ -182,6 +238,52 @@ const FloatingMessagesDock = () => {
       setMessageText(textToSend);
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleSendVoiceNote = async (audioFile, duration) => {
+    if (!activeConvo?._id) return;
+    setIsRecordingVoice(false);
+
+    try {
+      const fd = new FormData();
+      fd.append("audio", audioFile);
+      fd.append("conversationId", activeConvo._id);
+      fd.append("duration", duration);
+
+      const res = await api.post("/message/voice-note", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      if (res.data?.success && res.data?.message) {
+        setMessages((prev) => [...prev, res.data.message]);
+        playMessageSentSound();
+        fetchConversations();
+      }
+    } catch (err) {
+      console.warn("FloatingMessagesDock: handleSendVoiceNote failed", err);
+    }
+  };
+
+  const handleSendSticker = async (sticker) => {
+    if (!activeConvo?._id) return;
+    setShowPicker({ open: false, tab: "emojis" });
+
+    try {
+      const res = await api.post("/message/send", {
+        conversationId: activeConvo._id,
+        text: "",
+        media: [{ url: sticker.url, type: "sticker", name: sticker.name || "Sticker" }],
+        type: "sticker",
+      });
+
+      if (res.data?.message) {
+        setMessages((prev) => [...prev, res.data.message]);
+        playMessageSentSound();
+        fetchConversations();
+      }
+    } catch (err) {
+      console.warn("FloatingMessagesDock: handleSendSticker failed", err);
     }
   };
 
@@ -241,57 +343,65 @@ const FloatingMessagesDock = () => {
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </button>
-                <div
-                  onClick={() => {
-                    if (activeOtherUser?.userName) {
-                      setIsOpen(false);
-                      dispatch(setFloatingDockOpen(false));
-                      navigate(`/profile/${activeOtherUser.userName}`);
-                    }
-                  }}
-                  className="relative shrink-0 cursor-pointer hover:opacity-85 transition"
-                  title={`View @${activeOtherUser?.userName}'s profile`}
-                >
-                  <img
-                    src={activeOtherUser?.profileImage?.url || dp}
-                    alt=""
-                    className="w-8 h-8 rounded-full object-cover border border-border"
-                  />
-                  {activeOtherUser?.isOnline && (
-                    <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-bg rounded-full" />
-                  )}
-                </div>
-                <div
-                  onClick={() => {
-                    if (activeOtherUser?.userName) {
-                      setIsOpen(false);
-                      dispatch(setFloatingDockOpen(false));
-                      navigate(`/profile/${activeOtherUser.userName}`);
-                    }
-                  }}
-                  className="flex flex-col min-w-0 cursor-pointer hover:underline"
-                  title={`View @${activeOtherUser?.userName}'s profile`}
-                >
-                  <span className="text-xs font-bold text-text truncate max-w-[120px]">
-                    {activeOtherUser?.userName || activeOtherUser?.name || activeConvo.name || "User"}
-                  </span>
-                  <span className="text-[10px] text-text-secondary font-medium">
-                    {isTyping ? (
-                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                        <span className="flex gap-0.5">
-                          <span className="w-1 h-1 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                          <span className="w-1 h-1 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                          <span className="w-1 h-1 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                {(() => {
+                  const activeOtherUserId = (activeOtherUser?._id || activeOtherUser)?.toString();
+                  const isActiveOtherUserOnline = activeOtherUserId && (Boolean(activeOtherUser?.isOnline) || onlineUsers.includes(activeOtherUserId));
+                  return (
+                    <>
+                      <div
+                        onClick={() => {
+                          if (activeOtherUser?.userName) {
+                            setIsOpen(false);
+                            dispatch(setFloatingDockOpen(false));
+                            navigate(`/profile/${activeOtherUser.userName}`);
+                          }
+                        }}
+                        className="relative shrink-0 cursor-pointer"
+                        title={`View @${activeOtherUser?.userName}'s profile`}
+                      >
+                        <img
+                          src={activeOtherUser?.profileImage?.url || dp}
+                          alt=""
+                          className="w-8 h-8 rounded-full object-cover border border-border"
+                        />
+                        {isActiveOtherUserOnline && (
+                          <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-bg rounded-full" />
+                        )}
+                      </div>
+                      <div
+                        onClick={() => {
+                          if (activeOtherUser?.userName) {
+                            setIsOpen(false);
+                            dispatch(setFloatingDockOpen(false));
+                            navigate(`/profile/${activeOtherUser.userName}`);
+                          }
+                        }}
+                        className="flex flex-col min-w-0 cursor-pointer hover:underline"
+                        title={`View @${activeOtherUser?.userName}'s profile`}
+                      >
+                        <span className="text-xs font-bold text-text truncate max-w-[120px]">
+                          {activeOtherUser?.userName || activeOtherUser?.name || activeConvo.name || "User"}
                         </span>
-                        typing...
-                      </span>
-                    ) : activeOtherUser?.isOnline ? (
-                      <span className="text-emerald-400 font-medium">Active now</span>
-                    ) : (
-                      "Offline"
-                    )}
-                  </span>
-                </div>
+                        <span className="text-[10px] text-text-secondary font-medium">
+                          {isTyping ? (
+                            <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                              <span className="flex gap-0.5">
+                                <span className="w-1 h-1 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                                <span className="w-1 h-1 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                                <span className="w-1 h-1 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                              </span>
+                              typing...
+                            </span>
+                          ) : isActiveOtherUserOnline ? (
+                            <span className="text-emerald-400 font-medium">Active now</span>
+                          ) : (
+                            "Offline"
+                          )}
+                        </span>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             ) : (
               /* Conversations List Header */
@@ -373,6 +483,12 @@ const FloatingMessagesDock = () => {
                   messages.map((msg, index) => {
                     const isMe = msg.sender?._id === userData.user._id || msg.sender === userData.user._id;
                     const text = msg.content?.text || msg.text || "";
+                    const isVoiceNote = msg.type === "voice" || msg.content?.media?.some((m) => m.type === "audio");
+                    const audioMedia = isVoiceNote ? msg.content?.media?.find((m) => m.type === "audio") || msg.content?.media?.[0] : null;
+                    const audioUrl = audioMedia?.url || msg.content?.audioUrl || msg.audioUrl;
+
+                    const isSticker = msg.type === "sticker" || msg.content?.media?.some((m) => m.type === "sticker");
+                    const isOnlySticker = isSticker && !text.trim();
 
                     return (
                       <div
@@ -380,17 +496,58 @@ const FloatingMessagesDock = () => {
                         className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}
                       >
                         <div
-                          className={`max-w-[80%] px-3.5 py-2 rounded-2xl text-xs font-normal leading-relaxed ${
-                            isMe
-                              ? "bg-gradient-to-r from-pink-500 to-rose-600 text-text rounded-br-xs shadow"
-                              : "bg-surface text-text border border-border/80 rounded-bl-xs"
+                          className={`max-w-[85%] ${
+                            isOnlySticker
+                              ? "bg-transparent !p-0 !border-none !shadow-none"
+                              : `px-3.5 py-2 rounded-2xl text-xs font-normal leading-relaxed ${
+                                  isMe
+                                    ? "bg-gradient-to-r from-purple-600 to-rose-600 text-white rounded-br-xs shadow-md"
+                                    : "bg-surface text-text border border-border/80 rounded-bl-xs"
+                                }`
                           }`}
                         >
-                          {text}
+                          {/* Voice Note Player */}
+                          {isVoiceNote && audioUrl && (
+                            <VoiceNotePlayer
+                              audioUrl={audioUrl}
+                              duration={msg.content?.voiceDuration || 0}
+                              isSender={isMe}
+                              isGradientTheme={isMe}
+                            />
+                          )}
 
-                          {msg.content?.media?.map((m, i) => (
-                            <img key={i} src={m.url} alt="" className="rounded-xl mt-1.5 max-h-48 object-cover" />
-                          ))}
+                          {/* Text */}
+                          {text?.trim() && <p className="break-words text-inherit">{text}</p>}
+
+                          {/* Media attachments */}
+                          {msg.content?.media?.map((m, i) => {
+                            if (m.type === "audio" || msg.type === "voice") return null;
+                            if (m.type === "sticker" || msg.type === "sticker") {
+                              const isAnimatedEmoji = m.url?.includes("Animated-Fluent-Emojis") || m.url?.includes(".webp") || m.category === "animated";
+                              return (
+                                <img
+                                  key={i}
+                                  src={m.url}
+                                  alt="Animated Expression"
+                                  className={`${isAnimatedEmoji ? "w-18 h-18 sm:w-20 sm:h-20 max-w-[80px] max-h-[80px]" : "w-20 h-20 max-w-[80px] max-h-[80px]"} object-contain drop-shadow-md select-none my-1`}
+                                  style={{
+                                    width: isAnimatedEmoji ? "76px" : "80px",
+                                    height: isAnimatedEmoji ? "76px" : "80px",
+                                  }}
+                                />
+                              );
+                            }
+                            if (m.type === "video") {
+                              return (
+                                <video key={i} controls className="rounded-xl mt-1.5 max-h-48 w-full object-cover">
+                                  <source src={m.url} />
+                                </video>
+                              );
+                            }
+                            return (
+                              <img key={i} src={m.url} alt="" className="rounded-xl mt-1.5 max-h-48 w-full object-cover" />
+                            );
+                          })}
                         </div>
                         <span className="text-[9px] text-text-muted mt-1 px-1 flex items-center gap-1">
                           <span>{moment(msg.createdAt).format("h:mm A")}</span>
@@ -410,22 +567,75 @@ const FloatingMessagesDock = () => {
               </div>
 
               {/* Chat Input Bar */}
-              <form onSubmit={handleSendMessage} className="p-2 border-t border-border/80 bg-surface-inset flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder="Message..."
-                  value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
-                  className="flex-1 bg-surface border border-border rounded-full px-3.5 py-2 text-xs text-text placeholder-input-placeholder outline-none focus:border-rose-500/60"
-                />
-                <button
-                  type="submit"
-                  disabled={!messageText.trim() || sending}
-                  className="p-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-text rounded-full transition cursor-pointer shrink-0"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-              </form>
+              <div className="p-2 border-t border-border/80 bg-surface-inset relative">
+                {/* Vybe Expressions Popover (Emojis & Stickers) */}
+                {showPicker.open && (
+                  <VybeExpressionPicker
+                    initialTab={showPicker.tab}
+                    onSelectEmoji={(emoji) => {
+                      setMessageText((prev) => prev + emoji);
+                      inputRef.current?.focus();
+                    }}
+                    onSendSticker={handleSendSticker}
+                    onClose={() => setShowPicker({ open: false, tab: "emojis" })}
+                  />
+                )}
+
+                {isRecordingVoice ? (
+                  <VoiceRecorder
+                    onSendVoiceNote={handleSendVoiceNote}
+                    onCancel={() => setIsRecordingVoice(false)}
+                  />
+                ) : (
+                  <form onSubmit={handleSendMessage} className="flex items-center gap-1.5">
+                    {/* Emoji / Sticker Button */}
+                    <button
+                      type="button"
+                      data-expression-trigger="true"
+                      onClick={() => setShowPicker((prev) => ({ open: !prev.open, tab: "emojis" }))}
+                      className={`p-1.5 rounded-full transition cursor-pointer shrink-0 ${
+                        showPicker.open ? "text-primary bg-primary/10" : "text-text-secondary hover:text-text hover:bg-surface"
+                      }`}
+                      title="Emojis & Stickers"
+                    >
+                      <Smile className="w-4 h-4" />
+                    </button>
+
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      placeholder="Message..."
+                      value={messageText}
+                      onChange={(e) => setMessageText(e.target.value)}
+                      className="flex-1 bg-surface border border-border rounded-full px-3.5 py-1.5 text-xs text-text placeholder-input-placeholder outline-none focus:border-rose-500/60 min-w-0"
+                    />
+
+                    {/* Mic button */}
+                    {!messageText.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => setIsRecordingVoice(true)}
+                        className="p-1.5 text-text-secondary hover:text-text hover:bg-surface rounded-full transition cursor-pointer shrink-0"
+                        title="Record voice note"
+                      >
+                        <Mic className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    {/* Send button */}
+                    {messageText.trim() && (
+                      <button
+                        type="submit"
+                        disabled={sending}
+                        className="p-1.5 bg-gradient-to-tr from-purple-600 to-rose-600 hover:opacity-90 disabled:opacity-40 text-white rounded-full transition cursor-pointer shrink-0 shadow-sm"
+                        title="Send message"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </form>
+                )}
+              </div>
             </div>
           ) : (
             /* CONVERSATIONS LIST VIEW */
@@ -481,9 +691,13 @@ const FloatingMessagesDock = () => {
                               alt=""
                               className="w-10 h-10 rounded-full object-cover border border-border"
                             />
-                            {other?.isOnline && (
-                              <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-bg rounded-full" />
-                            )}
+                            {(() => {
+                              const otherId = (other?._id || other)?.toString();
+                              const isOtherOnline = otherId && (Boolean(other?.isOnline) || onlineUsers.includes(otherId));
+                              return isOtherOnline ? (
+                                <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-bg rounded-full" />
+                              ) : null;
+                            })()}
                           </div>
 
                           <div className="flex flex-col min-w-0">

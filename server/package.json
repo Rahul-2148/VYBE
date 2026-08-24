@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
+    "create-admin": "node scripts/createSuperAdmin.js",
     "build": "node scripts/check-all.js",
     "check": "node scripts/check-all.js",
     "test": "node scripts/check-all.js"

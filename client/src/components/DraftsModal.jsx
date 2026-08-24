@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, Trash2, Edit3, Film, Grid, Sparkles, Loader2, ArrowRight, FolderOpen, Clock } from "lucide-react";
 import api from "../lib/axios";
 import { snackbar } from "../lib/snackbar";
+import { deleteDraftMediaLocal } from "../lib/draftStorage";
 
 const DraftsModal = ({ isOpen, onClose, onResumeDraft }) => {
   const navigate = useNavigate();
@@ -11,28 +12,30 @@ const DraftsModal = ({ isOpen, onClose, onResumeDraft }) => {
   const [deletingId, setDeletingId] = useState(null);
   const [activeFilter, setActiveFilter] = useState("all");
 
-  // Fetch user drafts
-  const fetchDrafts = useCallback(async () => {
-    if (!isOpen) return;
-    setLoading(true);
-    try {
-      const res = await api.get("/post/drafts");
-      if (res.data?.success) {
-        setDrafts(res.data.drafts || []);
-      }
-    } catch (err) {
-      console.warn("DraftsModal: failed to load drafts", err);
-      snackbar.error("Failed to load drafts");
-    } finally {
-      setLoading(false);
-    }
-  }, [isOpen]);
-
   useEffect(() => {
+    let isMounted = true;
     if (isOpen) {
-      fetchDrafts();
+      api
+        .get("/post/drafts")
+        .then((res) => {
+          if (isMounted && res.data?.success) {
+            setDrafts(res.data.drafts || []);
+          }
+        })
+        .catch((err) => {
+          if (isMounted) {
+            console.warn("DraftsModal: failed to load drafts", err);
+            snackbar.error("Failed to load drafts");
+          }
+        })
+        .finally(() => {
+          if (isMounted) setLoading(false);
+        });
     }
-  }, [isOpen, fetchDrafts]);
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen]);
 
   // Delete draft
   const handleDeleteDraft = async (e, draftId) => {
@@ -40,6 +43,7 @@ const DraftsModal = ({ isOpen, onClose, onResumeDraft }) => {
     setDeletingId(draftId);
     try {
       await api.delete(`/post/drafts/${draftId}`);
+      deleteDraftMediaLocal(draftId).catch(() => {});
       setDrafts((prev) => prev.filter((d) => d._id !== draftId));
       snackbar.success("Draft discarded 🗑️");
     } catch (err) {

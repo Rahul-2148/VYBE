@@ -1,20 +1,17 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { useSelector } from "react-redux";
 import {
   Music,
-  Play,
-  Pause,
   ArrowLeft,
-  Disc,
-  Video,
   Bookmark,
   Share2,
+  Play,
+  Pause,
+  Video,
   Image as ImageIcon,
   Heart,
   Eye,
-  Volume2,
-  VolumeX,
 } from "lucide-react";
 import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
@@ -24,10 +21,11 @@ export const AudioTrackPage = () => {
   const { audioId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const { userData } = useSelector((state) => state.user);
+  const user = userData?.user || userData;
 
   // Audio metadata (from router state or fetched from music catalog)
   const initialMusic = location.state?.music || null;
-  const [audioTrack, setAudioTrack] = useState(initialMusic);
   const [audioName, setAudioName] = useState(initialMusic?.title || decodeURIComponent(audioId || "Original Audio"));
   const [artistName, setArtistName] = useState(initialMusic?.artist || "Official Soundtrack");
   const [coverUrl, setCoverUrl] = useState(initialMusic?.coverUrl || "");
@@ -41,8 +39,6 @@ export const AudioTrackPage = () => {
 
   // Audio Playback
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(30);
   const audioRef = useRef(null);
 
   // Bookmarking
@@ -67,7 +63,6 @@ export const AudioTrackPage = () => {
         const res = await api.get(`/music/search?q=${encodeURIComponent(decoded)}&limit=1`);
         if (res.data?.success && res.data.tracks?.[0]) {
           const track = res.data.tracks[0];
-          setAudioTrack(track);
           setAudioName(track.title);
           setArtistName(track.artist);
           setCoverUrl(track.coverUrl);
@@ -96,7 +91,9 @@ export const AudioTrackPage = () => {
             setReels(reels);
             if (res.data.audioTrackName) setAudioName(res.data.audioTrackName);
           }
-        } catch {}
+        } catch {
+          /* ignore reel audio error */
+        }
 
         // Fetch Feed Posts
         try {
@@ -104,7 +101,9 @@ export const AudioTrackPage = () => {
           if (res.data?.success && Array.isArray(res.data.posts)) {
             setPosts(res.data.posts);
           }
-        } catch {}
+        } catch {
+          /* ignore post audio error */
+        }
       } catch (err) {
         console.warn("Failed to load audio track details:", err);
       } finally {
@@ -124,8 +123,6 @@ export const AudioTrackPage = () => {
 
     if (!audioRef.current) {
       const audio = new Audio(audioUrl);
-      audio.ontimeupdate = () => setCurrentTime(audio.currentTime);
-      audio.onloadedmetadata = () => setDuration(audio.duration || 30);
       audio.onended = () => setIsPlaying(false);
       audioRef.current = audio;
     }
@@ -172,7 +169,9 @@ export const AudioTrackPage = () => {
         snackbar("Removed from saved audio");
       }
       localStorage.setItem("vybe_saved_real_music", JSON.stringify(updated));
-    } catch {}
+    } catch {
+      /* ignore storage serialization error */
+    }
   };
 
   // Use Audio in Creator
@@ -303,6 +302,15 @@ export const AudioTrackPage = () => {
               <Bookmark className={`w-3.5 h-3.5 ${isSaved ? "fill-amber-400" : ""}`} />
               <span>{isSaved ? "Saved" : "Save Audio"}</span>
             </button>
+
+            <button
+              onClick={() => setShowShare(true)}
+              className="px-4 py-2.5 rounded-full border border-border bg-surface hover:bg-surface-hover text-text text-xs font-bold transition flex items-center gap-1.5 cursor-pointer active:scale-98"
+              title="Share Audio"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span>Share</span>
+            </button>
           </div>
         </div>
       </div>
@@ -407,11 +415,23 @@ export const AudioTrackPage = () => {
         <ShareSheet
           open={showShare}
           onClose={() => setShowShare(false)}
-          shareData={{
+          entity={{
+            _id: audioId || audioName,
+            id: audioId || audioName,
             title: audioName,
-            url: window.location.href,
-            text: `Listen to ${audioName} on VYBE!`,
+            artist: artistName,
+            caption: `${audioName} • ${artistName}`,
+            author: {
+              userName: artistName,
+              name: artistName,
+              profileImage: { url: coverUrl },
+            },
+            mediaUrl: coverUrl,
+            coverUrl: coverUrl,
+            audioUrl: audioUrl,
           }}
+          entityType="audio"
+          following={user?.following || []}
         />
       )}
     </div>

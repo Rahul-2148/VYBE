@@ -21,7 +21,7 @@ export const StoryHighlighterModal = ({ isOpen, onClose, onSuccess }) => {
         if (res.data.success) {
           setArchivedStories(res.data.stories);
         }
-      } catch (err) {
+      } catch {
         snackbar.error("Failed to load archived stories.");
       } finally {
         setLoading(false);

@@ -92,6 +92,8 @@ export const createNotificationHelper = async ({ req, recipient, sender, type, p
     const io = global.io;
     if (io) {
       io.to(`user_${recipient}`).emit("new-notification", populated);
+      io.to(`user_${recipient}`).emit("notification-received", { notification: populated });
+      io.to(`user_${recipient}`).emit("notification:received", populated);
     }
   } catch (socketError) {
     console.error("Socket notification emit error:", socketError);
@@ -214,7 +216,7 @@ export const getUnreadCount = async (req, res) => {
 // Update Notification Preferences
 export const updateNotificationSettings = async (req, res) => {
   try {
-    const { settings } = req.body;
+    const settings = req.body.settings || req.body;
     const user = await User.findByIdAndUpdate(
       req.userId,
       { $set: { notificationSettings: settings } },

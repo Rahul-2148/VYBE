@@ -5,12 +5,10 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ClipLoader } from "react-spinners";
 import logo from "../assets/logo.png";
 import api from "../lib/axios";
-import { useTheme } from "../lib/themeContext";
 import VybeInput from "../components/VybeInput";
 import { Mail, ShieldCheck, Key } from "lucide-react";
 
 const ForgotPassword = () => {
-  const themeCtx = useTheme();
   const [step, setStep] = useState(1);
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
@@ -107,7 +105,7 @@ const ForgotPassword = () => {
 
       const result = await api.post("/auth/resetPassword", payload);
       snackbar.success(result.data.message || "Password reset successfully!");
-      setTimeout(() => navigate(isAddAccountMode ? "/signin?addAccount=true" : "/signin"), 1500);
+      setTimeout(() => navigate(isAddAccountMode ? "/signin?addAccount=true" : "/signin", { replace: true }), 1500);
     } catch (error) {
       const msg = error.response?.data?.message || "Failed to reset password.";
       snackbar.error(msg);

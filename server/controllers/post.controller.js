@@ -1,7 +1,10 @@
+import fs from "fs";
+import { detectAIMetadataFromBuffer } from "../lib/aiMetadataDetector.js";
 import uploadOnCloudinary from "../config/cloudinary.js";
 import deleteFromCloudinary from "../config/deleteFromCloudinary.js";
 import { Post } from "../models/post.model.js";
 import { User } from "../models/user.model.js";
+import { Reel } from "../models/reel.model.js";
 import { Draft } from "../models/draft.model.js";
 import { Collection } from "../models/collection.model.js";
 import { createNotificationHelper } from "./notification.controller.js";
@@ -53,6 +56,24 @@ export const uploadPost = async (req, res) => {
           };
         }
       } catch (e) {}
+    }
+
+    // Auto-detect C2PA / EXIF / SynthID AI metadata on server if not already self-disclosed
+    if (!parsedAiLabel.isAIGenerated && req.file?.path) {
+      try {
+        if (fs.existsSync(req.file.path)) {
+          const buf = fs.readFileSync(req.file.path);
+          const autoDetected = detectAIMetadataFromBuffer(buf);
+          if (autoDetected && autoDetected.isAIGenerated) {
+            parsedAiLabel = {
+              isAIGenerated: true,
+              tool: autoDetected.tool || "Generative AI",
+              disclosedAt: new Date(),
+              detectedAutomatically: true,
+            };
+          }
+        }
+      } catch (err) {}
     }
 
     const createdPost = await Post.create({
@@ -146,6 +167,27 @@ export const uploadCarouselPost = async (req, res) => {
           };
         }
       } catch (e) {}
+    }
+
+    // Auto-detect C2PA / EXIF / SynthID AI metadata across carousel items
+    if (!parsedAiLabel.isAIGenerated && req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        if (file?.path && fs.existsSync(file.path)) {
+          try {
+            const buf = fs.readFileSync(file.path);
+            const autoDetected = detectAIMetadataFromBuffer(buf);
+            if (autoDetected && autoDetected.isAIGenerated) {
+              parsedAiLabel = {
+                isAIGenerated: true,
+                tool: autoDetected.tool || "Generative AI",
+                disclosedAt: new Date(),
+                detectedAutomatically: true,
+              };
+              break;
+            }
+          } catch (e) {}
+        }
+      }
     }
 
     const createdPost = await Post.create({
@@ -312,7 +354,9 @@ export const createCollection = async (req, res) => {
 
 export const getUserCollections = async (req, res) => {
   try {
-    const collections = await Collection.find({ author: req.userId }).populate("posts");
+    const collections = await Collection.find({ author: req.userId })
+      .populate("posts")
+      .populate("reels");
     return res.status(200).json({ success: true, collections });
   } catch (error) {
     return res.status(500).json({ message: `getUserCollections error: ${error.message}` });
@@ -321,7 +365,7 @@ export const getUserCollections = async (req, res) => {
 
 export const addPostToCollection = async (req, res) => {
   try {
-    const { collectionId, postId } = req.body;
+    const { collectionId, postId, reelId } = req.body;
 
     const collection = await Collection.findById(collectionId);
     if (!collection) return res.status(404).json({ message: "Collection not found" });
@@ -330,11 +374,23 @@ export const addPostToCollection = async (req, res) => {
       return res.status(403).json({ message: "Not authorized" });
     }
 
-    const index = collection.posts.indexOf(postId);
-    if (index === -1) {
-      collection.posts.push(postId);
-    } else {
-      collection.posts.splice(index, 1);
+    if (postId) {
+      const index = collection.posts.indexOf(postId);
+      if (index === -1) {
+        collection.posts.push(postId);
+      } else {
+        collection.posts.splice(index, 1);
+      }
+    }
+
+    if (reelId) {
+      if (!collection.reels) collection.reels = [];
+      const reelIndex = collection.reels.indexOf(reelId);
+      if (reelIndex === -1) {
+        collection.reels.push(reelId);
+      } else {
+        collection.reels.splice(reelIndex, 1);
+      }
     }
 
     await collection.save();
@@ -360,6 +416,9 @@ export const saveDraft = async (req, res) => {
       aspectRatio = "4:5",
       filter = "normal",
       audioTrack = null,
+      aiLabel = null,
+      isVybeTv = false,
+      videoDuration = 0,
     } = req.body;
 
     const targetDraftId = draftId || _id;
@@ -377,6 +436,9 @@ export const saveDraft = async (req, res) => {
         existingDraft.aspectRatio = aspectRatio;
         existingDraft.filter = filter;
         existingDraft.audioTrack = audioTrack;
+        if (aiLabel) existingDraft.aiLabel = aiLabel;
+        existingDraft.isVybeTv = isVybeTv;
+        existingDraft.videoDuration = videoDuration;
         await existingDraft.save();
 
         return res.status(200).json({ success: true, draft: existingDraft, message: "Draft updated! 📝" });
@@ -395,6 +457,9 @@ export const saveDraft = async (req, res) => {
       aspectRatio,
       filter,
       audioTrack,
+      aiLabel,
+      isVybeTv,
+      videoDuration,
     });
     return res.status(201).json({ success: true, draft, message: "Draft saved! 📝" });
   } catch (error) {
@@ -441,6 +506,7 @@ export const getAllPosts = async (req, res) => {
       .sort({ createdAt: -1 })
       .populate("author", "name userName profileImage isVerified followers accountType professionalType")
       .populate("comments.author", "name userName profileImage isVerified")
+      .populate("comments.replies.author", "name userName profileImage isVerified")
       .populate("taggedUsers.user", "userName profileImage")
       .lean();
 
@@ -471,6 +537,7 @@ export const getRankedFeed = async (req, res) => {
       .sort({ createdAt: -1 })
       .populate("author", "name userName profileImage isVerified followers accountType professionalType")
       .populate("comments.author", "name userName profileImage isVerified")
+      .populate("comments.replies.author", "name userName profileImage isVerified")
       .populate("taggedUsers.user", "userName profileImage")
       .lean();
 
@@ -494,6 +561,7 @@ export const getAllPostsOfLoggedInUser = async (req, res) => {
       .sort({ createdAt: -1 })
       .populate("author", "name userName profileImage isVerified")
       .populate("comments.author", "name userName profileImage isVerified")
+      .populate("comments.replies.author", "name userName profileImage isVerified")
       .lean();
     return res.status(200).json({ success: true, error: false, posts });
   } catch (error) {
@@ -570,6 +638,23 @@ export const likePost = async (req, res) => {
   }
 };
 
+// 9b. Get Post Likers Controller
+export const getPostLikers = async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const post = await Post.findById(postId).populate({
+      path: "likes",
+      select: "name userName profileImage isVerified followers following",
+    });
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+    return res.status(200).json({ success: true, likers: post.likes || [] });
+  } catch (error) {
+    return res.status(500).json({ message: `getPostLikers error: ${error.message}` });
+  }
+};
+
 // 10. Comment Post Controller
 export const commentPost = async (req, res) => {
   try {
@@ -600,7 +685,7 @@ export const commentPost = async (req, res) => {
       }
     }
 
-    const commentObj = { author, message: message.trim() };
+    const commentObj = { author, message: message.trim(), replies: [], likes: [] };
     if (clientCommentId) {
       commentObj._id = clientCommentId;
     }
@@ -611,7 +696,8 @@ export const commentPost = async (req, res) => {
       { returnDocument: 'after' }
     )
       .populate("author", "name userName profileImage.url profileImage.public_id isVerified")
-      .populate("comments.author", "name userName profileImage.url profileImage.public_id isVerified");
+      .populate("comments.author", "name userName profileImage.url profileImage.public_id isVerified")
+      .populate("comments.replies.author", "name userName profileImage.url profileImage.public_id isVerified");
 
     createNotificationHelper({
       req,
@@ -625,6 +711,206 @@ export const commentPost = async (req, res) => {
     return res.status(200).json({ success: true, error: false, post });
   } catch (error) {
     return res.status(500).json({ message: `commentPost error: ${error.message}` });
+  }
+};
+
+// 10b. Like / Unlike Post Comment Controller
+export const likePostComment = async (req, res) => {
+  try {
+    const { postId, commentId } = req.params;
+    const userId = req.userId;
+
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    const comment = post.comments.id(commentId);
+    if (!comment) return res.status(404).json({ message: "Comment not found" });
+
+    if (!comment.likes) comment.likes = [];
+    const hasLiked = comment.likes.some((id) => id.toString() === userId.toString());
+
+    if (hasLiked) {
+      comment.likes = comment.likes.filter((id) => id.toString() !== userId.toString());
+    } else {
+      comment.likes.push(userId);
+      if (comment.author.toString() !== userId.toString()) {
+        createNotificationHelper({
+          req,
+          recipient: comment.author,
+          sender: userId,
+          type: "like",
+          post: post._id,
+        }).catch(() => null);
+      }
+    }
+
+    await post.save();
+    const updatedPost = await Post.findById(postId)
+      .populate("author", "name userName profileImage.url profileImage.public_id isVerified")
+      .populate("comments.author", "name userName profileImage.url profileImage.public_id isVerified")
+      .populate("comments.replies.author", "name userName profileImage.url profileImage.public_id isVerified");
+
+    return res.status(200).json({ success: true, post: updatedPost, isLiked: !hasLiked });
+  } catch (error) {
+    return res.status(500).json({ message: `likePostComment error: ${error.message}` });
+  }
+};
+
+// 10c. Reply to Post Comment Controller
+export const replyPostComment = async (req, res) => {
+  try {
+    const { postId, commentId } = req.params;
+    const author = req.userId;
+    const { message, replyingTo } = req.body;
+
+    if (!message || !message.trim()) {
+      return res.status(400).json({ message: "Reply message is required" });
+    }
+
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    const comment = post.comments.id(commentId);
+    if (!comment) return res.status(404).json({ message: "Comment not found" });
+
+    if (!comment.replies) comment.replies = [];
+    comment.replies.push({
+      author,
+      message: message.trim(),
+      replyingTo: replyingTo || "",
+      likes: [],
+      createdAt: new Date(),
+    });
+
+    await post.save();
+    const updatedPost = await Post.findById(postId)
+      .populate("author", "name userName profileImage.url profileImage.public_id isVerified")
+      .populate("comments.author", "name userName profileImage.url profileImage.public_id isVerified")
+      .populate("comments.replies.author", "name userName profileImage.url profileImage.public_id isVerified");
+
+    if (comment.author.toString() !== author.toString()) {
+      createNotificationHelper({
+        req,
+        recipient: comment.author,
+        sender: author,
+        type: "comment",
+        post: post._id,
+        commentText: message.trim(),
+      }).catch(() => null);
+    }
+
+    return res.status(200).json({ success: true, post: updatedPost });
+  } catch (error) {
+    return res.status(500).json({ message: `replyPostComment error: ${error.message}` });
+  }
+};
+
+// 10d. Like / Unlike Post Reply Controller
+export const likePostReply = async (req, res) => {
+  try {
+    const { postId, commentId, replyId } = req.params;
+    const userId = req.userId;
+
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    const comment = post.comments.id(commentId);
+    if (!comment) return res.status(404).json({ message: "Comment not found" });
+
+    const reply = comment.replies.id(replyId);
+    if (!reply) return res.status(404).json({ message: "Reply not found" });
+
+    if (!reply.likes) reply.likes = [];
+    const hasLiked = reply.likes.some((id) => id.toString() === userId.toString());
+
+    if (hasLiked) {
+      reply.likes = reply.likes.filter((id) => id.toString() !== userId.toString());
+    } else {
+      reply.likes.push(userId);
+    }
+
+    await post.save();
+    const updatedPost = await Post.findById(postId)
+      .populate("author", "name userName profileImage.url profileImage.public_id isVerified")
+      .populate("comments.author", "name userName profileImage.url profileImage.public_id isVerified")
+      .populate("comments.replies.author", "name userName profileImage.url profileImage.public_id isVerified");
+
+    return res.status(200).json({ success: true, post: updatedPost, isLiked: !hasLiked });
+  } catch (error) {
+    return res.status(500).json({ message: `likePostReply error: ${error.message}` });
+  }
+};
+
+// 10e. Delete Post Reply Controller
+export const deletePostReply = async (req, res) => {
+  try {
+    const { postId, commentId, replyId } = req.params;
+    const userId = req.userId;
+
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    const comment = post.comments.id(commentId);
+    if (!comment) return res.status(404).json({ message: "Comment not found" });
+
+    const reply = comment.replies.id(replyId);
+    if (!reply) return res.status(404).json({ message: "Reply not found" });
+
+    if (reply.author.toString() !== userId.toString() && post.author.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "Unauthorized to delete this reply" });
+    }
+
+    comment.replies.pull(replyId);
+    await post.save();
+
+    const updatedPost = await Post.findById(postId)
+      .populate("author", "name userName profileImage.url profileImage.public_id isVerified")
+      .populate("comments.author", "name userName profileImage.url profileImage.public_id isVerified")
+      .populate("comments.replies.author", "name userName profileImage.url profileImage.public_id isVerified");
+
+    return res.status(200).json({ success: true, post: updatedPost, message: "Reply deleted" });
+  } catch (error) {
+    return res.status(500).json({ message: `deletePostReply error: ${error.message}` });
+  }
+};
+
+// 10f. Pin / Unpin Post Comment Controller (YouTube/Instagram Style)
+export const pinPostComment = async (req, res) => {
+  try {
+    const { postId, commentId } = req.params;
+    const userId = req.userId;
+
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    if (post.author.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "Only the post author can pin comments" });
+    }
+
+    const targetComment = post.comments.id(commentId);
+    if (!targetComment) return res.status(404).json({ message: "Comment not found" });
+
+    const willPin = !targetComment.isPinned;
+    if (willPin) {
+      // Unpin any other previously pinned comments (YouTube standard)
+      post.comments.forEach((c) => {
+        c.isPinned = false;
+      });
+      targetComment.isPinned = true;
+    } else {
+      targetComment.isPinned = false;
+    }
+
+    await post.save();
+
+    const updatedPost = await Post.findById(postId)
+      .populate("author", "name userName profileImage.url profileImage.public_id isVerified")
+      .populate("comments.author", "name userName profileImage.url profileImage.public_id isVerified")
+      .populate("comments.replies.author", "name userName profileImage.url profileImage.public_id isVerified");
+
+    return res.status(200).json({ success: true, post: updatedPost, isPinned: targetComment.isPinned });
+  } catch (error) {
+    return res.status(500).json({ message: `pinPostComment error: ${error.message}` });
   }
 };
 
@@ -809,3 +1095,86 @@ export const editComment = async (req, res) => {
     return res.status(500).json({ message: `editComment error: ${error.message}` });
   }
 };
+
+// Get Posts by Audio Track
+export const getPostsByAudio = async (req, res) => {
+  try {
+    const { audioId } = req.params;
+    const decoded = decodeURIComponent(audioId || "").trim();
+
+    if (!decoded) {
+      return res.status(200).json({ success: true, posts: [], count: 0 });
+    }
+
+    const regex = new RegExp(decoded.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+
+    const posts = await Post.find({
+      isArchived: { $ne: true },
+      $or: [
+        { music: { $regex: regex } },
+        { "music.title": { $regex: regex } },
+        { "music.id": decoded },
+        { "music.trackId": decoded },
+      ],
+    })
+      .populate("author", "userName name profileImage isVerified")
+      .sort({ createdAt: -1 })
+      .limit(50);
+
+    return res.status(200).json({
+      success: true,
+      audioTrackName: decoded,
+      count: posts.length,
+      posts,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: `getPostsByAudio error: ${error.message}` });
+  }
+};
+
+// Get Single Post By ID Controller
+export const getPostById = async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const post = await Post.findById(postId)
+      .populate("author", "name userName profileImage isVerified followers accountType professionalType")
+      .populate("likes", "_id")
+      .populate("comments.author", "name userName profileImage isVerified")
+      .populate("comments.replies.author", "name userName profileImage isVerified")
+      .populate("taggedUsers.user", "userName profileImage");
+
+    if (!post) {
+      return res.status(404).json({ success: false, error: true, message: "Post not found" });
+    }
+
+    return res.status(200).json({ success: true, error: false, post });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: true, message: `getPostById error: ${error.message}` });
+  }
+};
+
+// Get Tagged Posts & Reels for a User
+export const getTaggedPosts = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const [posts, reels] = await Promise.all([
+      Post.find({ "taggedUsers.user": userId, isArchived: { $ne: true } })
+        .sort({ createdAt: -1 })
+        .populate("author", "name userName profileImage isVerified"),
+      Reel.find({ taggedUsers: userId })
+        .sort({ createdAt: -1 })
+        .populate("author", "name userName profileImage isVerified"),
+    ]);
+
+    const formattedPosts = posts.map((p) => ({ ...p.toObject(), __kind: "post" }));
+    const formattedReels = reels.map((r) => ({ ...r.toObject(), __kind: "reel" }));
+    const tagged = [...formattedPosts, ...formattedReels].sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    );
+
+    return res.status(200).json({ success: true, tagged });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: `getTaggedPosts error: ${error.message}` });
+  }
+};
+

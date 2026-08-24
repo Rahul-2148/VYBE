@@ -37,7 +37,7 @@ export const ReelPreloader = ({ reels = [], currentIndex = 0 }) => {
         }
       };
     });
-  }, [items, currentIndex]);
+  }, [items, currentIndex, dataSaver]);
 
   return (
     <div className="hidden" aria-hidden="true">

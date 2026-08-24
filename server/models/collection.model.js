@@ -23,6 +23,12 @@ const collectionSchema = new mongoose.Schema(
         ref: "Post",
       },
     ],
+    reels: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Reel",
+      },
+    ],
   },
   { timestamps: true }
 );

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, TrendingUp, Eye, Users, Heart, MessageCircle, Sparkles, BarChart2, Briefcase } from "lucide-react";
 import { snackbar } from "../lib/snackbar";
@@ -10,27 +10,15 @@ export const ProfileInsightsModal = ({ isOpen, onClose, user, onAccountSwitched 
   const [insights, setInsights] = useState(null);
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState(false);
-  const [currentType, setCurrentType] = useState(user?.professionalType || "personal");
+  const [currentType, setCurrentType] = useState(() => user?.professionalType || "personal");
   const [showPersonalWarning, setShowPersonalWarning] = useState(false);
   const dispatch = useDispatch();
 
-  useEffect(() => {
-    if (user?.professionalType) {
-      setCurrentType(user.professionalType);
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (isOpen) {
-      fetchInsights();
-    }
-  }, [isOpen]);
-
-  const fetchInsights = async () => {
+  const fetchInsights = useCallback(async () => {
     try {
       setLoading(true);
       const res = await api.get("/user/insights");
-      if (res.data.success) {
+      if (res.data?.success) {
         setInsights(res.data.insights);
       }
     } catch {
@@ -38,7 +26,36 @@ export const ProfileInsightsModal = ({ isOpen, onClose, user, onAccountSwitched 
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (user?.professionalType && user.professionalType !== currentType) {
+      const timer = setTimeout(() => setCurrentType(user.professionalType), 0);
+      return () => clearTimeout(timer);
+    }
+  }, [user?.professionalType, currentType]);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (isOpen) {
+      api
+        .get("/user/insights")
+        .then((res) => {
+          if (isMounted && res.data?.success) {
+            setInsights(res.data.insights);
+          }
+        })
+        .catch(() => {
+          if (isMounted) snackbar.error("Failed to load account insights.");
+        })
+        .finally(() => {
+          if (isMounted) setLoading(false);
+        });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen]);
 
   const handleSwitchAccountType = async (type) => {
     try {

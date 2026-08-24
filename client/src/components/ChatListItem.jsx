@@ -10,20 +10,21 @@ export const ChatListItem = ({ chat, onContextMenu }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { userData } = useSelector((s) => s.user);
-  const { selectedChatUser, typingUsers } = useSelector((s) => s.message);
+  const { selectedChatUser, typingUsers, onlineUsers = [] } = useSelector((s) => s.message);
   const currentUserId = userData?.user?._id || userData?._id;
 
   if (!chat) return null;
 
   const isGroup = Boolean(chat.isGroup);
   const participant = chat.participant || chat.participants?.find((p) => (p?._id || p)?.toString() !== currentUserId?.toString());
+  const pidStr = (participant?._id || participant)?.toString();
 
   const avatar = isGroup
     ? chat.groupImage?.url || chat.avatar || null
     : participant?.profileImage?.url || dp;
 
   const title = isGroup ? chat.groupName || chat.name || "Group Chat" : participant?.userName || participant?.name || "User";
-  const isOnline = !isGroup && Boolean(participant?.isOnline);
+  const isOnline = !isGroup && (Boolean(participant?.isOnline) || (pidStr && onlineUsers.includes(pidStr)));
   const isSelected = selectedChatUser?.conversationId === chat._id;
   const unreadCount = chat.unreadCount || 0;
 
@@ -101,7 +102,7 @@ export const ChatListItem = ({ chat, onContextMenu }) => {
           : participant,
       })
     );
-    navigate(`/messages/${chat._id}`);
+    navigate(`/messages/${chat._id}`, { replace: true });
   };
 
   return (

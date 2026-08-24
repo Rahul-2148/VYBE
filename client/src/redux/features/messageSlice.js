@@ -15,6 +15,8 @@ const initialState = {
   forwardingMessage: null, // Message being forwarded
   isFloatingDockOpen: false, // Mini window drawer state
   floatingActiveConvo: null, // Active conversation inside floating mini dock
+  onlineUsers: [], // Array of user IDs currently online
+  lastSeenMap: {}, // Map of userId -> lastSeen date string
 };
 
 const messageSlice = createSlice({
@@ -163,7 +165,10 @@ const messageSlice = createSlice({
 
     updateMessage(state, action) {
       const updated = action.payload;
-      const idx = state.messages.findIndex((m) => m._id === updated._id);
+      if (!updated?._id) return;
+      const idx = state.messages.findIndex(
+        (m) => (m._id?.toString() || m.tempId) === updated._id.toString()
+      );
       if (idx !== -1) {
         state.messages[idx] = { ...state.messages[idx], ...updated };
       }
@@ -171,9 +176,15 @@ const messageSlice = createSlice({
 
     updateMessageReactionInRedux(state, action) {
       const { messageId, reactions } = action.payload;
-      const msg = state.messages.find((m) => m._id === messageId);
-      if (msg) {
-        msg.reactions = reactions;
+      if (!messageId) return;
+      const idx = state.messages.findIndex(
+        (m) => m._id?.toString() === messageId.toString()
+      );
+      if (idx !== -1) {
+        state.messages[idx] = {
+          ...state.messages[idx],
+          reactions: reactions || [],
+        };
       }
     },
 
@@ -295,29 +306,80 @@ const messageSlice = createSlice({
       }
     },
 
+    setOnlineUsersListInRedux(state, action) {
+      const userIds = Array.isArray(action.payload)
+        ? action.payload
+        : action.payload?.onlineUsers || [];
+      const normalizedIds = [...new Set(userIds.map((id) => (id?._id || id)?.toString()).filter(Boolean))];
+
+      const prevIds = state.onlineUsers || [];
+      if (prevIds.length === normalizedIds.length && prevIds.every((id) => normalizedIds.includes(id))) {
+        return;
+      }
+
+      state.onlineUsers = normalizedIds;
+
+      // Sync online status across all conversations in inbox
+      state.conversations.forEach((conv) => {
+        if (conv.participant) {
+          const pid = (conv.participant._id || conv.participant)?.toString();
+          if (pid) {
+            conv.participant.isOnline = normalizedIds.includes(pid);
+          }
+        }
+        if (conv.participants) {
+          conv.participants.forEach((p) => {
+            const pid = (p._id || p)?.toString();
+            if (pid) {
+              p.isOnline = normalizedIds.includes(pid);
+            }
+          });
+        }
+      });
+
+      // Sync active selectedChatUser
+      if (state.selectedChatUser.user) {
+        const activeId = (state.selectedChatUser.user._id || state.selectedChatUser.user)?.toString();
+        if (activeId) {
+          state.selectedChatUser.user.isOnline = normalizedIds.includes(activeId);
+        }
+      }
+    },
+
     updateUserPresenceInRedux(state, action) {
       const { userId, isOnline, lastSeen } = action.payload;
       if (!userId) return;
 
-      const userIdStr = userId.toString();
+      const userIdStr = (userId?._id || userId)?.toString();
+
+      if (isOnline) {
+        if (!state.onlineUsers.includes(userIdStr)) {
+          state.onlineUsers.push(userIdStr);
+        }
+      } else {
+        state.onlineUsers = state.onlineUsers.filter((id) => id !== userIdStr);
+        if (lastSeen) {
+          state.lastSeenMap[userIdStr] = lastSeen;
+        }
+      }
 
       // Update selectedChatUser if matching
-      if (state.selectedChatUser.user?._id?.toString() === userIdStr) {
+      if (state.selectedChatUser.user && (state.selectedChatUser.user._id || state.selectedChatUser.user)?.toString() === userIdStr) {
         state.selectedChatUser.user.isOnline = isOnline;
-        state.selectedChatUser.user.lastSeen = lastSeen;
+        if (lastSeen) state.selectedChatUser.user.lastSeen = lastSeen;
       }
       // Update inside conversations list
       state.conversations.forEach((conv) => {
         const participant = conv.participant;
         if (participant && (participant._id || participant)?.toString() === userIdStr) {
           participant.isOnline = isOnline;
-          participant.lastSeen = lastSeen;
+          if (lastSeen) participant.lastSeen = lastSeen;
         }
         if (conv.participants) {
           conv.participants.forEach((p) => {
             if ((p._id || p)?.toString() === userIdStr) {
               p.isOnline = isOnline;
-              p.lastSeen = lastSeen;
+              if (lastSeen) p.lastSeen = lastSeen;
             }
           });
         }
@@ -405,6 +467,7 @@ export const {
   toggleMuteInRedux,
   togglePinInRedux,
   toggleArchiveInRedux,
+  setOnlineUsersListInRedux,
   updateUserPresenceInRedux,
   setTypingUsersInRedux,
   setChatInfoOpen,

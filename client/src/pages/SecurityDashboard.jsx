@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from "react";
-// framer-motion not used directly in this file
+// client/src/pages/SecurityDashboard.jsx
+import React, { useEffect, useState, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   ShieldCheck,
   ShieldAlert,
@@ -25,28 +26,32 @@ import {
   ChevronDown,
   ChevronUp,
   UserCheck,
-  EyeOff as HideIcon,
   Check,
   X,
   Sliders,
-  Smartphone as DeviceIcon,
   ToggleLeft,
   ToggleRight,
+  Users,
+  UserPlus,
 } from "lucide-react";
-import { snackbar } from "../lib/snackbar";
+import { useSelector, useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
+import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import TwoFactorModal from "../components/TwoFactorModal";
+import AccountSwitcherModal from "../components/AccountSwitcherModal";
+import { setUserData } from "../redux/features/userSlice";
+import { getLinkedAccounts } from "../lib/accountManager";
 import moment from "moment";
 
 // Security Score Calculator
 const calculateSecurityScore = (user, sessions) => {
-  let score = 30; // Base score for having an account
+  let score = 30; // Base score
   if (user?.twoFactorEnabled) score += 35;
   if (user?.email) score += 10;
-  if (sessions?.length <= 3) score += 10;
-  if (user?.profileImage) score += 5;
-  score += 10; // password exists
+  if (sessions && sessions.length > 0 && sessions.length <= 3) score += 10;
+  if (user?.profileImage?.url) score += 5;
+  score += 10; // Active password
   return Math.min(score, 100);
 };
 
@@ -58,11 +63,20 @@ const getScoreColor = (score) => {
 
 export const SecurityDashboard = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState(null);
+  const dispatch = useDispatch();
+  const { userData } = useSelector((state) => state.user);
+  const currentReduxUser = userData?.user || userData;
+
+  const [user, setUser] = useState(currentReduxUser || null);
   const [sessions, setSessions] = useState([]);
   const [securityLogs, setSecurityLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!currentReduxUser);
   const [refreshing, setRefreshing] = useState(false);
+  const [spinAngle, setSpinAngle] = useState(0);
+
+  // Accounts Center state
+  const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
+  const [linkedAccounts, setLinkedAccounts] = useState([]);
 
   // 2FA Modal states
   const [is2FaModalOpen, setIs2FaModalOpen] = useState(false);
@@ -85,8 +99,9 @@ export const SecurityDashboard = () => {
 
   // VYBE Privacy & DM Controls
   const [savedLoginInfo, setSavedLoginInfo] = useState(true);
-  const [isPrivateAccount, setIsPrivateAccount] = useState(false);
-  const [hideLikes, setHideLikes] = useState(false);
+  const [isPrivateAccount, setIsPrivateAccount] = useState(
+    currentReduxUser?.accountType === "private" || false
+  );
   const [privacySettings, setPrivacySettings] = useState({
     allowMessagesFrom: "everyone",
     allowStoryRepliesFrom: "everyone",
@@ -96,6 +111,7 @@ export const SecurityDashboard = () => {
 
   // Collapsible sections
   const [expandedSections, setExpandedSections] = useState({
+    accounts: true,
     checkup: true,
     passAndSec: true,
     sessions: true,
@@ -107,7 +123,8 @@ export const SecurityDashboard = () => {
     setExpandedSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const fetchData = async (isManual = false) => {
+  const fetchData = useCallback(async (isManual = false) => {
+    const startTime = Date.now();
     try {
       setRefreshing(true);
       const [userRes, sessionsRes, logsRes, privacyRes] = await Promise.all([
@@ -119,33 +136,85 @@ export const SecurityDashboard = () => {
 
       if (userRes?.data?.user) {
         setUser(userRes.data.user);
-        setIsPrivateAccount(userRes.data.user.accountType === "private" || false);
-        setHideLikes(userRes.data.user.hideLikes || false);
+        dispatch(setUserData(userRes.data.user));
+        setIsPrivateAccount(userRes.data.user.accountType === "private");
       }
       if (privacyRes?.data?.privacySettings) {
         setPrivacySettings(privacyRes.data.privacySettings);
       }
-      if (sessionsRes?.data?.sessions) setSessions(sessionsRes.data.sessions);
-      if (logsRes?.data?.logs) setSecurityLogs(logsRes.data.logs);
+      if (sessionsRes?.data?.sessions) {
+        setSessions(sessionsRes.data.sessions);
+      }
+      if (logsRes?.data?.logs) {
+        setSecurityLogs(logsRes.data.logs);
+      }
 
+      setLinkedAccounts(getLinkedAccounts());
+
+      // On manual click, hold spin animation for at least 700ms so rotation is clearly visible and satisfying
       if (isManual) {
-        snackbar.success("Security status refreshed! 🛡️");
+        const elapsed = Date.now() - startTime;
+        if (elapsed < 700) {
+          await new Promise((resolve) => setTimeout(resolve, 700 - elapsed));
+        }
+        snackbar.success("Security & Accounts status refreshed! 🛡️");
       }
     } catch (err) {
       console.warn("Failed to load security center data:", err);
-      snackbar.error("Failed to load security center data.");
+      if (isManual) snackbar.error("Failed to refresh security status");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [dispatch]);
+
+  useEffect(() => {
+    let isMounted = true;
+    Promise.all([
+      api.get("/user/current-user").catch(() => null),
+      api.get("/auth/sessions").catch(() => null),
+      api.get("/auth/security-logs").catch(() => null),
+      api.get("/user/privacy-settings").catch(() => null),
+    ])
+      .then(([userRes, sessionsRes, logsRes, privacyRes]) => {
+        if (!isMounted) return;
+        if (userRes?.data?.user) {
+          setUser(userRes.data.user);
+          dispatch(setUserData(userRes.data.user));
+          setIsPrivateAccount(userRes.data.user.accountType === "private");
+        }
+        if (privacyRes?.data?.privacySettings) {
+          setPrivacySettings(privacyRes.data.privacySettings);
+        }
+        if (sessionsRes?.data?.sessions) {
+          setSessions(sessionsRes.data.sessions);
+        }
+        if (logsRes?.data?.logs) {
+          setSecurityLogs(logsRes.data.logs);
+        }
+        setLinkedAccounts(getLinkedAccounts());
+      })
+      .catch((err) => {
+        if (isMounted) console.warn("Failed to load security center data:", err);
+      })
+      .finally(() => {
+        if (isMounted) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [dispatch]);
 
   const handleUpdatePrivacySetting = async (key, value) => {
     const updated = { ...privacySettings, [key]: value };
     setPrivacySettings(updated);
     try {
       const res = await api.patch("/user/privacy-settings", { [key]: value });
-      if (res.data.success) {
+      if (res.data?.success) {
         snackbar.success("Privacy setting updated! ✨");
       }
     } catch {
@@ -153,21 +222,30 @@ export const SecurityDashboard = () => {
     }
   };
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      await fetchData();
-      if (!active) return;
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
+  const handleTogglePrivateAccount = async () => {
+    const nextVal = !isPrivateAccount;
+    const newType = nextVal ? "private" : "public";
+    setIsPrivateAccount(nextVal);
+    try {
+      const res = await api.patch("/user/privacy-settings", { accountType: newType });
+      if (res.data?.success) {
+        snackbar.success(`Account set to ${newType}!`);
+        if (user) {
+          const updatedUser = { ...user, accountType: newType };
+          setUser(updatedUser);
+          dispatch(setUserData(updatedUser));
+        }
+      }
+    } catch {
+      setIsPrivateAccount(!nextVal);
+      snackbar.error("Failed to update account privacy");
+    }
+  };
 
   const handleStart2FaSetup = async () => {
     try {
       const res = await api.post("/auth/2fa/setup");
-      if (res.data.success) {
+      if (res.data?.success) {
         setTwoFaSetupData(res.data);
         setIs2FaModalOpen(true);
       }
@@ -192,7 +270,7 @@ export const SecurityDashboard = () => {
         code: disableCode,
       });
 
-      if (res.data.success) {
+      if (res.data?.success) {
         snackbar.success("2FA Disabled Successfully");
         setShowDisableModal(false);
         setDisablePassword("");
@@ -222,7 +300,7 @@ export const SecurityDashboard = () => {
         newPassword,
       });
 
-      if (res.data.success) {
+      if (res.data?.success) {
         snackbar.success("Password updated successfully! ✨");
         setShowChangePasswordModal(false);
         setCurrentPassword("");
@@ -240,9 +318,12 @@ export const SecurityDashboard = () => {
   const handleRevokeSession = async (sessionId) => {
     try {
       const res = await api.delete(`/auth/sessions/${sessionId}`);
-      if (res.data.success) {
+      if (res.data?.success) {
         snackbar.success("Remote device logged out successfully.");
-        setSessions(sessions.filter((s) => s.id !== sessionId));
+        setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+        api.get("/auth/security-logs").then((resLogs) => {
+          if (resLogs.data?.logs) setSecurityLogs(resLogs.data.logs);
+        }).catch(() => {});
       }
     } catch (err) {
       snackbar.error(err.response?.data?.message || "Failed to revoke session.");
@@ -252,24 +333,13 @@ export const SecurityDashboard = () => {
   const handleRevokeAllOthers = async () => {
     try {
       const res = await api.delete("/auth/sessions/revoke-others");
-      if (res.data.success) {
+      if (res.data?.success) {
         snackbar.success("Logged out from all other devices! 🔒");
+        setSessions((prev) => prev.filter((s) => s.isCurrentSession));
         fetchData();
       }
     } catch (err) {
       snackbar.error(err.response?.data?.message || "Failed to revoke all sessions.");
-    }
-  };
-
-  const handleTogglePrivateAccount = async () => {
-    try {
-      const nextVal = !isPrivateAccount;
-      setIsPrivateAccount(nextVal);
-      await api.post("/user/edit-profile", { isPrivate: nextVal });
-      snackbar.success(nextVal ? "Account set to Private" : "Account set to Public");
-    } catch {
-      setIsPrivateAccount(!isPrivateAccount);
-      snackbar.error("Failed to update privacy setting");
     }
   };
 
@@ -301,12 +371,12 @@ export const SecurityDashboard = () => {
     return <CheckCircle2 className="w-4 h-4" />;
   };
 
-  if (loading) {
+  if (loading && !user) {
     return (
-      <div className="min-h-screen bg-bg text-text flex items-center justify-center p-6">
+      <div className="min-h-screen bg-bg text-text flex items-center justify-center p-6 select-none">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-3 border-input-border border-t-white rounded-full animate-spin" />
-          <p className="text-sm text-text-secondary">Loading Accounts & Security Center...</p>
+          <div className="w-10 h-10 border-3 border-accent border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs text-text-secondary">Loading Accounts Center & Security...</p>
         </div>
       </div>
     );
@@ -316,14 +386,14 @@ export const SecurityDashboard = () => {
   const scoreConfig = getScoreColor(securityScore);
 
   return (
-    <div className="min-h-screen bg-bg text-text pb-12">
-      {/* Sticky Top Header with Back Navigation */}
+    <div className="min-h-screen bg-bg text-text pb-12 select-none">
+      {/* Sticky Top Header */}
       <div className="sticky top-0 z-40 bg-bg/90 backdrop-blur-xl border-b border-border/80">
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
               onClick={() => navigate(-1)}
-              className="p-2 rounded-full hover:bg-surface-hover transition cursor-pointer"
+              className="p-2 rounded-full hover:bg-surface transition cursor-pointer"
               title="Go back"
             >
               <ArrowLeft className="w-5 h-5 text-text" />
@@ -331,73 +401,106 @@ export const SecurityDashboard = () => {
             <h1 className="text-base font-bold tracking-tight">Accounts Center & Security</h1>
           </div>
 
-          <button
-            onClick={() => fetchData(true)}
+          <motion.button
+            whileTap={{ scale: 0.85 }}
+            onClick={() => {
+              setSpinAngle((prev) => prev + 360);
+              fetchData(true);
+            }}
             disabled={refreshing}
-            className="p-2 rounded-full hover:bg-surface-hover transition cursor-pointer"
+            className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-surface transition cursor-pointer text-text-secondary hover:text-text shrink-0"
             title="Refresh Security Status"
           >
-            <RefreshCw className={`w-4.5 h-4.5 text-text-secondary ${refreshing ? "animate-spin" : ""}`} />
-          </button>
+            <motion.div
+              animate={{ rotate: spinAngle }}
+              transition={{ duration: 0.8, ease: [0.34, 1.4, 0.64, 1] }}
+              className="flex items-center justify-center"
+            >
+              <RefreshCw className="w-4 h-4 text-text-secondary hover:text-primary transition-colors" />
+            </motion.div>
+          </motion.button>
         </div>
       </div>
 
       <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
         {/* VYBE Accounts Center Banner */}
-        <div className="p-4 bg-surface/40 border border-border/60 rounded-2xl flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-500 via-purple-600 to-amber-500 flex items-center justify-center shrink-0 shadow-lg">
-            <ShieldCheck className="w-6 h-6 text-text" />
+        <div className="p-4 bg-surface/60 border border-border rounded-2xl flex items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-rose-500 via-purple-600 to-indigo-500 flex items-center justify-center shrink-0 shadow-lg">
+              <ShieldCheck className="w-6 h-6 text-white" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-black text-text">VYBE Accounts Center</p>
+              <p className="text-[11px] text-text-secondary truncate">
+                Logged in as <span className="text-text font-bold">@{user?.userName || "user"}</span> · {linkedAccounts.length} Linked Account{linkedAccounts.length !== 1 ? "s" : ""}
+              </p>
+            </div>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-bold text-text">VYBE Accounts Center</p>
-            <p className="text-[11px] text-text-secondary truncate">Manage connected experiences, password, 2FA & account security.</p>
-          </div>
+
+          <button
+            onClick={() => setShowAccountSwitcher(true)}
+            className="px-3.5 py-1.5 rounded-xl bg-surface-hover hover:bg-surface-active text-text text-xs font-bold transition flex items-center gap-1.5 cursor-pointer border border-border shrink-0"
+          >
+            <Users className="w-3.5 h-3.5 text-primary" />
+            <span>Switch Account</span>
+          </button>
         </div>
 
         {/* Security Health Score Card */}
-        <div className={`relative overflow-hidden rounded-2xl bg-gradient-to-br ${scoreConfig.bg} p-6 shadow-2xl`}>
-          <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
-          <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
+        <div className={`relative overflow-hidden rounded-3xl bg-gradient-to-br ${scoreConfig.bg} p-6 shadow-2xl text-white`}>
+          <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-lg" />
+          <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/10 rounded-full translate-y-1/2 -translate-x-1/2 blur-lg" />
 
           <div className="relative flex items-center justify-between">
             <div className="space-y-1.5">
-              <p className="text-xs font-semibold uppercase tracking-wider text-white/70">Security Health Index</p>
-              <h2 className="text-3xl font-black text-text">{securityScore}%</h2>
-              <p className="text-sm font-medium text-white/90">{scoreConfig.label} Account Protection</p>
+              <p className="text-[10px] font-black uppercase tracking-wider text-white/80">Security Health Index</p>
+              <h2 className="text-3xl font-black text-white">{securityScore}%</h2>
+              <p className="text-xs font-bold text-white/90">{scoreConfig.label} Account Protection</p>
 
-              <button
-                onClick={() => fetchData(true)}
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => {
+                  setSpinAngle((prev) => prev + 360);
+                  fetchData(true);
+                }}
                 disabled={refreshing}
-                className="mt-2 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer backdrop-blur border border-white/20"
+                className="mt-2.5 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold transition-colors cursor-pointer backdrop-blur-md border border-white/20 shrink-0 select-none disabled:opacity-80 shadow-xs"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+                <motion.div
+                  animate={{ rotate: spinAngle }}
+                  transition={{ duration: 0.8, ease: [0.34, 1.4, 0.64, 1] }}
+                  className="flex items-center justify-center shrink-0"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+                </motion.div>
                 <span>Refresh Security Status</span>
-              </button>
+              </motion.button>
             </div>
 
-            <div className="w-20 h-20 rounded-full border-4 border-white/30 flex items-center justify-center shadow-inner">
+            <div className="w-20 h-20 rounded-2xl bg-white/10 border border-white/30 backdrop-blur-md flex items-center justify-center shadow-inner">
               {securityScore >= 80 ? (
-                <ShieldCheck className="w-10 h-10 text-text" />
+                <ShieldCheck className="w-10 h-10 text-white" />
               ) : (
-                <ShieldAlert className="w-10 h-10 text-text" />
+                <ShieldAlert className="w-10 h-10 text-white" />
               )}
             </div>
           </div>
         </div>
 
         {/* SECTION 1: VYBE Security Checkup Checklist */}
-        <div className="rounded-2xl bg-surface/60 border border-border/60 overflow-hidden">
+        <div className="rounded-2xl bg-surface border border-border overflow-hidden shadow-xs">
           <button
             onClick={() => toggleSection("checkup")}
-            className="w-full flex items-center justify-between p-4 cursor-pointer"
+            className="w-full flex items-center justify-between p-4 cursor-pointer hover:bg-surface-hover/30 transition"
           >
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-rose-500/10">
-                <CheckCircle2 className="w-5 h-5 text-rose-400" />
+              <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-400">
+                <CheckCircle2 className="w-5 h-5" />
               </div>
               <div className="text-left">
-                <h3 className="text-sm font-bold">Security Checkup</h3>
-                <p className="text-[10px] text-text-muted">4 essential account security verification steps</p>
+                <h3 className="text-xs font-bold text-text">Security Checkup</h3>
+                <p className="text-[10px] text-text-muted">Essential account security verification steps</p>
               </div>
             </div>
             {expandedSections.checkup ? <ChevronUp className="w-4 h-4 text-text-muted" /> : <ChevronDown className="w-4 h-4 text-text-muted" />}
@@ -413,19 +516,19 @@ export const SecurityDashboard = () => {
               >
                 <div className="px-4 pb-4 space-y-2">
                   {/* 1. Password */}
-                  <div className="flex items-center justify-between p-3 bg-surface-inset/60 border border-border/40 rounded-xl">
+                  <div className="flex items-center justify-between p-3 bg-surface-inset border border-border/80 rounded-xl">
                     <div className="flex items-center gap-3">
                       <Key className="w-4 h-4 text-emerald-400" />
                       <div>
                         <p className="text-xs font-semibold text-text">Password</p>
-                        <p className="text-[10px] text-text-muted">Strong encrypted password active</p>
+                        <p className="text-[10px] text-text-muted">Encrypted password active</p>
                       </div>
                     </div>
-                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">Secure</span>
+                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">Secure</span>
                   </div>
 
                   {/* 2. Email */}
-                  <div className="flex items-center justify-between p-3 bg-surface-inset/60 border border-border/40 rounded-xl">
+                  <div className="flex items-center justify-between p-3 bg-surface-inset border border-border/80 rounded-xl">
                     <div className="flex items-center gap-3">
                       <Mail className="w-4 h-4 text-cyan-400" />
                       <div>
@@ -433,11 +536,11 @@ export const SecurityDashboard = () => {
                         <p className="text-[10px] text-text-muted">{user?.email || "Email configured"}</p>
                       </div>
                     </div>
-                    <span className="text-[10px] font-bold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">Verified</span>
+                    <span className="text-[10px] font-bold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-lg border border-cyan-500/20">Verified</span>
                   </div>
 
                   {/* 3. 2FA */}
-                  <div className="flex items-center justify-between p-3 bg-surface-inset/60 border border-border/40 rounded-xl">
+                  <div className="flex items-center justify-between p-3 bg-surface-inset border border-border/80 rounded-xl">
                     <div className="flex items-center gap-3">
                       <Fingerprint className={`w-4 h-4 ${user?.twoFactorEnabled ? "text-emerald-400" : "text-amber-400"}`} />
                       <div>
@@ -446,22 +549,22 @@ export const SecurityDashboard = () => {
                       </div>
                     </div>
                     {user?.twoFactorEnabled ? (
-                      <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">Active</span>
+                      <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">Active</span>
                     ) : (
                       <button onClick={handleStart2FaSetup} className="text-[10px] font-bold text-rose-400 hover:underline cursor-pointer">Turn On</button>
                     )}
                   </div>
 
                   {/* 4. Login Activity */}
-                  <div className="flex items-center justify-between p-3 bg-surface-inset/60 border border-border/40 rounded-xl">
+                  <div className="flex items-center justify-between p-3 bg-surface-inset border border-border/80 rounded-xl">
                     <div className="flex items-center gap-3">
                       <Smartphone className="w-4 h-4 text-purple-400" />
                       <div>
-                        <p className="text-xs font-semibold text-text">Login Activity</p>
-                        <p className="text-[10px] text-text-muted">{sessions.length} active device session{sessions.length !== 1 ? "s" : ""}</p>
+                        <p className="text-xs font-semibold text-text">Active Devices</p>
+                        <p className="text-[10px] text-text-muted">{sessions.length} monitored session{sessions.length !== 1 ? "s" : ""}</p>
                       </div>
                     </div>
-                    <span className="text-[10px] font-bold text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">Monitored</span>
+                    <span className="text-[10px] font-bold text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-lg border border-purple-500/20">Protected</span>
                   </div>
                 </div>
               </motion.div>
@@ -470,17 +573,17 @@ export const SecurityDashboard = () => {
         </div>
 
         {/* SECTION 2: Password & Security Actions */}
-        <div className="rounded-2xl bg-surface/60 border border-border/60 overflow-hidden">
+        <div className="rounded-2xl bg-surface border border-border overflow-hidden shadow-xs">
           <button
             onClick={() => toggleSection("passAndSec")}
-            className="w-full flex items-center justify-between p-4 cursor-pointer"
+            className="w-full flex items-center justify-between p-4 cursor-pointer hover:bg-surface-hover/30 transition"
           >
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-purple-500/10">
-                <Lock className="w-5 h-5 text-purple-400" />
+              <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-400">
+                <Lock className="w-5 h-5" />
               </div>
               <div className="text-left">
-                <h3 className="text-sm font-bold">Password & Security</h3>
+                <h3 className="text-xs font-bold text-text">Password & Authentication</h3>
                 <p className="text-[10px] text-text-muted">Change password, 2FA & saved login credentials</p>
               </div>
             </div>
@@ -499,7 +602,7 @@ export const SecurityDashboard = () => {
                   {/* Change Password Option */}
                   <button
                     onClick={() => setShowChangePasswordModal(true)}
-                    className="w-full flex items-center justify-between p-3.5 bg-surface-inset/60 border border-border/40 rounded-xl hover:bg-surface-hover/50 transition cursor-pointer"
+                    className="w-full flex items-center justify-between p-3.5 bg-surface-inset border border-border/80 rounded-xl hover:bg-surface-hover/50 transition cursor-pointer"
                   >
                     <div className="flex items-center gap-3">
                       <Key className="w-4.5 h-4.5 text-rose-400" />
@@ -512,7 +615,7 @@ export const SecurityDashboard = () => {
                   </button>
 
                   {/* 2FA Option */}
-                  <div className="p-3.5 bg-surface-inset/60 border border-border/40 rounded-xl space-y-2">
+                  <div className="p-3.5 bg-surface-inset border border-border/80 rounded-xl space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <Fingerprint className="w-4.5 h-4.5 text-emerald-400" />
@@ -521,7 +624,7 @@ export const SecurityDashboard = () => {
                           <p className="text-[10px] text-text-muted">{user?.twoFactorEnabled ? "Authenticator app verification enabled" : "Add an extra layer of protection"}</p>
                         </div>
                       </div>
-                      <span className={`px-2.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                      <span className={`px-2.5 py-0.5 rounded-lg text-[9px] font-bold uppercase ${
                         user?.twoFactorEnabled ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-surface-hover text-text-secondary"
                       }`}>
                         {user?.twoFactorEnabled ? "On" : "Off"}
@@ -530,14 +633,14 @@ export const SecurityDashboard = () => {
                     {user?.twoFactorEnabled ? (
                       <button
                         onClick={() => setShowDisableModal(true)}
-                        className="w-full py-2 bg-surface hover:bg-surface-hover text-rose-400 border border-border rounded-lg text-xs font-semibold transition cursor-pointer"
+                        className="w-full py-2 bg-surface hover:bg-surface-hover text-rose-400 border border-border rounded-xl text-xs font-semibold transition cursor-pointer"
                       >
                         Turn Off 2FA
                       </button>
                     ) : (
                       <button
                         onClick={handleStart2FaSetup}
-                        className="w-full py-2 bg-gradient-to-r from-rose-500 to-pink-600 text-text rounded-lg text-xs font-bold shadow transition cursor-pointer"
+                        className="w-full py-2 bg-gradient-to-r from-rose-500 to-pink-600 text-white rounded-xl text-xs font-bold shadow transition cursor-pointer"
                       >
                         Turn On 2FA
                       </button>
@@ -545,12 +648,12 @@ export const SecurityDashboard = () => {
                   </div>
 
                   {/* Saved Login Info */}
-                  <div className="flex items-center justify-between p-3.5 bg-surface-inset/60 border border-border/40 rounded-xl">
+                  <div className="flex items-center justify-between p-3.5 bg-surface-inset border border-border/80 rounded-xl">
                     <div className="flex items-center gap-3">
                       <Smartphone className="w-4.5 h-4.5 text-blue-400" />
                       <div className="text-left">
                         <p className="text-xs font-bold text-text">Saved Login Info</p>
-                        <p className="text-[10px] text-text-muted">Remember login credentials on this device</p>
+                        <p className="text-[10px] text-text-muted">Remember login credentials on this browser</p>
                       </div>
                     </div>
                     <button
@@ -574,18 +677,18 @@ export const SecurityDashboard = () => {
         </div>
 
         {/* SECTION 3: Account Privacy & Controls */}
-        <div className="rounded-2xl bg-surface/60 border border-border/60 overflow-hidden">
+        <div className="rounded-2xl bg-surface border border-border overflow-hidden shadow-xs">
           <button
             onClick={() => toggleSection("privacy")}
-            className="w-full flex items-center justify-between p-4 cursor-pointer"
+            className="w-full flex items-center justify-between p-4 cursor-pointer hover:bg-surface-hover/30 transition"
           >
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-amber-500/10">
-                <Sliders className="w-5 h-5 text-amber-400" />
+              <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400">
+                <Sliders className="w-5 h-5" />
               </div>
               <div className="text-left">
-                <h3 className="text-sm font-bold">Account Privacy & Controls</h3>
-                <p className="text-[10px] text-text-muted">Private account, likes visibility & interactions</p>
+                <h3 className="text-xs font-bold text-text">Account Privacy & DM Controls</h3>
+                <p className="text-[10px] text-text-muted">Private account, interactions & story replies</p>
               </div>
             </div>
             {expandedSections.privacy ? <ChevronUp className="w-4 h-4 text-text-muted" /> : <ChevronDown className="w-4 h-4 text-text-muted" />}
@@ -601,7 +704,7 @@ export const SecurityDashboard = () => {
               >
                 <div className="px-4 pb-4 space-y-3">
                   {/* Private Account Toggle */}
-                  <div className="flex items-center justify-between p-3.5 bg-surface-inset/60 border border-border/40 rounded-xl">
+                  <div className="flex items-center justify-between p-3.5 bg-surface-inset border border-border/80 rounded-xl">
                     <div className="flex items-center gap-3">
                       <UserCheck className="w-4.5 h-4.5 text-amber-400" />
                       <div className="text-left">
@@ -610,16 +713,7 @@ export const SecurityDashboard = () => {
                       </div>
                     </div>
                     <button
-                      onClick={async () => {
-                        const newType = isPrivateAccount ? "public" : "private";
-                        setIsPrivateAccount(!isPrivateAccount);
-                        try {
-                          await api.patch("/user/privacy-settings", { accountType: newType });
-                          snackbar.success(`Account set to ${newType}!`);
-                        } catch {
-                          snackbar.error("Failed to update account type.");
-                        }
-                      }}
+                      onClick={handleTogglePrivateAccount}
                       className="cursor-pointer"
                     >
                       {isPrivateAccount ? (
@@ -630,21 +724,21 @@ export const SecurityDashboard = () => {
                     </button>
                   </div>
 
-                  {/* Who can send you Direct Messages */}
-                  <div className="p-3.5 bg-surface-inset/60 border border-border/40 rounded-xl space-y-2">
+                  {/* Direct Messages Permission */}
+                  <div className="p-3.5 bg-surface-inset border border-border/80 rounded-xl space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <Send className="w-4.5 h-4.5 text-blue-400" />
                         <div className="text-left">
                           <p className="text-xs font-bold text-text">Who Can Send You Direct Messages</p>
-                          <p className="text-[10px] text-text-muted">Choose who can send message requests or direct messages</p>
+                          <p className="text-[10px] text-text-muted">Control incoming message requests</p>
                         </div>
                       </div>
                     </div>
                     <select
                       value={privacySettings.allowMessagesFrom || "everyone"}
                       onChange={(e) => handleUpdatePrivacySetting("allowMessagesFrom", e.target.value)}
-                      className="w-full bg-surface border border-border rounded-xl px-3 py-2 text-xs text-text outline-none focus:border-blue-500"
+                      className="w-full bg-surface border border-border rounded-xl px-3 py-2 text-xs text-text outline-none focus:border-blue-500 cursor-pointer"
                     >
                       <option value="everyone">Everyone</option>
                       <option value="followers">Your Followers Only</option>
@@ -653,8 +747,8 @@ export const SecurityDashboard = () => {
                     </select>
                   </div>
 
-                  {/* Who can reply to your Stories */}
-                  <div className="p-3.5 bg-surface-inset/60 border border-border/40 rounded-xl space-y-2">
+                  {/* Story Replies */}
+                  <div className="p-3.5 bg-surface-inset border border-border/80 rounded-xl space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <Smartphone className="w-4.5 h-4.5 text-purple-400" />
@@ -667,7 +761,7 @@ export const SecurityDashboard = () => {
                     <select
                       value={privacySettings.allowStoryRepliesFrom || "everyone"}
                       onChange={(e) => handleUpdatePrivacySetting("allowStoryRepliesFrom", e.target.value)}
-                      className="w-full bg-surface border border-border rounded-xl px-3 py-2 text-xs text-text outline-none focus:border-purple-500"
+                      className="w-full bg-surface border border-border rounded-xl px-3 py-2 text-xs text-text outline-none focus:border-purple-500 cursor-pointer"
                     >
                       <option value="everyone">Everyone</option>
                       <option value="following">People You Follow Only</option>
@@ -676,7 +770,7 @@ export const SecurityDashboard = () => {
                   </div>
 
                   {/* Post & Reel Sharing to DM */}
-                  <div className="p-3.5 bg-surface-inset/60 border border-border/40 rounded-xl space-y-2">
+                  <div className="p-3.5 bg-surface-inset border border-border/80 rounded-xl space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <Sliders className="w-4.5 h-4.5 text-emerald-400" />
@@ -689,7 +783,7 @@ export const SecurityDashboard = () => {
                     <select
                       value={privacySettings.allowPostSharingToDM || "everyone"}
                       onChange={(e) => handleUpdatePrivacySetting("allowPostSharingToDM", e.target.value)}
-                      className="w-full bg-surface border border-border rounded-xl px-3 py-2 text-xs text-text outline-none focus:border-emerald-500"
+                      className="w-full bg-surface border border-border rounded-xl px-3 py-2 text-xs text-text outline-none focus:border-emerald-500 cursor-pointer"
                     >
                       <option value="everyone">Everyone</option>
                       <option value="followers">Your Followers Only</option>
@@ -704,17 +798,17 @@ export const SecurityDashboard = () => {
         </div>
 
         {/* SECTION 4: Where You're Logged In (Active Sessions) */}
-        <div className="rounded-2xl bg-surface/60 border border-border/60 overflow-hidden">
+        <div className="rounded-2xl bg-surface border border-border overflow-hidden shadow-xs">
           <button
             onClick={() => toggleSection("sessions")}
-            className="w-full flex items-center justify-between p-4 cursor-pointer"
+            className="w-full flex items-center justify-between p-4 cursor-pointer hover:bg-surface-hover/30 transition"
           >
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-cyan-500/10">
-                <Smartphone className="w-5 h-5 text-cyan-400" />
+              <div className="p-2.5 rounded-xl bg-cyan-500/10 text-cyan-400">
+                <Smartphone className="w-5 h-5" />
               </div>
               <div className="text-left">
-                <h3 className="text-sm font-bold">Where You're Logged In</h3>
+                <h3 className="text-xs font-bold text-text">Where You're Logged In</h3>
                 <p className="text-[10px] text-text-muted">{sessions.length} active device session{sessions.length !== 1 ? "s" : ""}</p>
               </div>
             </div>
@@ -722,9 +816,9 @@ export const SecurityDashboard = () => {
               {sessions.length > 1 && (
                 <button
                   onClick={(e) => { e.stopPropagation(); handleRevokeAllOthers(); }}
-                  className="text-[10px] text-rose-400 font-bold hover:underline cursor-pointer"
+                  className="text-[10px] text-rose-400 font-bold hover:underline cursor-pointer mr-2"
                 >
-                  Log Out All Devices
+                  Log Out All Others
                 </button>
               )}
               {expandedSections.sessions ? <ChevronUp className="w-4 h-4 text-text-muted" /> : <ChevronDown className="w-4 h-4 text-text-muted" />}
@@ -739,48 +833,43 @@ export const SecurityDashboard = () => {
                 exit={{ height: 0, opacity: 0 }}
                 className="overflow-hidden"
               >
-                <div className="px-4 pb-4 divide-y divide-divider/40">
+                <div className="px-4 pb-4 space-y-2.5">
                   {sessions.map((session) => (
-                    <div key={session.id} className="py-3 flex items-center justify-between gap-3 first:pt-0 last:pb-0">
+                    <div key={session.id} className="p-3 bg-surface-inset border border-border/80 rounded-xl flex items-center justify-between gap-3">
                       <div className="flex items-start gap-3">
-                        <div className="p-2 rounded-xl bg-surface-hover/60 mt-0.5 shrink-0">
+                        <div className="p-2 rounded-xl bg-surface mt-0.5 shrink-0 border border-border">
                           {session.os?.toLowerCase().includes("android") || session.os?.toLowerCase().includes("ios") ? (
                             <Smartphone className="w-4.5 h-4.5 text-pink-400" />
                           ) : (
                             <Laptop className="w-4.5 h-4.5 text-cyan-400" />
                           )}
                         </div>
-
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-xs text-text">{session.deviceInfo}</span>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs font-bold text-text">
+                              {session.deviceInfo || "Web Browser"} ({session.os || "OS"})
+                            </p>
                             {session.isCurrentSession && (
-                              <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">
+                              <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
                                 This Device
                               </span>
                             )}
                           </div>
-
-                          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-text-muted mt-0.5">
-                            <span className="flex items-center gap-1">
-                              <Globe className="w-3 h-3" />
-                              {session.ipAddress} {session.location && `· ${session.location}`}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              {moment(session.lastActive).fromNow()}
-                            </span>
-                          </div>
+                          <p className="text-[10px] text-text-muted">
+                            {session.browser} · {session.ipAddress}
+                          </p>
+                          <p className="text-[9px] text-text-muted mt-0.5">
+                            Last active: {moment(session.lastActive).fromNow()}
+                          </p>
                         </div>
                       </div>
 
                       {!session.isCurrentSession && (
                         <button
                           onClick={() => handleRevokeSession(session.id)}
-                          className="p-2 rounded-xl text-text-muted hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer shrink-0"
-                          title="Log out device"
+                          className="px-2.5 py-1 text-[11px] font-semibold text-rose-400 hover:bg-rose-500/10 rounded-lg transition cursor-pointer"
                         >
-                          <LogOut className="w-4 h-4" />
+                          Revoke
                         </button>
                       )}
                     </div>
@@ -791,18 +880,18 @@ export const SecurityDashboard = () => {
           </AnimatePresence>
         </div>
 
-        {/* SECTION 5: Security Audit History */}
-        <div className="rounded-2xl bg-surface/60 border border-border/60 overflow-hidden">
+        {/* SECTION 5: Security & Login Audit Logs */}
+        <div className="rounded-2xl bg-surface border border-border overflow-hidden shadow-xs">
           <button
             onClick={() => toggleSection("logs")}
-            className="w-full flex items-center justify-between p-4 cursor-pointer"
+            className="w-full flex items-center justify-between p-4 cursor-pointer hover:bg-surface-hover/30 transition"
           >
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-amber-500/10">
-                <Clock className="w-5 h-5 text-amber-400" />
+              <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400">
+                <Clock className="w-5 h-5" />
               </div>
               <div className="text-left">
-                <h3 className="text-sm font-bold">Security & Login Audit Logs</h3>
+                <h3 className="text-xs font-bold text-text">Security & Login History</h3>
                 <p className="text-[10px] text-text-muted">{securityLogs.length} recent event{securityLogs.length !== 1 ? "s" : ""}</p>
               </div>
             </div>
@@ -826,7 +915,7 @@ export const SecurityDashboard = () => {
                       return (
                         <div
                           key={log._id}
-                          className="flex items-center justify-between p-3 rounded-xl bg-surface-inset/50 border border-border/40"
+                          className="flex items-center justify-between p-3 rounded-xl bg-surface-inset border border-border/80"
                         >
                           <div className="flex items-center gap-3 min-w-0">
                             <div className={`p-1.5 rounded-lg shrink-0 ${
@@ -854,13 +943,21 @@ export const SecurityDashboard = () => {
         </div>
       </div>
 
+      {/* Account Switcher Modal */}
+      {showAccountSwitcher && (
+        <AccountSwitcherModal
+          isOpen={showAccountSwitcher}
+          onClose={() => setShowAccountSwitcher(false)}
+        />
+      )}
+
       {/* CHANGE PASSWORD MODAL */}
       {showChangePasswordModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-surface-overlay backdrop-blur-md">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs select-none">
           <motion.div
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="w-full max-w-md bg-surface border border-border rounded-2xl p-6 text-text space-y-4 shadow-2xl"
+            className="w-full max-w-md bg-surface border border-border rounded-3xl p-6 text-text space-y-4 shadow-2xl"
           >
             <div className="flex items-center justify-between border-b border-border pb-3">
               <h3 className="text-base font-bold flex items-center gap-2">
@@ -941,7 +1038,7 @@ export const SecurityDashboard = () => {
                 <button
                   type="submit"
                   disabled={changingPassword}
-                  className="flex-1 py-2.5 bg-gradient-to-r from-rose-500 to-pink-600 font-bold rounded-xl text-xs shadow-lg transition active:scale-98 cursor-pointer disabled:opacity-50"
+                  className="flex-1 py-2.5 bg-gradient-to-r from-rose-500 to-pink-600 text-white font-bold rounded-xl text-xs shadow-lg transition active:scale-98 cursor-pointer disabled:opacity-50"
                 >
                   {changingPassword ? "Updating..." : "Update Password"}
                 </button>
@@ -965,11 +1062,11 @@ export const SecurityDashboard = () => {
 
       {/* Recovery Codes Display Modal */}
       {showRecoveryCodesModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-surface-overlay backdrop-blur-md">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs select-none">
           <motion.div
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="w-full max-w-md bg-surface border border-border rounded-2xl p-6 text-text space-y-5 shadow-2xl"
+            className="w-full max-w-md bg-surface border border-border rounded-3xl p-6 text-text space-y-5 shadow-2xl"
           >
             <div className="text-center">
               <Key className="w-10 h-10 text-emerald-400 mx-auto mb-2" />
@@ -979,9 +1076,9 @@ export const SecurityDashboard = () => {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 p-3 bg-surface-inset border border-border rounded-xl font-mono text-center text-xs font-bold tracking-wider text-rose-300">
+            <div className="grid grid-cols-2 gap-2 p-3 bg-surface-inset border border-border rounded-2xl font-mono text-center text-xs font-bold tracking-wider text-rose-300">
               {recoveryCodes.map((code, idx) => (
-                <div key={idx} className="p-2 bg-surface rounded-lg border border-border">
+                <div key={idx} className="p-2 bg-surface rounded-xl border border-border">
                   {code}
                 </div>
               ))}
@@ -997,7 +1094,7 @@ export const SecurityDashboard = () => {
               </button>
               <button
                 onClick={() => setShowRecoveryCodesModal(false)}
-                className="flex-1 py-3 bg-gradient-to-r from-rose-500 to-pink-600 font-semibold rounded-xl text-xs transition cursor-pointer"
+                className="flex-1 py-3 bg-gradient-to-r from-rose-500 to-pink-600 text-white font-semibold rounded-xl text-xs transition cursor-pointer"
               >
                 I've Saved Them
               </button>
@@ -1008,11 +1105,11 @@ export const SecurityDashboard = () => {
 
       {/* Disable 2FA Modal */}
       {showDisableModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-surface-overlay backdrop-blur-md">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs select-none">
           <motion.div
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="w-full max-w-md bg-surface border border-border rounded-2xl p-6 text-text space-y-5 shadow-2xl"
+            className="w-full max-w-md bg-surface border border-border rounded-3xl p-6 text-text space-y-5 shadow-2xl"
           >
             <div>
               <h3 className="text-lg font-bold">Disable 2FA</h3>
@@ -1064,7 +1161,7 @@ export const SecurityDashboard = () => {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 font-semibold rounded-xl text-xs transition cursor-pointer"
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded-xl text-xs transition cursor-pointer"
                 >
                   Confirm Disable
                 </button>

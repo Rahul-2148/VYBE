@@ -1,4 +1,4 @@
-import axios from "axios";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   Eye,
   Send,
@@ -20,9 +20,11 @@ import {
   MoreHorizontal,
   Subtitles,
   Smartphone,
+  Loader2,
+  MapPin,
 } from "lucide-react";
-import moment from "moment";
-import { useEffect, useRef, useState } from "react";
+
+import { motion, AnimatePresence } from "framer-motion";
 import { snackbar } from "../lib/snackbar";
 import { GoHeart, GoHeartFill } from "react-icons/go";
 import { IoSendSharp } from "react-icons/io5";
@@ -30,16 +32,19 @@ import { MdOutlineComment } from "react-icons/md";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { ClipLoader } from "react-spinners";
-import { SERVER_URL } from "../App";
 import dp from "../assets/dp3.png";
 import { setReelData } from "../redux/features/reelSlice";
 import { setUserData } from "../redux/features/userSlice";
 import FollowButton from "./FollowButton";
 import ShareSheet from "./ShareSheet";
 import RemixReelModal from "./RemixReelModal";
+import ReelReshareModal from "./ReelReshareModal";
 import HeartExplosion from "./HeartExplosion";
 import ReelOptionsModal from "./ReelOptionsModal";
 import AIInfoModal from "./AIInfoModal";
+import LikersModal from "./LikersModal";
+import CommentsModal from "./CommentsModal";
+import CollectionsModal from "./CollectionsModal";
 import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
 import { getOptimizedMediaUrl } from "../lib/mediaQualitySettings";
 import api from "../lib/axios";
@@ -57,65 +62,209 @@ export const ReelCard = ({
   const currentItem = reel;
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const commentRef = useRef(null);
   const { userData } = useSelector((state) => state.user);
   const reelState = useSelector((state) => state.reel);
   const reelData = reelState?.reelData || [];
 
+  const containerRef = useRef(null);
   const videoRef = useRef(null);
+  const audioRef = useRef(null);
   const viewCountedRef = useRef(false);
   const endedTriggeredRef = useRef(false);
+  const tapTimerRef = useRef(null);
+  const pressTimerRef = useRef(null);
+  const hasFastForwardedRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(() => {
     return window.__vybe_reels_muted !== undefined ? window.__vybe_reels_muted : true;
   });
-  const [progress, setProgress] = useState(0);
+  const [showVolumeAnim, setShowVolumeAnim] = useState(false);
+
+  // Attached Audio Track URL
+  const attachedAudioUrl =
+    currentItem?.audioTrack?.audioUrl ||
+    (typeof currentItem?.music === "object" ? currentItem?.music?.audioUrl || currentItem?.music?.url : null);
 
   // Options & Auto-Scroll & Captions State
   const [showOptionsModal, setShowOptionsModal] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  const [applySpeedToAll, setApplySpeedToAll] = useState(() => {
+    if (typeof localStorage !== "undefined") {
+      return localStorage.getItem("vybe_reels_speed_apply_all") === "true";
+    }
+    return false;
+  });
+  const [playbackSpeed, setPlaybackSpeed] = useState(() => {
+    if (typeof localStorage !== "undefined") {
+      const applyAll = localStorage.getItem("vybe_reels_speed_apply_all") === "true";
+      if (applyAll) {
+        const savedSpeed = parseFloat(localStorage.getItem("vybe_reels_global_speed"));
+        if (!isNaN(savedSpeed) && savedSpeed > 0) return savedSpeed;
+      }
+    }
+    return 1.0;
+  });
   const [showCaptions, setShowCaptions] = useState(() => {
-    return typeof localStorage !== "undefined"
-      ? localStorage.getItem("vybe_reel_captions") === "true"
-      : false;
+    if (typeof localStorage !== "undefined") {
+      const stored = localStorage.getItem("vybe_reel_captions");
+      return stored === "true"; // Default OFF for reels unless user explicitly enabled it
+    }
+    return false;
   });
   const [commentsDisabled, setCommentsDisabled] = useState(
     Boolean(currentItem?.commentsDisabled)
   );
+
+  // Real-Time Audio Transcript & Live Captions
+  const [liveTranscript, setLiveTranscript] = useState("");
+  const [reelCaptions, setReelCaptions] = useState(currentItem?.captions || []);
+  const [syncedSubtitle, setSyncedSubtitle] = useState({ text: "", activeIndex: -1, words: [], hasContent: false });
+  const speechRecognitionRef = useRef(null);
   
   // Heart Burst & Play/Pause Animation State
   const [showHeart, setShowHeart] = useState(false);
   const [showPlayPauseAnim, setShowPlayPauseAnim] = useState(false);
-  const [playPauseIcon, setPlayPauseIcon] = useState("play");
 
-  // Long Press 2X Speed State
+  // Long Press 2X Speed & Slide-to-Lock State
   const [isFastForwarding, setIsFastForwarding] = useState(false);
-  const longPressTimerRef = useRef(null);
+  const [is2XLocked, setIs2XLocked] = useState(false);
+  const [isNearLockZone, setIsNearLockZone] = useState(false);
+  const touchStartYRef = useRef(null);
 
   // Tap Gesture Counters (Single, Double, Triple Tap)
-  const clickTimerRef = useRef(null);
   const tapCountRef = useRef(0);
 
   // Drawers & Modals
   const [showComments, setShowComments] = useState(false);
-  const [message, setMessage] = useState("");
-  const [commentLoading, setCommentLoading] = useState(false);
+  const [showCollectionsModal, setShowCollectionsModal] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [showViewers, setShowViewers] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [showRemixModal, setShowRemixModal] = useState(false);
+  const [showReshareModal, setShowReshareModal] = useState(false);
   const [showAIInfoModal, setShowAIInfoModal] = useState(false);
+  const [showLikersModal, setShowLikersModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [scrubTime, setScrubTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isHovered, setIsHovered] = useState(false);
+  const [showCenterPlayIcon, setShowCenterPlayIcon] = useState(false);
+  const [isCaptionExpanded, setIsCaptionExpanded] = useState(false);
+  const playFadeTimeoutRef = useRef(null);
+  const seekBarRef = useRef(null);
   const viewersRef = useRef(null);
 
-  // Optimistic Like State
-  const currentUserId = userData?._id || userData?.user?._id;
-  const isInitiallyLiked = currentItem?.likes?.some((id) => (id._id || id) === currentUserId);
+  // Playback Rate Sync Effect
+  useEffect(() => {
+    const activeRate = (isFastForwarding || is2XLocked) ? 2.0 : (playbackSpeed || 1.0);
+    if (videoRef.current) {
+      videoRef.current.playbackRate = activeRate;
+    }
+    if (audioRef.current) {
+      audioRef.current.playbackRate = activeRate;
+    }
+  }, [playbackSpeed, isFastForwarding, is2XLocked]);
+
+  // Sync speed on new reel navigation
+  useEffect(() => {
+    let timer;
+    if (typeof localStorage !== "undefined") {
+      const applyAll = localStorage.getItem("vybe_reels_speed_apply_all") === "true";
+      if (applyAll) {
+        const savedSpeed = parseFloat(localStorage.getItem("vybe_reels_global_speed"));
+        if (!isNaN(savedSpeed) && savedSpeed > 0) {
+          timer = setTimeout(() => setPlaybackSpeed(savedSpeed), 0);
+          if (videoRef.current) videoRef.current.playbackRate = savedSpeed;
+          if (audioRef.current) audioRef.current.playbackRate = savedSpeed;
+          return () => clearTimeout(timer);
+        }
+      }
+    }
+    // If not applied to all reels, reset to 1.0x on every new reel
+    timer = setTimeout(() => setPlaybackSpeed(1.0), 0);
+    if (videoRef.current) videoRef.current.playbackRate = 1.0;
+    if (audioRef.current) audioRef.current.playbackRate = 1.0;
+    return () => clearTimeout(timer);
+  }, [currentItem?._id]);
+
+  const handleChangePlaybackSpeed = (newSpeed) => {
+    setPlaybackSpeed(newSpeed);
+    if (applySpeedToAll) {
+      localStorage.setItem("vybe_reels_global_speed", newSpeed.toString());
+      window.__vybe_reels_global_speed = newSpeed;
+    }
+    if (videoRef.current && !isFastForwarding && !is2XLocked) {
+      videoRef.current.playbackRate = newSpeed;
+    }
+    if (audioRef.current && !isFastForwarding && !is2XLocked) {
+      audioRef.current.playbackRate = newSpeed;
+    }
+  };
+
+  const handleToggleApplySpeedToAll = (enabled) => {
+    setApplySpeedToAll(enabled);
+    localStorage.setItem("vybe_reels_speed_apply_all", enabled ? "true" : "false");
+    if (enabled) {
+      localStorage.setItem("vybe_reels_global_speed", playbackSpeed.toString());
+      window.__vybe_reels_global_speed = playbackSpeed;
+    }
+  };
+
+  const isAnyModalOpen = Boolean(
+    showComments ||
+    showViewers ||
+    showLikersModal ||
+    showOptionsModal ||
+    showReshareModal ||
+    showShare ||
+    showRemixModal ||
+    showDeleteModal ||
+    showAIInfoModal
+  );
+
+  const handleCloseAllModals = () => {
+    setShowComments(false);
+    setShowViewers(false);
+    setShowLikersModal(false);
+    setShowOptionsModal(false);
+    setShowReshareModal(false);
+    setShowShare(false);
+    setShowRemixModal(false);
+    setShowDeleteModal(false);
+    setShowAIInfoModal(false);
+  };
+
+  // Optimistic Like & Author State
+  const currentUserId = (userData?._id || userData?.user?._id)?.toString();
+  const followingList = useMemo(
+    () => userData?.user?.following || userData?.following || [],
+    [userData?.user?.following, userData?.following]
+  );
+  const followingIds = useMemo(() => {
+    return new Set(followingList.map((f) => (f?._id || f)?.toString()));
+  }, [followingList]);
+  const authorId = (currentItem?.author?._id || currentItem?.author)?.toString();
+  const isAuthor = Boolean(currentUserId && authorId && currentUserId === authorId);
+  const isInitiallyLiked = Boolean(
+    currentUserId &&
+    currentItem?.likes?.some((id) => (id?._id || id)?.toString() === currentUserId)
+  );
   const [isLiked, setIsLiked] = useState(isInitiallyLiked);
   const [likesCount, setLikesCount] = useState(currentItem?.likes?.length || 0);
 
   useEffect(() => {
-    setIsLiked(currentItem?.likes?.some((id) => (id._id || id) === currentUserId));
-    setLikesCount(currentItem?.likes?.length || 0);
+    const timer = setTimeout(() => {
+      setIsLiked(
+        Boolean(
+          currentUserId &&
+          currentItem?.likes?.some((id) => (id?._id || id)?.toString() === currentUserId)
+        )
+      );
+      setLikesCount(currentItem?.likes?.length || 0);
+    }, 0);
+    return () => clearTimeout(timer);
   }, [currentItem, currentUserId]);
 
   const reelRef = useRef(currentItem);
@@ -169,33 +318,339 @@ export const ReelCard = ({
     };
   }, [currentItem?._id, dispatch]);
 
+  const incrementView = useCallback(async () => {
+    if (viewCountedRef.current || !currentItem?._id) return;
+    viewCountedRef.current = true;
+    try {
+      await api.post(`/reel/view/${currentItem._id}`);
+    } catch {
+      /* ignore view count error */
+    }
+  }, [currentItem]);
+
+  const handlePlay = () => {
+    setIsPlaying(true);
+    if (audioRef.current && attachedAudioUrl) {
+      audioRef.current.currentTime = videoRef.current?.currentTime || 0;
+      audioRef.current.play().catch(() => null);
+    }
+  };
+
+  const handlePause = () => {
+    setIsPlaying(false);
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+  };
+
+  const formatTime = (secs) => {
+    if (!secs || isNaN(secs) || secs < 0) return "0:00";
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${s < 10 ? "0" : ""}${s}`;
+  };
+
+  const handleTogglePlayPause = () => {
+    if (!videoRef.current) return;
+    triggerHaptic("light");
+    if (isPlaying) {
+      videoRef.current.pause();
+      if (audioRef.current) audioRef.current.pause();
+      setIsPlaying(false);
+      setShowCenterPlayIcon(true);
+      if (playFadeTimeoutRef.current) clearTimeout(playFadeTimeoutRef.current);
+      playFadeTimeoutRef.current = setTimeout(() => {
+        setShowCenterPlayIcon(false);
+      }, 700);
+    } else {
+      videoRef.current.play().catch(() => null);
+      if (audioRef.current && attachedAudioUrl) {
+        audioRef.current.currentTime = videoRef.current.currentTime || 0;
+        audioRef.current.play().catch(() => null);
+      }
+      setIsPlaying(true);
+      setShowCenterPlayIcon(false);
+      setShowPlayPauseAnim(true);
+      setTimeout(() => setShowPlayPauseAnim(false), 450);
+    }
+  };
+
+  const handleSeek = (clientX) => {
+    if (!seekBarRef.current || !videoRef.current || !videoRef.current.duration) return;
+    const rect = seekBarRef.current.getBoundingClientRect();
+    const pos = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const newTime = pos * videoRef.current.duration;
+    setProgress(pos * 100);
+    setScrubTime(newTime);
+    videoRef.current.currentTime = newTime;
+    if (audioRef.current && attachedAudioUrl) {
+      audioRef.current.currentTime = newTime;
+    }
+  };
+
+  const handleSeekPointerDown = (e) => {
+    e.stopPropagation();
+    setIsScrubbing(true);
+    triggerHaptic("selection");
+    const clientX = e.clientX ?? (e.touches ? e.touches[0].clientX : 0);
+    handleSeek(clientX);
+
+    const onPointerMove = (moveEvent) => {
+      const moveX = moveEvent.clientX ?? (moveEvent.touches ? moveEvent.touches[0].clientX : 0);
+      handleSeek(moveX);
+    };
+
+    const onPointerUp = () => {
+      setIsScrubbing(false);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("touchmove", onPointerMove);
+      window.removeEventListener("touchend", onPointerUp);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("touchmove", onPointerMove);
+    window.addEventListener("touchend", onPointerUp);
+  };
+
+  const handleConfirmDeleteReel = async () => {
+    try {
+      setDeleteLoading(true);
+      triggerHaptic("heavy");
+      const res = await api.delete(`/reel/delete/${currentItem._id}`);
+      snackbar.success(res.data?.message || "Reel deleted successfully");
+      setShowDeleteModal(false);
+      setShowOptionsModal(false);
+      const updatedReels = reelData.filter((r) => r._id !== currentItem._id);
+      dispatch(setReelData(updatedReels));
+      if (onNext) onNext();
+    } catch (err) {
+      snackbar.error(err?.response?.data?.message || "Failed to delete reel");
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const _handleToggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await containerRef.current?.requestFullscreen();
+      }
+    } catch {
+      // Fullscreen fallback
+    }
+  };
+
+  const renderCaptionWithLinks = (text) => {
+    if (!text) return null;
+    const tokens = text.split(/(#[a-zA-Z0-9_]+|@[a-zA-Z0-9_.]+)/g);
+    return tokens.map((token, i) => {
+      if (token.startsWith("#")) {
+        const tag = token.slice(1);
+        return (
+          <span
+            key={i}
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/explore/hashtag/${tag}`);
+            }}
+            className="text-rose-400 hover:text-rose-300 font-semibold cursor-pointer hover:underline"
+          >
+            {token}{" "}
+          </span>
+        );
+      }
+      if (token.startsWith("@")) {
+        const username = token.slice(1);
+        return (
+          <span
+            key={i}
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/profile/${username}`);
+            }}
+            className="text-purple-400 hover:text-purple-300 font-semibold cursor-pointer hover:underline"
+          >
+            {token}{" "}
+          </span>
+        );
+      }
+      return token;
+    });
+  };
+
+  const toggleMute = useCallback((e) => {
+    if (e) e.stopPropagation();
+    setIsMuted((prev) => {
+      const nextMuted = !prev;
+      window.__vybe_reels_muted = nextMuted;
+      if (videoRef.current) videoRef.current.muted = nextMuted;
+      if (audioRef.current) audioRef.current.muted = nextMuted;
+      return nextMuted;
+    });
+    triggerHaptic("light");
+    setShowVolumeAnim(true);
+    setTimeout(() => setShowVolumeAnim(false), 650);
+  }, []);
+
+  // Video Playing / Muting / Audio attachment Effects
   useEffect(() => {
     if (isActive) {
       endedTriggeredRef.current = false;
       const playPromise = videoRef.current?.play();
       if (playPromise !== undefined) {
-        playPromise.then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+        playPromise
+          .then(() => {
+            setIsPlaying(true);
+            incrementView();
+          })
+          .catch(() => {
+            setIsPlaying(false);
+          });
       }
-      incrementView();
+
+      if (attachedAudioUrl && audioRef.current) {
+        audioRef.current.currentTime = videoRef.current?.currentTime || 0;
+        audioRef.current.play().catch(() => null);
+      }
     } else {
-      videoRef.current?.pause();
-      setIsPlaying(false);
-      endedTriggeredRef.current = false;
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.currentTime = 0;
+      }
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      const timer = setTimeout(() => {
+        setIsPlaying(false);
+        setIsFastForwarding(false);
+        setIs2XLocked(false);
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [isActive]);
+  }, [isActive, attachedAudioUrl, currentItem?._id, incrementView]);
 
   useEffect(() => {
     if (currentItem && userData?.user) {
-      const saved = (userData.user.savedReels || [])?.includes(currentItem._id) || currentItem.savedBy?.includes(userData.user._id);
-      setIsSaved(saved);
+      const saved = Boolean(
+        (userData.user.savedReels || [])?.includes(currentItem._id) ||
+        currentItem.savedBy?.includes(userData.user._id)
+      );
+      if (saved !== isSaved) {
+        const timer = setTimeout(() => setIsSaved(saved), 0);
+        return () => clearTimeout(timer);
+      }
     }
-  }, [currentItem, userData]);
+  }, [currentItem, userData, isSaved]);
 
   useEffect(() => {
+    const rate = isFastForwarding || is2XLocked ? 2.0 : playbackSpeed;
     if (videoRef.current) {
-      videoRef.current.playbackRate = isFastForwarding ? 2.0 : playbackSpeed;
+      videoRef.current.playbackRate = rate;
     }
-  }, [playbackSpeed, isFastForwarding, isActive]);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = rate;
+    }
+  }, [playbackSpeed, isFastForwarding, is2XLocked, isActive]);
+
+  // Auto-Fetch Real-Time Timed Captions for Current Reel Audio
+  useEffect(() => {
+    if (isActive && showCaptions && currentItem?._id) {
+      if (!reelCaptions || reelCaptions.length === 0) {
+        api.get(`/reel/transcript/${currentItem._id}`)
+          .then((res) => {
+            if (res.data?.captions && Array.isArray(res.data.captions) && res.data.captions.length > 0) {
+              setReelCaptions(res.data.captions);
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [isActive, showCaptions, currentItem?._id, reelCaptions]);
+
+  // Real-Time Audio Transcript (Multilingual Web Speech Recognition Engine)
+  useEffect(() => {
+    if (showCaptions && isActive && isPlaying) {
+      const SpeechRecognition =
+        typeof window !== "undefined"
+          ? window.SpeechRecognition || window.webkitSpeechRecognition
+          : null;
+      if (SpeechRecognition && !speechRecognitionRef.current) {
+        try {
+          const recognition = new SpeechRecognition();
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          // Set to Hindi / Indian English to recognize Hindi/Indian speech like "Maa Saraswati Sharde"
+          recognition.lang = "hi-IN";
+          recognition.onresult = (event) => {
+            let fullText = "";
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+              fullText += event.results[i][0].transcript;
+            }
+            const trimmed = fullText.trim();
+            if (trimmed) {
+              setLiveTranscript(trimmed);
+              const words = trimmed.split(/\s+/).filter(Boolean);
+              setSyncedSubtitle({
+                text: trimmed,
+                words,
+                activeIndex: words.length - 1,
+                hasContent: true,
+              });
+            }
+          };
+          recognition.onerror = (err) => {
+            if (err.error === "language-not-supported" && recognition.lang === "hi-IN") {
+              recognition.lang = "en-IN";
+              try { recognition.start(); } catch { /* ignore */ }
+            }
+          };
+          recognition.onend = () => {
+            if (showCaptions && isActive && isPlaying && speechRecognitionRef.current) {
+              try {
+                recognition.start();
+              } catch { /* ignore */ }
+            }
+          };
+          try {
+            recognition.start();
+            speechRecognitionRef.current = recognition;
+          } catch { /* ignore */ }
+        } catch { /* ignore */ }
+      }
+    } else {
+      if (speechRecognitionRef.current) {
+        try {
+          speechRecognitionRef.current.stop();
+        } catch { /* ignore */ }
+        speechRecognitionRef.current = null;
+      }
+    }
+    return () => {
+      if (speechRecognitionRef.current) {
+        try {
+          speechRecognitionRef.current.stop();
+        } catch { /* ignore */ }
+        speechRecognitionRef.current = null;
+      }
+    };
+  }, [showCaptions, isActive, isPlaying]);
+
+  useEffect(() => {
+    const handleGlobalCaptionsChange = (e) => {
+      if (e.detail && typeof e.detail.enabled === "boolean") {
+        setShowCaptions(e.detail.enabled);
+      }
+    };
+    window.addEventListener("vybe_captions_change", handleGlobalCaptionsChange);
+    return () => {
+      window.removeEventListener("vybe_captions_change", handleGlobalCaptionsChange);
+    };
+  }, []);
 
   const handleToggleCaptions = () => {
     setShowCaptions((prev) => {
@@ -203,6 +658,10 @@ export const ReelCard = ({
       if (typeof localStorage !== "undefined") {
         localStorage.setItem("vybe_reel_captions", String(next));
       }
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("vybe_captions_change", { detail: { enabled: next } }));
+      }
+      triggerHaptic("light");
       return next;
     });
   };
@@ -210,8 +669,12 @@ export const ReelCard = ({
   const handleToggleComments = async () => {
     try {
       const res = await api.patch(`/reel/toggle-comments/${currentItem?._id}`);
-      setCommentsDisabled(res.data.commentsDisabled);
+      const nextState = res.data.commentsDisabled;
+      setCommentsDisabled(nextState);
       snackbar.success(res.data.message);
+      const updated = { ...currentItem, commentsDisabled: nextState };
+      const updatedReels = reelData.map((r) => (r._id === currentItem._id ? updated : r));
+      dispatch(setReelData(updatedReels));
     } catch {
       snackbar.error("Failed to update commenting settings");
     }
@@ -220,16 +683,103 @@ export const ReelCard = ({
   const handleTimeUpdate = () => {
     const video = videoRef.current;
     if (video && video.duration) {
-      const percent = (video.currentTime / video.duration) * 100;
-      setProgress(percent);
+      setDuration(video.duration);
+      if (!isScrubbing) {
+        const percent = (video.currentTime / video.duration) * 100;
+        setProgress(percent);
+        setScrubTime(video.currentTime);
+      }
 
-      // Auto-scroll trigger when video finishes (within 0.25s of end)
+      // Sync audio track if drift exceeds 0.35s
+      if (audioRef.current && attachedAudioUrl && !audioRef.current.paused && !isScrubbing) {
+        if (Math.abs(audioRef.current.currentTime - video.currentTime) > 0.35) {
+          audioRef.current.currentTime = video.currentTime;
+        }
+      }
+
+      // Real-time Audio Transcript & Dynamic Karaoke Subtitles sync
+      if (showCaptions) {
+        const activeCaptionsList = (reelCaptions && reelCaptions.length > 0) ? reelCaptions : currentItem?.captions;
+
+        // 1. Timed captions array [{ start, end, text }]
+        if (Array.isArray(activeCaptionsList) && activeCaptionsList.length > 0) {
+          const activeCaption = activeCaptionsList.find(
+            (c) => video.currentTime >= (c.start || 0) && video.currentTime <= (c.end || video.duration)
+          );
+          if (activeCaption && activeCaption.text) {
+            const words = activeCaption.text.split(/\s+/).filter(Boolean);
+            const segDuration = Math.max(0.2, (activeCaption.end || video.currentTime) - (activeCaption.start || 0));
+            const segProgress = Math.min(1, Math.max(0, (video.currentTime - (activeCaption.start || 0)) / segDuration));
+            const activeWordIdx = Math.min(words.length - 1, Math.floor(segProgress * words.length));
+            setSyncedSubtitle({
+              text: activeCaption.text,
+              words,
+              activeIndex: activeWordIdx,
+              hasContent: true,
+            });
+          } else {
+            // Find current fractional segment
+            const fallbackCap = activeCaptionsList[Math.min(activeCaptionsList.length - 1, Math.floor((video.currentTime / (video.duration || 15)) * activeCaptionsList.length))];
+            if (fallbackCap && fallbackCap.text) {
+              const words = fallbackCap.text.split(/\s+/).filter(Boolean);
+              setSyncedSubtitle({
+                text: fallbackCap.text,
+                words,
+                activeIndex: Math.min(words.length - 1, Math.floor(((video.currentTime % 2) / 2) * words.length)),
+                hasContent: true,
+              });
+            } else {
+              setSyncedSubtitle({ text: "", words: [], activeIndex: -1, hasContent: false });
+            }
+          }
+        }
+        // 2. Live speech recognition from audio (multilingual speech)
+        else if (liveTranscript) {
+          const words = liveTranscript.split(/\s+/).filter(Boolean);
+          setSyncedSubtitle({
+            text: liveTranscript,
+            words,
+            activeIndex: words.length - 1,
+            hasContent: true,
+          });
+        }
+        // 3. Pre-transcribed speech / transcript field
+        else if (currentItem?.transcript || currentItem?.subtitles || currentItem?.audioTranscript) {
+          const rawTranscript = (currentItem.transcript || currentItem.subtitles || currentItem.audioTranscript).trim();
+          const words = rawTranscript.split(/\s+/).filter(Boolean);
+          if (words.length > 0) {
+            const totalDuration = video.duration || 15;
+            const progressFrac = Math.min(1, Math.max(0, video.currentTime / totalDuration));
+            const chunkSize = 5;
+            const totalChunks = Math.ceil(words.length / chunkSize);
+            const currentChunkIdx = Math.min(totalChunks - 1, Math.floor(progressFrac * totalChunks));
+            const chunkWords = words.slice(currentChunkIdx * chunkSize, (currentChunkIdx + 1) * chunkSize);
+            const chunkFrac = (progressFrac * totalChunks) - currentChunkIdx;
+            const activeWordIdx = Math.min(chunkWords.length - 1, Math.floor(chunkFrac * chunkWords.length));
+
+            setSyncedSubtitle({
+              text: chunkWords.join(" "),
+              words: chunkWords,
+              activeIndex: activeWordIdx,
+              hasContent: true,
+            });
+          } else {
+            setSyncedSubtitle({ text: "", words: [], activeIndex: -1, hasContent: false });
+          }
+        }
+        // 4. No speech / transcript available
+        else {
+          setSyncedSubtitle({ text: "", words: [], activeIndex: -1, hasContent: false });
+        }
+      }
+
+      // Auto-scroll trigger when video finishes (within 0.35s of end)
       if (
         autoScroll &&
         onNext &&
         !endedTriggeredRef.current &&
         video.duration > 1 &&
-        video.currentTime >= video.duration - 0.25
+        video.currentTime >= video.duration - 0.35
       ) {
         endedTriggeredRef.current = true;
         onNext();
@@ -239,6 +789,10 @@ export const ReelCard = ({
 
   // Zero-Jitter Optimistic Like Handler (Toggle for Heart Button)
   const handleOptimisticLike = async () => {
+    if (!currentUserId) {
+      snackbar.error("Please login to like reels");
+      return;
+    }
     const nextLiked = !isLiked;
     const nextCount = nextLiked ? likesCount + 1 : Math.max(0, likesCount - 1);
 
@@ -258,7 +812,7 @@ export const ReelCard = ({
       ...currentItem,
       likes: nextLiked
         ? [...(currentItem.likes || []), currentUserId]
-        : (currentItem.likes || []).filter((id) => (id._id || id) !== currentUserId),
+        : (currentItem.likes || []).filter((id) => (id?._id || id)?.toString() !== currentUserId),
     };
     const updatedReels = reelData?.map((r) => (r._id === currentItem._id ? updatedReel : r));
     dispatch(setReelData(updatedReels));
@@ -275,8 +829,13 @@ export const ReelCard = ({
     }
 
     try {
-      await api.post(`/reel/like/${currentItem?._id}`);
-    } catch (error) {
+      const res = await api.post(`/reel/like/${currentItem?._id}`, { action: nextLiked ? "like" : "unlike" });
+      if (res.data?.reel) {
+        const serverReel = res.data.reel;
+        const syncedReels = reelData?.map((r) => (r._id === serverReel._id ? serverReel : r));
+        dispatch(setReelData(syncedReels));
+      }
+    } catch {
       // Rollback on network failure
       setIsLiked(!nextLiked);
       setLikesCount(likesCount);
@@ -286,9 +845,12 @@ export const ReelCard = ({
 
   // Dedicated Double Tap Like (Always forces like state + Heart Burst)
   const forceDoubleTapLike = async () => {
+    triggerHaptic("like");
+    microAudio.playPop();
     setShowHeart(true);
+    setTimeout(() => setShowHeart(false), 900);
 
-    if (!isLiked) {
+    if (!isLiked && currentUserId) {
       const nextCount = likesCount + 1;
       setIsLiked(true);
       setLikesCount(nextCount);
@@ -311,90 +873,95 @@ export const ReelCard = ({
       }
 
       try {
-        await api.post(`/reel/like/${currentItem?._id}`);
-      } catch (error) {
+        const res = await api.post(`/reel/like/${currentItem?._id}`, { action: "like" });
+        if (res.data?.reel) {
+          const serverReel = res.data.reel;
+          const syncedReels = reelData?.map((r) => (r._id === serverReel._id ? serverReel : r));
+          dispatch(setReelData(syncedReels));
+        }
+      } catch {
         setIsLiked(false);
         setLikesCount(likesCount);
       }
     }
   };
 
-  // Tap Gesture Handler: Single Tap (Play/Pause), Double Tap (Like), Triple Tap (Comments)
-  const handleVideoTap = (e) => {
-    if (e.target.closest("button") || e.target.closest("input") || e.target.closest("textarea") || e.target.closest("a")) return;
+  // Tap Gesture Handler: Single Tap (Play / Pause), Double Tap (Like), Triple Tap (Comments Modal)
+  const handleVideoTap = () => {
+    if (isAnyModalOpen) return;
+
+    // If 2X is currently locked, a single tap immediately unlocks and returns to 1X
+    if (is2XLocked) {
+      setIs2XLocked(false);
+      setIsFastForwarding(false);
+      if (videoRef.current) videoRef.current.playbackRate = playbackSpeed || 1.0;
+      if (audioRef.current) audioRef.current.playbackRate = playbackSpeed || 1.0;
+      return;
+    }
 
     tapCountRef.current += 1;
-    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
 
-    clickTimerRef.current = setTimeout(() => {
-      const count = tapCountRef.current;
-      tapCountRef.current = 0;
-
-      if (count === 1) {
-        if (showComments || showViewers || showShare) {
-          setShowComments(false);
-          setShowViewers(false);
-          setShowShare(false);
-          return;
+    if (tapCountRef.current === 1) {
+      // Set a timer to check if single, double, or triple tap
+      tapTimerRef.current = setTimeout(() => {
+        if (tapCountRef.current === 1) {
+          // Single Tap -> Toggle Play / Pause
+          handleTogglePlayPause();
+        } else if (tapCountRef.current === 2) {
+          // Double Tap -> Force Like & Burst Heart
+          forceDoubleTapLike();
+        } else if (tapCountRef.current >= 3) {
+          // Triple Tap -> Open Comments Modal
+          setShowComments(true);
         }
-
-        const video = videoRef.current;
-        if (video) {
-          if (video.paused) {
-            video.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
-            setPlayPauseIcon("play");
-          } else {
-            video.pause();
-            setIsPlaying(false);
-            setPlayPauseIcon("pause");
-          }
-          setShowPlayPauseAnim(true);
-          setTimeout(() => setShowPlayPauseAnim(false), 550);
-        }
-
-      } else if (count === 2) {
-        forceDoubleTapLike();
-      } else if (count >= 3) {
-        setShowComments(true);
-      }
-    }, 350);
+        tapCountRef.current = 0;
+      }, 250);
+    }
   };
 
-  // Long Press Handler for 2X Speed & Lock
-  const handleMouseDown = (e) => {
-    if (e.button !== 0) return;
-    if (e.target.closest("button") || e.target.closest("input")) return;
-
-    longPressTimerRef.current = setTimeout(() => {
-      if (videoRef.current) {
-        videoRef.current.playbackRate = 2.0;
-        setIsFastForwarding(true);
-      }
-    }, 300);
+  // Touch & Pointer handlers for Long Press 2X Fast-Forwarding
+  const handleTouchStart = (e) => {
+    touchStartYRef.current = e?.clientY || (e?.touches ? e.touches[0]?.clientY : null);
+    pressTimerRef.current = setTimeout(() => {
+      hasFastForwardedRef.current = true;
+      setIsFastForwarding(true);
+      triggerHaptic("medium");
+      if (videoRef.current) videoRef.current.playbackRate = 2.0;
+      if (audioRef.current) audioRef.current.playbackRate = 2.0;
+    }, 450);
   };
 
-  const handleMouseUp = () => {
-    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-    if (isFastForwarding) {
-      if (videoRef.current) {
-        videoRef.current.playbackRate = 1.0;
-      }
+  const handlePointerDown = handleTouchStart;
+
+  const handlePointerMove = (e) => {
+    if (isFastForwarding && touchStartYRef.current !== null) {
+      const clientY = e?.clientY || (e?.touches ? e.touches[0]?.clientY : touchStartYRef.current);
+      const deltaY = touchStartYRef.current - clientY;
+      setIsNearLockZone(deltaY > 60);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (pressTimerRef.current) {
+      clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+
+    const wasFastForwarding = isFastForwarding;
+
+    if (wasFastForwarding && is2XLocked) {
+      // Already locked in 2X speed -> leave running fast!
+      return;
+    } else if (wasFastForwarding && !is2XLocked) {
+      // Released without locking -> instantly restore back to normal 1X speed!
       setIsFastForwarding(false);
+      setIs2XLocked(false);
+      if (videoRef.current) videoRef.current.playbackRate = playbackSpeed || 1.0;
+      if (audioRef.current) audioRef.current.playbackRate = playbackSpeed || 1.0;
     }
   };
 
-  const handleDeleteReel = async () => {
-    try {
-      const res = await api.delete(`/reel/delete/${currentItem?._id}`);
-      if (res.data.success) {
-        snackbar.success("Reel deleted successfully 🗑️");
-        const updatedReels = reelData.filter((r) => r._id !== currentItem._id);
-        dispatch(setReelData(updatedReels));
-      }
-    } catch (err) {
-      snackbar.error(err.response?.data?.message || "Failed to delete Reel");
-    }
-  };
+  const handlePointerUp = handleTouchEnd;
 
   const handleToggleSave = async () => {
     try {
@@ -404,58 +971,15 @@ export const ReelCard = ({
         if (res.data.user) {
           dispatch(setUserData(res.data.user));
         }
-        snackbar.success(res.data.message);
+        if (res.data.isSaved) {
+          snackbar.success(res.data.message || "Saved to your bookmarks");
+        } else {
+          snackbar.info("Removed from saved reels");
+        }
       }
-    } catch (err) {
+    } catch {
       snackbar.error("Failed to update bookmark.");
     }
-  };
-
-  const handleComment = async () => {
-    if (!message.trim()) return;
-
-    try {
-      setCommentLoading(true);
-      const result = await api.post(`/reel/comment/${currentItem?._id}`, { message });
-      const updatedReel = result.data.reel;
-      const updatedReels = reelData.map((r) => (r._id === currentItem._id ? updatedReel : r));
-
-      dispatch(setReelData(updatedReels));
-
-      const socket = getSocket();
-      if (socket && result.data?.comment) {
-        socket.emit("reel-comment-send", { reelId: currentItem._id, comment: result.data.comment });
-      }
-
-      setMessage("");
-    } catch (error) {
-      snackbar.error("Failed to add comment");
-    } finally {
-      setCommentLoading(false);
-    }
-  };
-
-  const incrementView = async () => {
-    if (viewCountedRef.current) return;
-    try {
-      viewCountedRef.current = true;
-      await api.post(`/reel/view/${currentItem?._id}`);
-    } catch (error) {
-      console.log("View increment failed");
-    }
-  };
-
-  const watchStartRef = useRef(null);
-
-  const handlePlay = () => {
-    watchStartRef.current = Date.now();
-  };
-
-  const handlePause = async () => {
-    if (!watchStartRef.current) return;
-    const duration = Math.floor((Date.now() - watchStartRef.current) / 1000);
-    watchStartRef.current = null;
-    await api.post(`/reel/watch/${currentItem._id}`, { duration }).catch(() => null);
   };
 
   // Keyboard Shortcuts
@@ -469,11 +993,9 @@ export const ReelCard = ({
         if (video) {
           if (video.paused) {
             video.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
-            setPlayPauseIcon("play");
           } else {
             video.pause();
             setIsPlaying(false);
-            setPlayPauseIcon("pause");
           }
           setShowPlayPauseAnim(true);
           setTimeout(() => setShowPlayPauseAnim(false), 550);
@@ -482,45 +1004,204 @@ export const ReelCard = ({
         onNext();
       } else if (e.code === "ArrowUp" && onPrev) {
         onPrev();
+      } else if (e.code === "KeyM") {
+        toggleMute();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPlaying, showComments, showViewers, showShare, onNext, onPrev]);
-
-  const audioId = currentItem?.audioTrack?.id || (typeof currentItem?.music === 'object' && currentItem?.music ? currentItem.music.id || currentItem.music.title : currentItem?.music) || "original";
-  const audioName = currentItem?.audioTrack?.title || (typeof currentItem?.music === 'object' && currentItem?.music ? `${currentItem.music.title} - ${currentItem.music.artist}` : currentItem?.music) || "Original Audio";
+  }, [isPlaying, showComments, showViewers, showShare, onNext, onPrev, isMuted, toggleMute]);
 
   if (!currentItem || !currentItem._id) return null;
 
   return (
-    <div
-      onClick={handleVideoTap}
-      onMouseDown={handleMouseDown}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-      onTouchStart={handleMouseDown}
-      onTouchEnd={handleMouseUp}
-      className="w-full lg:w-[460px] h-[100vh] flex items-center justify-center border-x border-border relative overflow-hidden bg-bg select-none cursor-pointer"
-    >
-      
-      {/* 2X SPEED BADGE OVERLAY */}
-      {isFastForwarding && (
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[160] px-4 py-1.5 rounded-full bg-surface-overlay backdrop-blur border border-amber-500/40 text-amber-400 text-xs font-bold flex items-center gap-2 shadow-2xl animate-pulse pointer-events-none">
-          <Zap className="w-4 h-4 text-amber-400 fill-amber-400" />
-          <span>2X SPEED</span>
+    <div ref={containerRef} className="relative flex items-center justify-center h-[100dvh] md:h-[calc(100dvh-32px)] md:max-h-[760px] my-auto">
+      {/* DESKTOP-ONLY LEFT-BOTTOM AUTHOR & CAPTION INFO (COMPACT & ANCHORED TO LEFT OF CENTERED VIDEO) */}
+      <div className="hidden md:flex flex-col justify-end w-[180px] lg:w-[210px] xl:w-[240px] max-w-[240px] absolute right-full mr-3.5 lg:mr-4.5 bottom-0 pb-3 space-y-2 text-text pointer-events-auto select-text z-40">
+        {/* Author Row */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <img
+            src={currentItem?.author?.profileImage?.url || dp}
+            alt=""
+            className="w-8 h-8 rounded-full object-cover border border-border cursor-pointer hover:opacity-90 transition shrink-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/profile/${currentItem?.author?.userName}`);
+            }}
+          />
+          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+            <span
+              className="text-text text-xs lg:text-[13px] font-bold cursor-pointer hover:underline flex items-center gap-1 truncate max-w-[100px] lg:max-w-[125px]"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/profile/${currentItem?.author?.userName}`);
+              }}
+            >
+              {currentItem?.author?.userName}
+              {currentItem?.author?.isVerified && <VerifiedBadge size="xs" />}
+            </span>
+
+            {currentItem?.author?._id !== userData?.user?._id && (
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-text-secondary text-xs">•</span>
+                <FollowButton
+                  targetUserId={currentItem?.author?._id}
+                  tailwind="text-primary hover:text-primary-hover text-xs lg:text-[13px] font-bold bg-transparent p-0 shadow-none cursor-pointer"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Location */}
+        {currentItem?.location && (
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/explore/location/${encodeURIComponent(currentItem.location)}`);
+            }}
+            className="text-[10px] lg:text-[11px] text-text-secondary font-medium cursor-pointer hover:underline flex items-center gap-1 truncate max-w-[160px]"
+          >
+            <span>📍</span> <span className="truncate">{currentItem.location}</span>
+          </div>
+        )}
+
+        {/* Caption */}
+        {currentItem?.caption && (
+          <div className="text-xs text-text font-normal leading-snug break-words max-h-[110px] lg:max-h-[130px] overflow-y-auto hide-scrollbar pr-1">
+            <span>{renderCaptionWithLinks(currentItem.caption)}</span>
+          </div>
+        )}
+
+        {/* Tagged People */}
+        {currentItem?.taggedUsers && currentItem.taggedUsers.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+            <span className="text-[10px] lg:text-xs text-text-secondary font-medium flex items-center gap-0.5">
+              <span>🏷️</span>
+              <span>with</span>
+            </span>
+            {currentItem.taggedUsers.map((tu, i) => {
+              const u = tu?.userName ? tu : { userName: tu };
+              return (
+                <button
+                  key={u?.userName || `tag_${i}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/profile/${u.userName}`);
+                  }}
+                  className="px-1.5 py-0.5 rounded-full bg-surface-hover hover:bg-surface-active border border-border text-[10px] lg:text-xs font-semibold text-text transition cursor-pointer"
+                >
+                  <span>@{u.userName}</span>
+                  {u?.isVerified && <VerifiedBadge size="xs" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Audio Track */}
+        {(() => {
+          let trackObj = currentItem?.audioTrack || currentItem?.music;
+          if (typeof trackObj === "string") {
+            try {
+              trackObj = JSON.parse(trackObj);
+            } catch {
+              trackObj = { title: trackObj };
+            }
+          }
+          const title = trackObj?.title || `${currentItem?.author?.userName || "Original"} • Audio`;
+          const trackParam = trackObj?.id || trackObj?.title || `${currentItem?.author?.userName}-original`;
+
+          return (
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/audio/${encodeURIComponent(trackParam)}`, {
+                  state: { music: trackObj },
+                });
+              }}
+              className="flex items-center gap-1.5 cursor-pointer text-[10px] lg:text-[11px] text-text-secondary hover:text-text transition w-fit pt-0.5"
+            >
+              <Disc className="w-3 h-3 animate-spin-slow text-text-secondary shrink-0" />
+              <span className="truncate max-w-[160px] lg:max-w-[190px] font-medium">{title}</span>
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* 9:16 MAIN REEL VIDEO CARD (CENTERED ANCHOR) */}
+      <div
+        onClick={handleVideoTap}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onMouseEnter={() => setIsHovered(true)}
+        className="w-full md:w-[330px] lg:w-[360px] xl:w-[390px] h-[100dvh] md:h-full flex items-center justify-center border-0 md:border md:border-white/10 md:rounded-md relative overflow-hidden bg-black select-none cursor-pointer group/card md:shadow-[0_8px_30px_rgba(0,0,0,0.5)] shrink-0"
+      >
+      {/* 2X SPEED INSTAGRAM MICRO-PILL (ACTIVE WHILE HOLDING) */}
+      {isFastForwarding && !is2XLocked && (
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[160] pointer-events-none animate-in fade-in zoom-in-95 duration-150">
+          <div
+            className={`px-3 py-1 rounded-full backdrop-blur-xl border text-[11px] font-semibold flex items-center gap-1.5 shadow-xl transition-all ${
+              isNearLockZone
+                ? "bg-emerald-500/90 text-white border-emerald-400 scale-105 shadow-emerald-500/30"
+                : "bg-black/70 text-white border-white/15"
+            }`}
+          >
+            <Zap className={`w-3 h-3 ${isNearLockZone ? "fill-white text-white" : "fill-amber-400 text-amber-400"}`} />
+            <span className={isNearLockZone ? "text-white font-bold" : "text-amber-400 font-bold"}>2X</span>
+            <span className="text-zinc-300 text-[10px]">
+              {isNearLockZone ? "· Release to lock 🔒" : "· Slide down to lock ⬇️"}
+            </span>
+          </div>
         </div>
       )}
 
-      {/* PLAY / PAUSE OVERLAY ANIMATION CIRCLE */}
-      {showPlayPauseAnim && (
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none flex items-center justify-center">
-          <div className="w-20 h-20 rounded-full bg-surface-overlay backdrop-blur-md border border-white/20 flex items-center justify-center shadow-2xl animate-scale-pulse">
-            {playPauseIcon === "play" ? (
-              <Play className="w-10 h-10 text-text fill-white ml-1" />
+      {/* 2X LOCKED MICRO-PILL */}
+      {is2XLocked && (
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[160] pointer-events-none animate-in fade-in zoom-in-95 duration-150">
+          <div
+            className={`px-3 py-1 rounded-full backdrop-blur-xl border text-[11px] font-semibold flex items-center gap-1.5 shadow-xl transition-all ${
+              isNearLockZone
+                ? "bg-rose-500/90 text-white border-rose-400 scale-105 shadow-rose-500/30"
+                : "bg-black/70 text-amber-400 border-amber-400/30"
+            }`}
+          >
+            <Zap className="w-3 h-3 fill-amber-400 text-amber-400" />
+            <span>{isNearLockZone ? "Release to 1X 🔓" : "2X Locked"}</span>
+          </div>
+        </div>
+      )}
+
+      {/* INSTAGRAM CENTER PLAY BUTTON (FADES OUT AFTER 700MS ON PAUSE, REAPPEARS ON HOVER) */}
+      {!isPlaying && (showCenterPlayIcon || isHovered) && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 pointer-events-none flex items-center justify-center animate-in zoom-in-75 fade-in duration-200">
+          <div className="w-18 h-18 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center shadow-2xl">
+            <Play className="w-9 h-9 text-white fill-white ml-1 drop-shadow-md" />
+          </div>
+        </div>
+      )}
+
+      {/* PLAY / PAUSE TRANSIENT PULSE OVERLAY (SHOWN ON PLAY / RESUME) */}
+      {showPlayPauseAnim && isPlaying && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none flex items-center justify-center animate-scale-pulse">
+          <div className="w-18 h-18 rounded-full bg-black/75 backdrop-blur-md border border-white/20 flex items-center justify-center shadow-2xl">
+            <Pause className="w-9 h-9 text-white fill-white drop-shadow-md" />
+          </div>
+        </div>
+      )}
+
+      {/* VOLUME MUTE / UNMUTE CENTER OVERLAY ANIMATION */}
+      {showVolumeAnim && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none flex items-center justify-center animate-scale-pulse">
+          <div className="w-20 h-20 rounded-full bg-black/80 backdrop-blur-xl border border-white/20 flex items-center justify-center shadow-2xl">
+            {isMuted ? (
+              <VolumeX className="w-10 h-10 text-white stroke-[2.5]" />
             ) : (
-              <Pause className="w-10 h-10 text-text fill-white" />
+              <Volume2 className="w-10 h-10 text-white stroke-[2.5]" />
             )}
           </div>
         </div>
@@ -529,91 +1210,16 @@ export const ReelCard = ({
       {/* Particle Heart Burst on double-tap */}
       <HeartExplosion show={showHeart} onComplete={() => setShowHeart(false)} />
 
-      {/* OVERLAY BACKDROP FOR DRAWERS */}
-      {(showComments || showViewers) && (
+      {/* OVERLAY BACKDROP FOR VIEWERS DRAWER */}
+      {showViewers && (
         <div
           onClick={(e) => {
             e.stopPropagation();
-            setShowComments(false);
             setShowViewers(false);
-            setShowShare(false);
           }}
           className="absolute inset-0 bg-bg/40 z-[150] backdrop-blur-[2px] transition-opacity cursor-pointer"
         />
       )}
-
-      {/* COMMENTS DRAWER */}
-      <div
-        ref={commentRef}
-        onClick={(e) => e.stopPropagation()}
-        className={`absolute z-[200] bottom-0 w-full h-[500px] p-4 rounded-t-3xl bg-surface-inset/95 border-t border-border transition-transform duration-300 ease-out left-0 shadow-2xl flex flex-col justify-between ${
-          showComments ? "translate-y-0" : "translate-y-full"
-        }`}
-      >
-        <div className="flex items-center justify-between border-b border-border pb-3">
-          <h1 className="text-text text-sm font-bold">Comments ({currentItem?.comments?.length || 0})</h1>
-          <button
-            onClick={() => setShowComments(false)}
-            className="text-xs text-text-secondary hover:text-text font-semibold cursor-pointer"
-          >
-            Done
-          </button>
-        </div>
-
-        <div className="w-full flex-1 overflow-y-auto flex flex-col gap-3 py-3">
-          {currentItem?.comments?.length === 0 ? (
-            <div className="text-center text-text-muted text-sm font-medium mt-12">No comments yet. Be the first!</div>
-          ) : (
-            currentItem?.comments?.map((comment, index) => (
-              <div key={index} className="flex items-start gap-3 p-2 rounded-xl bg-surface/50">
-                <img
-                  src={comment?.author?.profileImage?.url || dp}
-                  alt=""
-                  className="w-8 h-8 rounded-full object-cover cursor-pointer"
-                  onClick={() => navigate(`/profile/${comment?.author?.userName}`)}
-                />
-                <div className="flex-1 text-xs space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-text flex items-center gap-0.5">
-                      {comment?.author?.userName}
-                      {comment?.author?.isVerified && (
-                        <VerifiedBadge size="xs" />
-                      )}
-                    </span>
-                    <span className="text-[10px] text-text-muted">{moment(comment?.createdAt).fromNow()}</span>
-                  </div>
-                  <p className="text-text">{comment?.message}</p>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Comment input */}
-        {commentsDisabled ? (
-          <div className="w-full py-3 text-center text-xs text-text-muted font-semibold border-t border-border">
-            Commenting is turned off for this reel
-          </div>
-        ) : (
-          <div className="w-full pt-2 flex items-center gap-2 border-t border-border">
-            <input
-              type="text"
-              className="flex-1 px-4 py-2.5 bg-surface border border-border rounded-full text-xs text-text outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition shadow-xs"
-              placeholder="Add a comment..."
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleComment();
-              }}
-            />
-            {message.trim() && (
-              <button disabled={commentLoading} onClick={handleComment} className="p-2.5 bg-primary hover:bg-primary-hover rounded-full text-white cursor-pointer transition shadow-xs disabled:opacity-50">
-                {commentLoading ? <ClipLoader size={16} color="white" /> : <IoSendSharp className="w-4 h-4" />}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
 
       {/* VIEWERS DRAWER */}
       <div
@@ -637,80 +1243,159 @@ export const ReelCard = ({
           {!currentItem?.viewedBy || currentItem?.viewedBy?.length === 0 ? (
             <div className="text-center text-text-muted text-xs font-medium mt-12">No views recorded yet</div>
           ) : (
-            currentItem.viewedBy.map((viewer, idx) => (
-              <div key={idx} className="flex items-center justify-between p-2 rounded-xl hover:bg-surface/60 transition">
-                <div
-                  className="flex items-center gap-2.5 cursor-pointer"
-                  onClick={() => navigate(`/profile/${viewer?.userName}`)}
-                >
-                  <img
-                    src={viewer?.profileImage?.url || dp}
-                    alt=""
-                    className="w-8 h-8 rounded-full object-cover border border-border"
-                  />
-                  <div className="text-left">
-                    <div className="text-xs font-bold text-text">@{viewer?.userName}</div>
-                    <div className="text-[10px] text-text-secondary">{viewer?.name}</div>
+            [...currentItem.viewedBy]
+              .sort((a, b) => {
+                const aFollow = followingIds.has((a?._id || a)?.toString()) ? 1 : 0;
+                const bFollow = followingIds.has((b?._id || b)?.toString()) ? 1 : 0;
+                return bFollow - aFollow;
+              })
+              .map((viewer, idx) => {
+                const isFollowed = followingIds.has((viewer?._id || viewer)?.toString());
+                return (
+                  <div key={idx} className="flex items-center justify-between p-2 rounded-xl hover:bg-surface/60 transition">
+                    <div
+                      className="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0"
+                      onClick={() => navigate(`/profile/${viewer?.userName}`)}
+                    >
+                      <img
+                        src={viewer?.profileImage?.url || dp}
+                        alt=""
+                        className="w-8 h-8 rounded-full object-cover border border-border shrink-0"
+                      />
+                      <div className="text-left min-w-0">
+                        <div className="text-xs font-bold text-text flex items-center gap-1.5 truncate">
+                          <span>@{viewer?.userName}</span>
+                          {isFollowed && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-400 font-semibold border border-rose-500/30">
+                              Following
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-text-secondary truncate">{viewer?.name}</div>
+                      </div>
+                    </div>
+                    {viewer?._id !== userData?.user?._id && (
+                      <FollowButton
+                        targetUserId={viewer?._id}
+                        tailwind="px-3 py-1 bg-surface-hover hover:bg-surface-active text-text text-[10px] font-semibold rounded-full shrink-0"
+                      />
+                    )}
                   </div>
-                </div>
-                {viewer?._id !== userData?.user?._id && (
-                  <FollowButton
-                    targetUserId={viewer?._id}
-                    tailwind="px-3 py-1 bg-surface-hover hover:bg-surface-active text-text text-[10px] font-semibold rounded-full"
-                  />
-                )}
-              </div>
-            ))
+                );
+              })
           )}
         </div>
       </div>
 
-      {/* VIDEO PLAYER WITH SMOOTH DRAWER TRANSITION & GESTURES */}
-      <video
-        onPlay={handlePlay}
-        onPause={handlePause}
-        ref={videoRef}
-        autoPlay
-        muted={isMuted}
-        onEnded={(e) => {
-          if (autoScroll && onNext) {
-            if (!endedTriggeredRef.current) {
-              endedTriggeredRef.current = true;
-              onNext();
-            }
-          } else {
-            e.target.currentTime = 0;
-            e.target.play().catch(() => null);
+      {/* VIDEO PLAYER WITH SMOOTH DRAWER TRANSITION & GESTURES (INSTAGRAM REEL SHRINK TO TOP) */}
+      <div
+        onClick={(e) => {
+          if (isAnyModalOpen) {
+            e.stopPropagation();
+            handleCloseAllModals();
           }
         }}
-        playsInline
-        src={getOptimizedMediaUrl(currentItem?.media?.url, "video")}
-        className={`w-full h-full object-cover transition-all duration-300 ${
-          showComments || showViewers ? "scale-[0.95] translate-y-[-24px] rounded-2xl" : "scale-100 translate-y-0"
-        } ${isFastForwarding ? "brightness-110" : ""}`}
-        onTimeUpdate={handleTimeUpdate}
-      />
+        className={`w-full transition-all duration-300 ease-out flex items-center justify-center relative overflow-hidden ${
+          isAnyModalOpen
+            ? "h-[36vh] md:h-[40vh] max-h-[360px] rounded-2xl scale-[0.98] -translate-y-2 md:-translate-y-4 shadow-2xl z-20 cursor-pointer"
+            : "h-full scale-100 translate-y-0 z-0"
+        }`}
+      >
+        <video
+          onPlay={handlePlay}
+          onPause={handlePause}
+          ref={videoRef}
+          autoPlay
+          muted={isMuted}
+          onEnded={(e) => {
+            if (autoScroll && onNext) {
+              if (!endedTriggeredRef.current) {
+                endedTriggeredRef.current = true;
+                onNext();
+              }
+            } else {
+              e.target.currentTime = 0;
+              e.target.play().catch(() => null);
+            }
+          }}
+          playsInline
+          src={getOptimizedMediaUrl(currentItem?.media?.url, "video")}
+          className={`w-full h-full object-cover select-none pointer-events-none transition-all duration-300 ${
+            isFastForwarding ? "brightness-110" : ""
+          }`}
+          onTimeUpdate={handleTimeUpdate}
+        />
 
-      {/* CAPTIONS & SUBTITLES OVERLAY */}
-      {showCaptions && currentItem?.caption && (
-        <div className="absolute bottom-28 left-4 right-16 z-30 pointer-events-none animate-fade-in">
-          <div className="inline-block px-3 py-1.5 rounded-xl bg-black/80 backdrop-blur-md text-white text-xs font-semibold border border-white/15 shadow-xl max-w-full truncate">
-            💬 {currentItem.caption}
+        {/* TAP TO EXPAND BADGE WHEN ANY MODAL OPEN */}
+        {isAnyModalOpen && (
+          <div className="absolute inset-0 bg-black/10 hover:bg-black/25 transition-colors flex items-center justify-center pointer-events-auto">
+            <span className="text-[11px] font-bold text-white/90 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full shadow-lg pointer-events-none">
+              Tap video to expand ✕
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* SYNCHRONIZED AUDIO TRACK (Background / Music) */}
+      {attachedAudioUrl && (
+        <audio
+          ref={audioRef}
+          src={attachedAudioUrl}
+          muted={isMuted}
+          loop
+          playsInline
+        />
+      )}
+
+      {/* YOUTUBE SHORTS STYLE REAL-TIME SUBTITLES */}
+      {showCaptions && !isAnyModalOpen && syncedSubtitle.hasContent && syncedSubtitle.words && syncedSubtitle.words.length > 0 && (
+        <div className="absolute bottom-28 md:bottom-20 inset-x-3 sm:inset-x-6 z-30 pointer-events-none flex items-center justify-center animate-fade-in select-none">
+          <div className="max-w-[92%] px-3.5 py-1.5 rounded-lg bg-black/80 backdrop-blur-sm border border-white/10 text-white font-bold text-xs sm:text-sm md:text-[15px] leading-snug tracking-normal shadow-2xl flex flex-wrap items-center justify-center gap-1.5">
+            {syncedSubtitle.words.map((word, idx) => (
+              <span
+                key={idx}
+                className={`transition-colors duration-100 ${
+                  idx === syncedSubtitle.activeIndex
+                    ? "text-yellow-400 font-black drop-shadow-[0_0_6px_rgba(250,204,21,0.6)]"
+                    : idx < syncedSubtitle.activeIndex
+                    ? "text-white"
+                    : "text-white/70"
+                }`}
+              >
+                {word}
+              </span>
+            ))}
           </div>
         </div>
       )}
 
-      {/* TOP CONTROLS */}
+      {/* CONTROLS (CC SUBTITLES & VOLUME) */}
       {!isFastForwarding && (
-        <div className="absolute top-4 right-4 z-[100] flex items-center gap-3">
+        <div className="absolute top-4 right-4 md:top-auto md:bottom-4 z-[100] flex items-center gap-2 pointer-events-auto">
+          {/* Quick 1-Tap CC Toggle Button */}
           <button
             onClick={(e) => {
               e.stopPropagation();
-              const nextMuted = !isMuted;
-              setIsMuted(nextMuted);
-              window.__vybe_reels_muted = nextMuted;
+              handleToggleCaptions();
             }}
-            className="p-2 rounded-full bg-surface-overlay backdrop-blur text-white hover:bg-surface-overlay transition cursor-pointer interactive-btn"
+            className={`h-8 px-2.5 rounded-full border text-xs font-black transition-all flex items-center justify-center cursor-pointer shadow-lg active:scale-90 ${
+              showCaptions
+                ? "bg-white text-black border-white shadow-white/20"
+                : "bg-black/60 backdrop-blur-md border-white/20 text-white/70 hover:text-white"
+            }`}
+            title={showCaptions ? "Turn off subtitles (CC)" : "Turn on subtitles (CC)"}
+          >
+            <span className="text-[11px] font-extrabold tracking-tighter">CC</span>
+          </button>
+
+          {/* Mute / Unmute Button */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleMute();
+            }}
+            className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-white hover:bg-black/80 active:scale-90 transition-all flex items-center justify-center cursor-pointer shadow-lg"
+            title={isMuted ? "Unmute" : "Mute"}
           >
             {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
@@ -722,9 +1407,9 @@ export const ReelCard = ({
         <div className="h-full bg-rose-500 transition-all duration-150 ease-linear" style={{ width: `${progress}%` }} />
       </div>
 
-      {/* BOTTOM INFO OVERLAY */}
-      {!isFastForwarding && (
-        <div className="w-full absolute bottom-4 inset-x-0 p-4 flex justify-between items-end z-40 bg-gradient-to-t from-black/90 via-black/40 to-transparent pointer-events-none">
+      {/* MOBILE-ONLY BOTTOM INFO OVERLAY (INSIDE VIDEO CARD) */}
+      {!isFastForwarding && !isAnyModalOpen && (
+        <div className="flex md:hidden w-full absolute bottom-0 inset-x-0 px-3.5 pb-4 pt-12 flex justify-between items-end z-40 bg-gradient-to-t from-black/95 via-black/50 to-transparent pointer-events-none">
           <div className="space-y-3 max-w-[75%] pointer-events-auto">
             {/* Author */}
             <div className="flex items-center gap-2.5">
@@ -765,14 +1450,82 @@ export const ReelCard = ({
                   e.stopPropagation();
                   navigate(`/explore/location/${encodeURIComponent(currentItem.location)}`);
                 }}
-                className="text-[10px] text-rose-400 font-semibold cursor-pointer hover:underline flex items-center gap-0.5 mt-0.5 interactive-btn"
+                className="text-[10px] text-white/90 font-bold cursor-pointer hover:text-white flex items-center gap-1 mt-0.5 interactive-btn bg-black/40 px-2 py-0.5 rounded-full border border-white/10 backdrop-blur w-fit shadow-xs"
               >
-                📍 {currentItem.location}
+                <MapPin className="w-2.5 h-2.5 text-rose-400 fill-rose-400/20 shrink-0" />
+                <span className="truncate max-w-[170px]">{currentItem.location}</span>
               </div>
             )}
 
-            {/* Caption */}
-            {currentItem?.caption && <p className="text-xs text-white font-normal line-clamp-2 pointer-events-none">{currentItem.caption}</p>}
+            {/* Interactive Caption with clickable #hashtags and @mentions + Instagram-style "...more / less" */}
+            {currentItem?.caption && (
+              <div className="text-xs text-white font-normal leading-relaxed pointer-events-auto break-words mt-0.5">
+                {(() => {
+                  const cap = currentItem.caption;
+                  const isLong = cap.length > 85;
+                  if (!isLong || isCaptionExpanded) {
+                    return (
+                      <>
+                        <span>{renderCaptionWithLinks(cap)}</span>
+                        {isLong && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsCaptionExpanded(false);
+                            }}
+                            className="text-zinc-400 font-semibold hover:text-white ml-1.5 cursor-pointer text-[11px]"
+                          >
+                            less
+                          </button>
+                        )}
+                      </>
+                    );
+                  }
+                  return (
+                    <>
+                      <span>{renderCaptionWithLinks(cap.slice(0, 80))}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsCaptionExpanded(true);
+                        }}
+                        className="text-zinc-300 font-bold hover:text-white ml-1 cursor-pointer text-[11px]"
+                      >
+                        ...more
+                      </button>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Tagged People Pill */}
+            {currentItem?.taggedUsers && currentItem.taggedUsers.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap pointer-events-auto mt-0.5">
+                <span className="text-[11px] text-zinc-300 font-medium flex items-center gap-0.5">
+                  <span>🏷️</span>
+                  <span>with</span>
+                </span>
+                {currentItem.taggedUsers.map((tu, i) => {
+                  const u = tu?.userName ? tu : { userName: tu };
+                  return (
+                    <button
+                      key={u?.userName || `mobile_tag_${i}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/profile/${u.userName}`);
+                      }}
+                      className="px-2 py-0.5 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-[10px] font-bold text-white flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <span>@{u.userName}</span>
+                      {u?.isVerified && <VerifiedBadge size="xs" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Made with AI Pill Badge */}
             {currentItem?.aiLabel?.isAIGenerated && (
@@ -787,7 +1540,7 @@ export const ReelCard = ({
                 title="Made with AI • Click for info"
               >
                 <Sparkles className="w-2.5 h-2.5 text-purple-400 fill-purple-400/20 animate-pulse" />
-                <span>Made with AI</span>
+                <span>AI info</span>
               </button>
             )}
 
@@ -802,7 +1555,6 @@ export const ReelCard = ({
                 }
               }
               const title = trackObj?.title || `${currentItem?.author?.userName || "Original"} • Audio`;
-              const artist = trackObj?.artist || "Original Audio";
               const trackParam = trackObj?.id || trackObj?.title || `${currentItem?.author?.userName}-original`;
 
               return (
@@ -824,125 +1576,512 @@ export const ReelCard = ({
             })()}
           </div>
 
-          {/* RIGHT SIDE ACTION BUTTONS */}
-          <div className="flex flex-col items-center gap-5 text-white pointer-events-auto">
+          {/* MOBILE-ONLY RIGHT SIDE ACTION BUTTONS (INSIDE VIDEO CARD) */}
+          <div className="flex md:hidden flex-col items-center gap-2.5 text-white pointer-events-auto pb-1">
             {/* Like */}
-            <button onClick={handleOptimisticLike} className="flex flex-col items-center gap-1 group cursor-pointer">
-              <div className="p-2.5 rounded-full bg-bg/40 backdrop-blur group-hover:bg-surface-overlay transition">
+            <div className="flex flex-col items-center">
+              <button
+                onClick={handleOptimisticLike}
+                className="p-1 group cursor-pointer active:scale-75 transition-transform"
+                title={isLiked ? "Unlike" : "Like"}
+              >
                 {isLiked ? (
-                  <GoHeartFill className="w-6 h-6 text-rose-500 scale-110 transition-transform" />
+                  <GoHeartFill className="w-6 h-6 text-[#ff3040] drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)] animate-heart-burst" />
                 ) : (
-                  <GoHeart className="w-6 h-6 text-white group-hover:text-rose-400 transition" />
+                  <GoHeart className="w-6 h-6 text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)] group-hover:text-rose-300 transition-colors" />
                 )}
-              </div>
-              <span className="text-[11px] font-semibold">{likesCount}</span>
-            </button>
+              </button>
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  triggerHaptic("light");
+                  setShowLikersModal(true);
+                }}
+                className="text-[11px] font-semibold text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)] cursor-pointer hover:underline"
+                title="View likes"
+              >
+                {likesCount > 0 ? likesCount : "0"}
+              </span>
+            </div>
 
             {/* Comment */}
-            <button onClick={() => setShowComments(true)} className="flex flex-col items-center gap-1 group cursor-pointer">
-              <div className="p-2.5 rounded-full bg-bg/40 backdrop-blur group-hover:bg-surface-overlay transition">
-                <MdOutlineComment className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-[11px] font-semibold">{currentItem?.comments?.length || 0}</span>
-            </button>
+            <div className="flex flex-col items-center">
+              <button
+                onClick={() => setShowComments(true)}
+                className="p-1 group cursor-pointer active:scale-75 transition-transform"
+                title="Comments"
+              >
+                <MdOutlineComment className="w-6 h-6 text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)] group-hover:text-rose-300 transition-colors" />
+              </button>
+              <span className="text-[11px] font-semibold text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">
+                {(currentItem?.comments || []).reduce((acc, c) => acc + 1 + (c.replies?.length || 0), 0)}
+              </span>
+            </div>
 
             {/* Share */}
-            <button onClick={() => setShowShare(true)} className="flex flex-col items-center gap-1 group cursor-pointer">
-              <div className="p-2.5 rounded-full bg-bg/40 backdrop-blur group-hover:bg-surface-overlay transition">
-                <Send className="w-5 h-5 text-white" />
-              </div>
-              <span className="text-[11px] font-semibold">{currentItem?.forwards || 0}</span>
-            </button>
+            <div className="flex flex-col items-center">
+              <button
+                onClick={() => setShowShare(true)}
+                className="p-1 group cursor-pointer active:scale-75 transition-transform"
+                title="Share"
+              >
+                <Send className="w-5 h-5 text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)] -rotate-12 group-hover:text-rose-300 transition-colors" />
+              </button>
+              <span className="text-[11px] font-semibold text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">
+                {currentItem?.forwards || 0}
+              </span>
+            </div>
 
             {/* Save Bookmark */}
-            <button onClick={handleToggleSave} className="flex flex-col items-center gap-1 group cursor-pointer">
-              <div className="p-2.5 rounded-full bg-bg/40 backdrop-blur group-hover:bg-surface-overlay transition">
-                {isSaved ? <BookmarkCheck className="w-5 h-5 text-amber-400" /> : <Bookmark className="w-5 h-5 text-white" />}
-              </div>
+            <button
+              onClick={handleToggleSave}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setShowCollectionsModal(true);
+              }}
+              className="p-1 group cursor-pointer active:scale-75 transition-transform"
+              title={isSaved ? "Saved (Right click for Collection)" : "Save Bookmark"}
+            >
+              {isSaved ? (
+                <BookmarkCheck className="w-5 h-5 text-amber-400 drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)]" />
+              ) : (
+                <Bookmark className="w-5 h-5 text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)] group-hover:text-amber-300 transition-colors" />
+              )}
             </button>
 
-            {/* Remix */}
-            <button onClick={() => setShowRemixModal(true)} className="flex flex-col items-center gap-1 group cursor-pointer" title="Remix Reel">
-              <div className="p-2.5 rounded-full bg-bg/40 backdrop-blur group-hover:bg-surface-overlay transition">
-                <Repeat className="w-5 h-5 text-rose-400" />
-              </div>
+            {/* Reshare & Repost */}
+            <button
+              onClick={() => setShowReshareModal(true)}
+              className="p-1 group cursor-pointer active:scale-75 transition-transform"
+              title="Reshare & Repost Reel"
+            >
+              <Repeat className="w-5 h-5 text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)] group-hover:text-rose-400 group-hover:rotate-180 transition-all duration-300" />
             </button>
 
             {/* Views & Insights */}
-            <button onClick={() => setShowViewers(true)} className="flex flex-col items-center gap-1 group cursor-pointer" title="Reel Views & Insights">
-              <div className="p-2.5 rounded-full bg-bg/40 backdrop-blur group-hover:bg-surface-overlay transition">
-                <Eye className="w-5 h-5 text-white group-hover:text-rose-400 transition" />
-              </div>
-              <span className="text-[11px] font-semibold">{currentItem?.views || 0}</span>
-            </button>
+            <div className="flex flex-col items-center">
+              <button
+                onClick={() => setShowViewers(true)}
+                className="p-1 group cursor-pointer active:scale-75 transition-transform"
+                title="Views & Insights"
+              >
+                <Eye className="w-5 h-5 text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)] group-hover:text-cyan-300 transition-colors" />
+              </button>
+              <span className="text-[11px] font-semibold text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">
+                {currentItem?.views || 0}
+              </span>
+            </div>
 
             {/* 3-Dot Options & Settings */}
             <button
               onClick={() => setShowOptionsModal(true)}
-              className="flex flex-col items-center gap-1 group cursor-pointer"
-              title="Reel Options & Auto-Scroll"
+              className="p-1 group cursor-pointer active:scale-75 transition-transform"
+              title="More Options"
             >
-              <div className="p-2.5 rounded-full bg-bg/40 backdrop-blur group-hover:bg-surface-overlay transition text-white group-hover:text-rose-400">
-                <MoreVertical className="w-5 h-5" />
-              </div>
+              <MoreVertical className="w-5 h-5 text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)] group-hover:text-rose-300 transition-colors" />
             </button>
 
             {/* Delete Reel (Owner only) */}
-            {(currentItem?.author?._id === currentUserId || currentItem?.author === currentUserId) && (
-              <button onClick={handleDeleteReel} className="flex flex-col items-center gap-1 group cursor-pointer" title="Delete Reel">
-                <div className="p-2.5 rounded-full bg-bg/40 backdrop-blur hover:bg-rose-950/80 transition text-rose-500 hover:text-rose-400">
-                  <Trash2 className="w-5 h-5" />
-                </div>
+            {isAuthor && (
+              <button
+                onClick={() => setShowDeleteModal(true)}
+                className="p-1 group cursor-pointer active:scale-75 transition-transform"
+                title="Delete Reel"
+              >
+                <Trash2 className="w-5 h-5 text-rose-400 drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)] hover:text-rose-300 transition-colors" />
               </button>
             )}
+
+            {/* Spinning Audio Album Art (Instagram Style) */}
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                let trackObj = currentItem?.audioTrack || currentItem?.music;
+                if (typeof trackObj === "string") {
+                  try {
+                    trackObj = JSON.parse(trackObj);
+                  } catch {
+                    trackObj = { title: trackObj };
+                  }
+                }
+                const trackParam = trackObj?.id || trackObj?.title || `${currentItem?.author?.userName}-original`;
+                navigate(`/audio/${encodeURIComponent(trackParam)}`, {
+                  state: { music: trackObj },
+                });
+              }}
+              className="w-6 h-6 rounded-md overflow-hidden border border-white/90 shadow-md cursor-pointer animate-spin-slow active:scale-80 transition-transform bg-gradient-to-tr from-rose-500 via-purple-600 to-amber-500 flex items-center justify-center mt-0.5"
+              title="Audio Track"
+            >
+              {currentItem?.author?.profileImage?.url ? (
+                <img src={currentItem.author.profileImage.url} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <Disc className="w-3 h-3 text-white" />
+              )}
+            </div>
           </div>
         </div>
       )}
 
-      {/* Share Sheet */}
-      <ShareSheet open={showShare} onClose={() => setShowShare(false)} entity={currentItem} entityType="reel" following={userData?.user?.following} />
+      {/* SEEK & PROGRESS BAR OVERLAY */}
+      <div
+        ref={seekBarRef}
+        onPointerDown={handleSeekPointerDown}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute bottom-0 left-0 right-0 z-[130] h-6 flex items-end cursor-pointer group/seek pointer-events-auto touch-none select-none"
+      >
+        {/* Scrubber Tooltip when dragging */}
+        {isScrubbing && (
+          <div
+            className="absolute -top-7 transform -translate-x-1/2 px-2.5 py-0.5 rounded-md bg-black/85 backdrop-blur-md border border-white/20 text-[10px] font-bold text-white shadow-lg pointer-events-none"
+            style={{ left: `${Math.min(95, Math.max(5, progress))}%` }}
+          >
+            {formatTime(scrubTime)} / {formatTime(duration)}
+          </div>
+        )}
 
-      {/* Remix Modal */}
-      {showRemixModal && (
-        <RemixReelModal
-          isOpen={showRemixModal}
-          onClose={() => setShowRemixModal(false)}
-          originalReel={currentItem}
-          onSuccess={() => snackbar.success("Remix created!")}
-        />
-      )}
+        {/* Track Background */}
+        <div className="w-full h-[2.5px] group-hover/seek:h-[5px] transition-all bg-white/25 relative overflow-visible">
+          {/* Filled Progress Bar */}
+          <div
+            className="h-full bg-white relative transition-all duration-75 ease-out"
+            style={{ width: `${progress}%` }}
+          >
+            {/* Scrubber Thumb */}
+            <div
+              className={`absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-1/2 w-3 h-3 rounded-full bg-white shadow-md transition-all duration-150 ${
+                isScrubbing || isHovered ? "opacity-100 scale-100" : "opacity-0 group-hover/seek:opacity-100 scale-75 group-hover/seek:scale-100"
+              }`}
+            />
+          </div>
+        </div>
+      </div>
+      </div>
 
-      {/* Reel 3-Dot Options & Auto-Scroll Modal */}
-      <ReelOptionsModal
-        isOpen={showOptionsModal}
-        onClose={() => setShowOptionsModal(false)}
-        reel={currentItem}
-        isAuthor={currentItem?.author?._id === currentUserId || currentItem?.author === currentUserId}
-        isSaved={isSaved}
-        onToggleSave={handleToggleSave}
-        onOpenRemix={() => setShowRemixModal(true)}
-        onOpenShare={() => setShowShare(true)}
-        playbackSpeed={playbackSpeed}
-        onChangePlaybackSpeed={setPlaybackSpeed}
-        autoScroll={autoScroll}
-        onToggleAutoScroll={onToggleAutoScroll}
-        showCaptions={showCaptions}
-        onToggleCaptions={handleToggleCaptions}
-        onDeleteReel={handleDeleteReel}
-        onNotInterested={() => {
-          if (onNext) onNext();
-        }}
-        onToggleComments={handleToggleComments}
-        commentsDisabled={commentsDisabled}
-      />
+      {/* DESKTOP-ONLY RIGHT ACTION BAR (ANCHORED TO RIGHT OF CENTERED VIDEO - EXACT INSTAGRAM WEB) */}
+      <div className="hidden md:flex flex-col items-center justify-end absolute left-full ml-4 lg:ml-6 bottom-0 pb-2 gap-3 text-text select-none shrink-0 z-40">
+        {/* 1. Like */}
+        <div className="flex flex-col items-center">
+          <button
+            onClick={handleOptimisticLike}
+            className="p-2 group cursor-pointer active:scale-75 transition-transform text-text"
+            title={isLiked ? "Unlike" : "Like"}
+          >
+            {isLiked ? (
+              <GoHeartFill className="w-7 h-7 text-[#ff3040] animate-heart-burst" />
+            ) : (
+              <GoHeart className="w-7 h-7 group-hover:opacity-70 transition-opacity" />
+            )}
+          </button>
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              triggerHaptic("light");
+              setShowLikersModal(true);
+            }}
+            className="text-xs font-medium text-text cursor-pointer hover:underline -mt-0.5"
+            title="View likes"
+          >
+            {likesCount > 0 ? likesCount : "0"}
+          </span>
+        </div>
 
-      {/* AI Transparency Disclosure Modal */}
-      <AIInfoModal
-        isOpen={showAIInfoModal}
-        onClose={() => setShowAIInfoModal(false)}
-        aiLabel={currentItem?.aiLabel}
-        authorName={currentItem?.author?.name || `@${currentItem?.author?.userName}` || "The creator"}
-      />
+        {/* 2. Comment */}
+        <div className="flex flex-col items-center">
+          <button
+            onClick={() => setShowComments(true)}
+            className="p-2 group cursor-pointer active:scale-75 transition-transform text-text"
+            title="Comments"
+          >
+            <MdOutlineComment className="w-7 h-7 group-hover:opacity-70 transition-opacity" />
+          </button>
+          <span className="text-xs font-medium text-text -mt-0.5">
+            {(currentItem?.comments || []).reduce((acc, c) => acc + 1 + (c.replies?.length || 0), 0)}
+          </span>
+        </div>
+
+        {/* 3. Repost / Reshare */}
+        <div className="flex flex-col items-center">
+          <button
+            onClick={() => setShowReshareModal(true)}
+            className="p-2 group cursor-pointer active:scale-75 transition-transform text-text"
+            title="Reshare & Repost Reel"
+          >
+            <Repeat className="w-6 h-6 group-hover:opacity-70 transition-opacity" />
+          </button>
+          <span className="text-xs font-medium text-text -mt-0.5">
+            {currentItem?.forwards || 0}
+          </span>
+        </div>
+
+        {/* 4. Share / Send */}
+        <div className="flex flex-col items-center">
+          <button
+            onClick={() => setShowShare(true)}
+            className="p-2 group cursor-pointer active:scale-75 transition-transform text-text"
+            title="Share"
+          >
+            <Send className="w-6 h-6 -rotate-12 group-hover:opacity-70 transition-opacity" />
+          </button>
+        </div>
+
+        {/* 5. Save Bookmark */}
+        <button
+          onClick={handleToggleSave}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setShowCollectionsModal(true);
+          }}
+          className="p-2 group cursor-pointer active:scale-75 transition-transform text-text"
+          title={isSaved ? "Saved (Right click for Collection)" : "Save Bookmark"}
+        >
+          {isSaved ? (
+            <BookmarkCheck className="w-6 h-6 text-amber-500 fill-amber-500" />
+          ) : (
+            <Bookmark className="w-6 h-6 group-hover:opacity-70 transition-opacity" />
+          )}
+        </button>
+
+        {/* 6. Views & Insights */}
+        <div className="flex flex-col items-center">
+          <button
+            onClick={() => setShowViewers(true)}
+            className="p-2 group cursor-pointer active:scale-75 transition-transform text-text"
+            title="Views & Insights"
+          >
+            <Eye className="w-6 h-6 group-hover:opacity-70 transition-opacity" />
+          </button>
+          <span className="text-xs font-medium text-text -mt-0.5">
+            {currentItem?.views || 0}
+          </span>
+        </div>
+
+        {/* 7. 3-Dot Options */}
+        <button
+          onClick={() => setShowOptionsModal(true)}
+          className="p-2 group cursor-pointer active:scale-75 transition-transform text-text"
+          title="More Options"
+        >
+          <MoreHorizontal className="w-6 h-6 group-hover:opacity-70 transition-opacity" />
+        </button>
+
+        {/* 8. Delete Reel (Owner only) */}
+        {isAuthor && (
+          <button
+            onClick={() => setShowDeleteModal(true)}
+            className="p-2 group cursor-pointer active:scale-75 transition-transform text-rose-500"
+            title="Delete Reel"
+          >
+            <Trash2 className="w-6 h-6 hover:text-rose-400 transition-colors" />
+          </button>
+        )}
+
+        {/* 9. Audio Album Art / Disc */}
+        {(() => {
+          let trackObj = currentItem?.audioTrack || currentItem?.music;
+          if (typeof trackObj === "string") {
+            try {
+              trackObj = JSON.parse(trackObj);
+            } catch {
+              trackObj = { title: trackObj };
+            }
+          }
+          const trackParam = trackObj?.id || trackObj?.title || `${currentItem?.author?.userName}-original`;
+
+          return (
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/audio/${encodeURIComponent(trackParam)}`, {
+                  state: { music: trackObj },
+                });
+              }}
+              className="w-7 h-7 rounded-md overflow-hidden border-2 border-text/60 mt-1 cursor-pointer hover:scale-105 active:scale-90 transition-transform shrink-0 shadow-md"
+              title="Audio track"
+            >
+              {currentItem?.author?.profileImage?.url ? (
+                <img
+                  src={currentItem.author.profileImage.url}
+                  alt=""
+                  className="w-full h-full object-cover animate-spin-slow"
+                />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-tr from-rose-500 to-purple-600 flex items-center justify-center">
+                  <Disc className="w-3.5 h-3.5 text-white" />
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* Modals with AnimatePresence for Smooth Enter & Exit Animations */}
+      <AnimatePresence>
+        {/* Share Sheet */}
+        {showShare && (
+          <ShareSheet
+            open={showShare}
+            onClose={() => setShowShare(false)}
+            entity={currentItem}
+            entityType="reel"
+            following={userData?.user?.following}
+          />
+        )}
+
+        {/* Reshare & Repost Modal */}
+        {showReshareModal && (
+          <ReelReshareModal
+            isOpen={showReshareModal}
+            onClose={() => setShowReshareModal(false)}
+            reel={currentItem}
+            onOpenRemix={() => setShowRemixModal(true)}
+            onOpenShare={() => setShowShare(true)}
+            onSuccess={(data) => {
+              if (data?.isReshared) {
+                const updated = { ...currentItem, forwards: (currentItem.forwards || 0) + 1 };
+                const updatedReels = reelData.map((r) => (r._id === currentItem._id ? updated : r));
+                dispatch(setReelData(updatedReels));
+              }
+            }}
+          />
+        )}
+
+        {/* Remix Modal */}
+        {showRemixModal && (
+          <RemixReelModal
+            isOpen={showRemixModal}
+            onClose={() => setShowRemixModal(false)}
+            originalReel={currentItem}
+            onSuccess={() => snackbar.success("Remix created!")}
+          />
+        )}
+
+        {/* Reel 3-Dot Options & Auto-Scroll Modal */}
+        {showOptionsModal && (
+          <ReelOptionsModal
+            isOpen={showOptionsModal}
+            onClose={() => setShowOptionsModal(false)}
+            reel={currentItem}
+            isAuthor={isAuthor}
+            isSaved={isSaved}
+            onToggleSave={handleToggleSave}
+            onOpenRemix={() => setShowRemixModal(true)}
+            onOpenReshare={() => setShowReshareModal(true)}
+            onOpenShare={() => setShowShare(true)}
+            onOpenViewers={() => setShowViewers(true)}
+            playbackSpeed={playbackSpeed}
+            onChangePlaybackSpeed={handleChangePlaybackSpeed}
+            applySpeedToAll={applySpeedToAll}
+            onToggleApplySpeedToAll={handleToggleApplySpeedToAll}
+            autoScroll={autoScroll}
+            onToggleAutoScroll={onToggleAutoScroll}
+            showCaptions={showCaptions}
+            onToggleCaptions={handleToggleCaptions}
+            onDeleteReel={() => {
+              setShowOptionsModal(false);
+              setShowDeleteModal(true);
+            }}
+            onNotInterested={() => {
+              if (onNext) onNext();
+            }}
+            onToggleComments={handleToggleComments}
+            commentsDisabled={commentsDisabled}
+          />
+        )}
+
+        {/* AI Transparency Disclosure Modal */}
+        {showAIInfoModal && (
+          <AIInfoModal
+            isOpen={showAIInfoModal}
+            onClose={() => setShowAIInfoModal(false)}
+            aiLabel={currentItem?.aiLabel}
+            authorName={currentItem?.author?.name || `@${currentItem?.author?.userName}` || "The creator"}
+          />
+        )}
+
+        {/* Likers Modal for Reels */}
+        {showLikersModal && (
+          <LikersModal
+            isOpen={showLikersModal}
+            onClose={() => setShowLikersModal(false)}
+            reelId={currentItem?._id}
+          />
+        )}
+
+        {/* Advanced Nested Comments Modal for Reels */}
+        {showComments && (
+          <CommentsModal
+            isOpen={showComments}
+            onClose={() => setShowComments(false)}
+            reel={currentItem}
+          />
+        )}
+
+        {/* Save Reel to Custom Collections Modal */}
+        {showCollectionsModal && (
+          <CollectionsModal
+            isOpen={showCollectionsModal}
+            onClose={() => setShowCollectionsModal(false)}
+            reelId={currentItem?._id}
+          />
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteModal && (
+          <motion.div
+            key="delete-reel-modal"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={() => setShowDeleteModal(false)}
+            className="fixed inset-0 z-[1200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm bg-[#181d28] border border-white/15 rounded-3xl p-6 shadow-2xl text-center space-y-4"
+            >
+              <div className="w-12 h-12 rounded-full bg-rose-500/15 border border-rose-500/30 flex items-center justify-center mx-auto text-rose-500">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="space-y-1.5">
+                <h3 className="text-base font-bold text-white">Delete Reel?</h3>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Are you sure you want to permanently delete this reel? This action cannot be undone and will delete all associated comments, likes, and analytics.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={deleteLoading}
+                  onClick={() => setShowDeleteModal(false)}
+                  className="py-2.5 px-4 bg-white/10 hover:bg-white/15 text-zinc-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={deleteLoading}
+                  onClick={handleConfirmDeleteReel}
+                  className="py-2.5 px-4 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-rose-600/30"
+                >
+                  {deleteLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

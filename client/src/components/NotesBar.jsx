@@ -9,6 +9,7 @@ import dp from "../assets/dp3.png";
 
 export const NotesBar = () => {
   const { userData } = useSelector((s) => s.user);
+  const { onlineUsers = [] } = useSelector((s) => s.message || {});
   const currentUser = userData?.user || userData;
 
   const [notes, setNotes] = useState([]);
@@ -21,6 +22,8 @@ export const NotesBar = () => {
   // Active Note Sound Playback Modal
   const [activePlayingNote, setActivePlayingNote] = useState(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [noteReplyText, setNoteReplyText] = useState("");
+  const [sendingReply, setSendingReply] = useState(false);
   const audioRef = useRef(null);
 
   const fetchNotes = async () => {
@@ -35,7 +38,20 @@ export const NotesBar = () => {
   };
 
   useEffect(() => {
-    fetchNotes();
+    let isMounted = true;
+    api
+      .get("/note")
+      .then((res) => {
+        if (isMounted && res.data?.notes) {
+          setNotes(res.data.notes);
+        }
+      })
+      .catch((e) => {
+        console.warn("NotesBar: fetchNotes failed", e);
+      });
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const myNote = notes.find(
@@ -117,6 +133,30 @@ export const NotesBar = () => {
     }
     setIsPlayingAudio(false);
     setActivePlayingNote(null);
+    setNoteReplyText("");
+  };
+
+  const handleSendNoteReply = async (e) => {
+    e.preventDefault();
+    if (!noteReplyText.trim() || !activePlayingNote) return;
+
+    try {
+      setSendingReply(true);
+      const recipientId = activePlayingNote.user?._id || activePlayingNote.user;
+      const text = noteReplyText.trim();
+
+      await api.post("/message/send", {
+        receiverId: recipientId,
+        text: `Replied to your note "${activePlayingNote.text}": ${text}`,
+      });
+
+      snackbar.success(`Reply sent to @${activePlayingNote.user?.userName || "User"}! ✈️`);
+      closeNotePlayback();
+    } catch (err) {
+      snackbar.error(err.response?.data?.message || "Failed to send reply");
+    } finally {
+      setSendingReply(false);
+    }
   };
 
   useEffect(() => {
@@ -209,9 +249,13 @@ export const NotesBar = () => {
                   />
                 </div>
 
-                {userObj?.isOnline && (
-                  <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-bg rounded-full shadow" />
-                )}
+                {(() => {
+                  const uid = (userObj?._id || userObj)?.toString();
+                  const isUserOnline = uid && (Boolean(userObj?.isOnline) || onlineUsers.includes(uid));
+                  return isUserOnline ? (
+                    <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-bg rounded-full shadow" />
+                  ) : null;
+                })()}
               </div>
 
               <span className="text-[11px] font-semibold text-text truncate max-w-[64px]">
@@ -293,6 +337,26 @@ export const NotesBar = () => {
                   )}
                 </div>
               )}
+
+              {/* Reply to Note Input Form (Instagram Style) */}
+              <form onSubmit={handleSendNoteReply} className="flex items-center gap-2 pt-2 border-t border-border">
+                <input
+                  type="text"
+                  value={noteReplyText}
+                  onChange={(e) => setNoteReplyText(e.target.value)}
+                  placeholder={`Send message to @${activePlayingNote.user?.userName || "User"}...`}
+                  maxLength={200}
+                  className="flex-1 px-3.5 py-2 bg-surface-hover border border-border rounded-full text-xs text-text placeholder:text-text-muted focus:outline-none focus:border-rose-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!noteReplyText.trim() || sendingReply}
+                  className="p-2 rounded-full bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white transition shadow-sm cursor-pointer"
+                  title="Send reply"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                </button>
+              </form>
             </motion.div>
           </div>
         )}

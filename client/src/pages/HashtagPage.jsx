@@ -111,7 +111,7 @@ export const HashtagPage = () => {
                 key={post._id}
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                onClick={() => navigate(post.mediaType === "video" ? "/reels" : "/")}
+                onClick={() => navigate(post.mediaType === "video" ? `/reel/${post._id}` : `/post/${post._id}`)}
                 className="relative aspect-square rounded-2xl overflow-hidden bg-surface border border-border cursor-pointer group shadow-lg"
               >
                 {post.mediaType === "video" ? (

@@ -1,9 +1,12 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { MdOutlineKeyboardBackspace } from "react-icons/md";
+import { ChevronUp, ChevronDown, Sparkles, Users, Star, Compass, UserPlus } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
-import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
+import { useNavigate, useLocation, useSearchParams, useParams } from "react-router-dom";
 import ReelCard from "../components/ReelCard";
 import ReelPreloader from "../components/ReelPreloader";
+import LeftHome from "../components/LeftHome";
+import CloseFriendsModal from "../components/CloseFriendsModal";
 import api from "../lib/axios";
 import { useGetAllReelsQuery } from "../redux/api/apiSlice";
 import { setReelData } from "../redux/features/reelSlice";
@@ -12,16 +15,22 @@ export const Reels = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const { reelId } = useParams();
   const dispatch = useDispatch();
 
-  const targetReelId = searchParams.get("reelId") || location.state?.initialReelId;
+  const targetReelId = reelId || searchParams.get("reelId") || location.state?.initialReelId;
+  const [reelMode, setReelMode] = useState("for-you");
+  const [showCloseFriendsModal, setShowCloseFriendsModal] = useState(false);
   
   // RTK Query with instant cache & stale-while-revalidate
-  const { data: reelsResponse, isLoading: loadingReels } = useGetAllReelsQuery(undefined, {
+  const { data: reelsResponse, isLoading: loadingReels, isFetching: isReelsFetching } = useGetAllReelsQuery(reelMode, {
     refetchOnMountOrArgChange: true,
   });
   const reelState = useSelector((state) => state.reel);
-  const reelData = reelsResponse?.reels || reelState?.reelData || [];
+  const reelData = useMemo(
+    () => (reelsResponse?.reels !== undefined ? reelsResponse.reels : reelState?.reelData || []),
+    [reelsResponse, reelState?.reelData]
+  );
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [autoScroll, setAutoScroll] = useState(() => {
@@ -45,12 +54,12 @@ export const Reels = () => {
 
   // Sync to Redux slice
   useEffect(() => {
-    if (reelsResponse?.reels) {
+    if (reelsResponse?.reels && reelsResponse.mode === reelMode) {
       dispatch(setReelData(reelsResponse.reels));
     }
-  }, [reelsResponse, dispatch]);
+  }, [reelsResponse, reelMode, dispatch]);
 
-  const loading = loadingReels && reelData.length === 0;
+  const loading = (loadingReels || isReelsFetching) && reelData.length === 0;
 
   // Target reel positioning & smooth scroll
   useEffect(() => {
@@ -98,130 +107,292 @@ export const Reels = () => {
     }
   };
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
+    if (!containerRef.current) return;
     const total = reelData?.length || 0;
     if (total <= 1) return;
-    const nextIdx = (currentIndex + 1) % total;
+    const height = containerRef.current.clientHeight || window.innerHeight;
+    const currentScrollIndex = Math.round(containerRef.current.scrollTop / height);
+    const nextIdx = (currentScrollIndex + 1) % total;
     setCurrentIndex(nextIdx);
-    if (containerRef.current) {
-      const targetElement = containerRef.current.children[nextIdx];
-      if (targetElement && typeof targetElement.scrollIntoView === "function") {
-        targetElement.scrollIntoView({ behavior: "smooth", block: "start" });
-      } else {
-        const height = containerRef.current.clientHeight || window.innerHeight;
-        containerRef.current.scrollTo({
-          top: nextIdx * height,
-          behavior: "smooth",
-        });
-      }
-    }
-  };
+    containerRef.current.scrollTo({
+      top: nextIdx * height,
+      behavior: "smooth",
+    });
+  }, [reelData?.length]);
 
-  const handlePrev = () => {
-    if (currentIndex > 0) {
-      const prevIdx = currentIndex - 1;
-      setCurrentIndex(prevIdx);
-      if (containerRef.current) {
-        const targetElement = containerRef.current.children[prevIdx];
-        if (targetElement && typeof targetElement.scrollIntoView === "function") {
-          targetElement.scrollIntoView({ behavior: "smooth", block: "start" });
-        } else {
-          const height = containerRef.current.clientHeight || window.innerHeight;
-          containerRef.current.scrollTo({
-            top: prevIdx * height,
-            behavior: "smooth",
-          });
-        }
+  const handlePrev = useCallback(() => {
+    if (!containerRef.current) return;
+    const total = reelData?.length || 0;
+    if (total <= 1) return;
+    const height = containerRef.current.clientHeight || window.innerHeight;
+    const currentScrollIndex = Math.round(containerRef.current.scrollTop / height);
+    const prevIdx = (currentScrollIndex - 1 + total) % total;
+    setCurrentIndex(prevIdx);
+    containerRef.current.scrollTo({
+      top: prevIdx * height,
+      behavior: "smooth",
+    });
+  }, [reelData?.length]);
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA"
+      ) {
+        return;
       }
-    }
-  };
+      if (e.key === "ArrowDown" || e.key === "j") {
+        e.preventDefault();
+        handleNext();
+      } else if (e.key === "ArrowUp" || e.key === "k") {
+        e.preventDefault();
+        handlePrev();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [currentIndex, reelData, handleNext, handlePrev]);
 
   return (
-    <div className="w-screen h-screen bg-black overflow-hidden flex flex-col justify-center items-center relative select-none">
-      {/* Background Preloader for adjacent 2 videos */}
-      {reelData && reelData.length > 0 && (
-        <ReelPreloader reels={reelData} currentIndex={currentIndex} />
-      )}
+    <div className="w-full h-[100dvh] bg-bg text-text overflow-hidden flex relative select-none">
+      <div className="w-full h-full flex">
+        {/* Fixed Left Sidebar Navigation for Desktop (Instagram Web style) */}
+        <div className="hidden md:flex shrink-0 z-30">
+          <LeftHome />
+        </div>
 
-      {/* Header Bar */}
-      <div className="w-full h-[70px] flex items-center justify-between px-4 fixed top-0 left-0 z-[100] bg-gradient-to-b from-black/80 to-transparent pointer-events-auto">
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={() => {
-              if (window.history.length > 1) {
-                navigate(-1);
-              } else if (location.state?.from) {
-                navigate(location.state.from, { replace: true });
-              } else {
-                navigate("/explore", { replace: true });
-              }
-            }} 
-            className="text-white p-1.5 hover:bg-white/10 rounded-full cursor-pointer active:scale-90 transition"
-            title="Go Back"
-          >
-            <MdOutlineKeyboardBackspace className="w-6 h-6" />
-          </button>
-          <h1 className="text-white text-lg font-bold">Reels</h1>
+        {/* Main Reels Feed Area (Centered in the remaining screen space) */}
+        <div className="flex-1 h-full flex flex-col justify-center items-center relative overflow-y-hidden md:overflow-visible bg-black md:bg-bg">
+          {/* Top Filter Mode Switcher (For You | Following | Favorites) */}
+          <div className="absolute top-4 z-[90] flex items-center bg-black/50 backdrop-blur-lg border border-white/10 rounded-full p-1 shadow-2xl pointer-events-auto">
+            <button
+              onClick={() => {
+                setReelMode("for-you");
+                setCurrentIndex(0);
+                containerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition active:scale-95 cursor-pointer ${
+                reelMode === "for-you"
+                  ? "bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow"
+                  : "text-white/70 hover:text-white hover:bg-white/10"
+              }`}
+            >
+              <Sparkles className="w-3 h-3" />
+              <span>For You</span>
+            </button>
+            <button
+              onClick={() => {
+                setReelMode("following");
+                setCurrentIndex(0);
+                containerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition active:scale-95 cursor-pointer ${
+                reelMode === "following"
+                  ? "bg-indigo-600 text-white shadow"
+                  : "text-white/70 hover:text-white hover:bg-white/10"
+              }`}
+            >
+              <Users className="w-3 h-3" />
+              <span>Following</span>
+            </button>
+            <button
+              onClick={() => {
+                setReelMode("favorites");
+                setCurrentIndex(0);
+                containerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition active:scale-95 cursor-pointer ${
+                reelMode === "favorites"
+                  ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow"
+                  : "text-white/70 hover:text-white hover:bg-white/10"
+              }`}
+            >
+              <Star className="w-3 h-3" />
+              <span>Favorites</span>
+            </button>
+          </div>
+
+          {/* Background Preloader for adjacent 2 videos */}
+          {reelData && reelData.length > 0 && (
+            <ReelPreloader
+              reels={reelData}
+              currentIndex={currentIndex}
+              preloadCount={2}
+            />
+          )}
+
+          {/* Back button for Mobile */}
+          <div className="flex md:hidden absolute top-4 left-4 z-[100] pointer-events-auto">
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => {
+                  if (window.history.length > 1) {
+                    navigate(-1);
+                  } else if (location.state?.from) {
+                    navigate(location.state.from, { replace: true });
+                  } else {
+                    navigate("/explore", { replace: true });
+                  }
+                }} 
+                className="text-white p-1.5 hover:bg-white/10 rounded-full cursor-pointer active:scale-90 transition"
+                title="Go Back"
+              >
+                <MdOutlineKeyboardBackspace className="w-6 h-6" />
+              </button>
+            </div>
+          </div>
+
+          {/* DESKTOP FLOATING UP/DOWN NAVIGATION CONTROLS */}
+          {reelData && reelData.length > 1 && (
+            <div className="hidden lg:flex flex-col gap-3 fixed right-8 top-1/2 -translate-y-1/2 z-[110] pointer-events-auto">
+              <button
+                disabled={currentIndex === 0}
+                onClick={handlePrev}
+                className="w-12 h-12 rounded-full bg-surface/90 hover:bg-surface border border-border text-text flex items-center justify-center shadow-xl backdrop-blur-md transition hover:scale-105 active:scale-95 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+                title="Previous Reel (Up Arrow)"
+              >
+                <ChevronUp className="w-6 h-6" />
+              </button>
+
+              <button
+                disabled={currentIndex === reelData.length - 1}
+                onClick={handleNext}
+                className="w-12 h-12 rounded-full bg-surface/90 hover:bg-surface border border-border text-text flex items-center justify-center shadow-xl backdrop-blur-md transition hover:scale-105 active:scale-95 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+                title="Next Reel (Down Arrow)"
+              >
+                <ChevronDown className="w-6 h-6" />
+              </button>
+            </div>
+          )}
+
+          {/* Loading Skeleton */}
+          {loading && (!reelData || reelData.length === 0) && (
+            <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-text z-10">
+              <div className="w-10 h-10 border-3 border-rose-500 border-t-transparent rounded-full animate-spin shadow-lg" />
+              <p className="text-xs font-bold text-text-muted tracking-wide animate-pulse">Loading {reelMode === "following" ? "Following" : reelMode === "favorites" ? "Favorites" : "For You"} Reels...</p>
+            </div>
+          )}
+
+          {/* Mode-Specific Empty State */}
+          {!loading && (!reelData || reelData.length === 0) && (
+            <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-4 text-text z-10">
+              {reelMode === "following" ? (
+                <>
+                  <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shadow-xl">
+                    <Users className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-1 max-w-xs">
+                    <h2 className="text-base font-bold">No Reels from Following</h2>
+                    <p className="text-xs text-text-muted">
+                      Creators you follow haven't posted any reels yet. Follow more creators to populate this tab!
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 pt-2">
+                    <button
+                      onClick={() => navigate("/explore")}
+                      className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 font-bold text-xs rounded-full text-white shadow-xl transition cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Compass className="w-4 h-4" />
+                      <span>Explore Creators</span>
+                    </button>
+                    <button
+                      onClick={() => setReelMode("for-you")}
+                      className="px-5 py-2.5 bg-surface-hover hover:bg-surface-active border border-border font-bold text-xs rounded-full text-text transition cursor-pointer"
+                    >
+                      For You
+                    </button>
+                  </div>
+                </>
+              ) : reelMode === "favorites" ? (
+                <>
+                  <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shadow-xl">
+                    <Star className="w-8 h-8 fill-amber-400/20" />
+                  </div>
+                  <div className="space-y-1 max-w-xs">
+                    <h2 className="text-base font-bold">No Reels from Favorites</h2>
+                    <p className="text-xs text-text-muted">
+                      Add friends and creators to your Close Friends & Favorites list to watch their reels here.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 pt-2">
+                    <button
+                      onClick={() => setShowCloseFriendsModal(true)}
+                      className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 font-bold text-xs rounded-full text-white shadow-xl transition cursor-pointer flex items-center gap-1.5"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      <span>Manage Favorites</span>
+                    </button>
+                    <button
+                      onClick={() => setReelMode("for-you")}
+                      className="px-5 py-2.5 bg-surface-hover hover:bg-surface-active border border-border font-bold text-xs rounded-full text-text transition cursor-pointer"
+                    >
+                      For You
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-500 shadow-xl">
+                    <Sparkles className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-1 max-w-xs">
+                    <h2 className="text-base font-bold">No Reels Yet</h2>
+                    <p className="text-xs text-text-muted">
+                      Be the first to share an inspiring video or discover content from creators.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 pt-2">
+                    <button
+                      onClick={() => navigate("/upload")}
+                      className="px-5 py-2.5 bg-gradient-to-r from-rose-500 to-purple-600 font-bold text-xs rounded-full text-white shadow-xl hover:opacity-95 transition cursor-pointer"
+                    >
+                      Upload Reel
+                    </button>
+                    <button
+                      onClick={() => navigate("/explore")}
+                      className="px-5 py-2.5 bg-surface-hover hover:bg-surface-active border border-border font-bold text-xs rounded-full text-text transition cursor-pointer"
+                    >
+                      Explore Feed
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Scrollable Container with Snap */}
+          {reelData && reelData.length > 0 && (
+            <div
+              ref={containerRef}
+              onScroll={handleScroll}
+              className="h-[100dvh] w-full flex flex-col items-center overflow-y-scroll snap-y snap-mandatory scrollbar-none"
+            >
+              {reelData.map((reel, index) => (
+                <div key={reel._id || index} className="h-[100dvh] w-full flex items-center justify-center snap-start snap-always shrink-0 py-0 md:py-4">
+                  <ReelCard
+                    reel={reel}
+                    isActive={index === currentIndex}
+                    onNext={handleNext}
+                    onPrev={handlePrev}
+                    autoScroll={autoScroll}
+                    onToggleAutoScroll={toggleAutoScroll}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Loading Skeleton */}
-      {loading && (!reelData || reelData.length === 0) && (
-        <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-white z-10">
-          <div className="w-10 h-10 border-3 border-rose-500 border-t-transparent rounded-full animate-spin shadow-lg" />
-          <p className="text-xs font-bold text-zinc-400 tracking-wide animate-pulse">Loading Reels...</p>
-        </div>
-      )}
-
-      {/* Empty State */}
-      {!loading && (!reelData || reelData.length === 0) && (
-        <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-4 text-white z-10">
-          <div className="w-16 h-16 rounded-full bg-surface-overlay border border-white/15 flex items-center justify-center text-rose-500 shadow-xl">
-            <span className="text-3xl">🎬</span>
-          </div>
-          <div className="space-y-1">
-            <h2 className="text-base font-bold">No Reels Yet</h2>
-            <p className="text-xs text-zinc-400 max-w-xs">
-              Be the first to share an inspiring video or discover content from creators.
-            </p>
-          </div>
-          <div className="flex items-center gap-3 pt-2">
-            <button
-              onClick={() => navigate("/upload")}
-              className="px-5 py-2.5 bg-gradient-to-r from-rose-500 to-purple-600 font-bold text-xs rounded-full text-white shadow-xl hover:opacity-95 transition cursor-pointer"
-            >
-              Upload Reel
-            </button>
-            <button
-              onClick={() => navigate("/explore")}
-              className="px-5 py-2.5 bg-white/10 hover:bg-white/20 border border-white/15 font-bold text-xs rounded-full text-white transition cursor-pointer"
-            >
-              Explore Feed
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Scrollable Container with Snap */}
-      {reelData && reelData.length > 0 && (
-        <div
-          ref={containerRef}
-          onScroll={handleScroll}
-          className="h-screen w-full flex flex-col items-center overflow-y-scroll snap-y snap-mandatory scrollbar-none"
-        >
-          {reelData.map((reel, index) => (
-            <div key={reel._id || index} className="h-screen w-full flex justify-center snap-start shrink-0">
-              <ReelCard
-                reel={reel}
-                isActive={index === currentIndex}
-                onNext={handleNext}
-                onPrev={handlePrev}
-                autoScroll={autoScroll}
-                onToggleAutoScroll={toggleAutoScroll}
-              />
-            </div>
-          ))}
-        </div>
+      {/* Close Friends / Favorites Management Modal */}
+      {showCloseFriendsModal && (
+        <CloseFriendsModal
+          isOpen={showCloseFriendsModal}
+          onClose={() => setShowCloseFriendsModal(false)}
+        />
       )}
     </div>
   );

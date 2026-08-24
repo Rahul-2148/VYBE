@@ -21,20 +21,38 @@ const channelMessageSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["text", "image", "video", "audio", "file"],
+      enum: ["text", "image", "video", "audio", "voice", "file", "sticker"],
       default: "text",
     },
     content: {
-      text: String,
+      text: { type: String, default: "" },
       media: [
         {
           url: String,
           public_id: String,
-          type: String, // image / video / audio / document
+          type: String, // image / video / audio / voice / sticker / document / file
           name: String,
           size: Number,
         },
       ],
+      voiceDuration: {
+        type: Number,
+        default: 0,
+      },
+    },
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ChannelMessage",
+      default: null,
+    },
+    isPinned: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    edited: {
+      type: Boolean,
+      default: false,
     },
     reactions: [
       {

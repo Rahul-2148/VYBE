@@ -32,6 +32,7 @@ const conversationRouter = express.Router();
 // Create Conversations
 conversationRouter.post("/one-to-one", isAuthenticated, createOneToOneConversation);
 conversationRouter.post("/group", isAuthenticated, createGroupConversation);
+conversationRouter.post("/create-group", isAuthenticated, createGroupConversation);
 
 // Group Member Management
 conversationRouter.post("/add/:conversationId", isAuthenticated, addGroupMember);

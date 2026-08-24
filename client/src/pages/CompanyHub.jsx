@@ -22,6 +22,39 @@ const TABS = [
   { id: "terms", label: "Terms of Service", icon: FileText, path: "/terms" },
 ];
 
+const FAQ_ITEMS = [
+  {
+    q: "How do I get verified on VYBE?",
+    a: "Accounts that represent authentic, notable, and active public figures, brands, or verified creators can apply directly in Settings > Account Security & Verification, or reach out with portfolio credentials.",
+    cat: "Account & Verification",
+  },
+  {
+    q: "How does 2-Factor Authentication (2FA) protect my account?",
+    a: "2FA adds an essential security layer. When enabled in Security Settings, signing in requires both your password/magic link and a time-based 6-digit TOTP authentication code.",
+    cat: "Security",
+  },
+  {
+    q: "How do Creator Monetization and Payouts work?",
+    a: "Creators with 1,000+ followers can activate the Monetization Dashboard to receive subscriber tips, virtual badges, and brand sponsorship revenue with instant payout transfers.",
+    cat: "Monetization",
+  },
+  {
+    q: "How do I request a creator's phone number or contact info?",
+    a: "On a creator's profile, click 'Contact Info'. If the creator has restricted their direct number, you can send an interactive Contact Request in chat, which they can approve or decline.",
+    cat: "Messaging & Privacy",
+  },
+  {
+    q: "What video specifications are recommended for Reels?",
+    a: "We recommend 1080x1920 (9:16 portrait) MP4/MOV formats up to 60fps and 100MB per video. Our adaptive streaming engine transcodes to multiple bitrates for zero-buffering playback.",
+    cat: "Content & Uploads",
+  },
+  {
+    q: "How do I report inappropriate content or copyright violations?",
+    a: "Click the 3-dots menu on any post, reel, or story and select 'Report'. Our automated AI safety filters and 24/7 human moderation team review reports in real-time.",
+    cat: "Safety & Community",
+  },
+];
+
 export const CompanyHub = ({ defaultTab = "about" }) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -65,8 +98,9 @@ export const CompanyHub = ({ defaultTab = "about" }) => {
   const [codeLang, setCodeLang] = useState("curl");
 
   useEffect(() => {
-    setActiveTab(currentTab);
+    const timer = setTimeout(() => setActiveTab(currentTab), 0);
     window.scrollTo({ top: 0, behavior: "smooth" });
+    return () => clearTimeout(timer);
   }, [currentTab]);
 
   const handleTabChange = (tabId) => {
@@ -74,7 +108,7 @@ export const CompanyHub = ({ defaultTab = "about" }) => {
     triggerHaptic("light");
     const target = TABS.find((t) => t.id === tabId);
     if (target) {
-      navigate(target.path);
+      navigate(target.path, { replace: true });
     }
   };
 
@@ -127,40 +161,6 @@ export const CompanyHub = ({ defaultTab = "about" }) => {
     setGeneratedApiKey(token);
     snackbar.success("Sandbox API Key generated!");
   };
-
-  // FAQ Items
-  const FAQ_ITEMS = [
-    {
-      q: "How do I get verified on VYBE?",
-      a: "Accounts that represent authentic, notable, and active public figures, brands, or verified creators can apply directly in Settings > Account Security & Verification, or reach out with portfolio credentials.",
-      cat: "Account & Verification"
-    },
-    {
-      q: "How does 2-Factor Authentication (2FA) protect my account?",
-      a: "2FA adds an essential security layer. When enabled in Security Settings, signing in requires both your password/magic link and a time-based 6-digit TOTP authentication code.",
-      cat: "Security"
-    },
-    {
-      q: "How do Creator Monetization and Payouts work?",
-      a: "Creators with 1,000+ followers can activate the Monetization Dashboard to receive subscriber tips, virtual badges, and brand sponsorship revenue with instant payout transfers.",
-      cat: "Monetization"
-    },
-    {
-      q: "How do I request a creator's phone number or contact info?",
-      a: "On a creator's profile, click 'Contact Info'. If the creator has restricted their direct number, you can send an interactive Contact Request in chat, which they can approve or decline.",
-      cat: "Messaging & Privacy"
-    },
-    {
-      q: "What video specifications are recommended for Reels?",
-      a: "We recommend 1080x1920 (9:16 portrait) MP4/MOV formats up to 60fps and 100MB per video. Our adaptive streaming engine transcodes to multiple bitrates for zero-buffering playback.",
-      cat: "Content & Uploads"
-    },
-    {
-      q: "How do I report inappropriate content or copyright violations?",
-      a: "Click the 3-dots menu on any post, reel, or story and select 'Report'. Our automated AI safety filters and 24/7 human moderation team review reports in real-time.",
-      cat: "Safety & Community"
-    }
-  ];
 
   const filteredFaqs = useMemo(() => {
     if (!searchQuery.trim()) return FAQ_ITEMS;

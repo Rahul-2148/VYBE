@@ -1,22 +1,16 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FolderPlus, Bookmark, Plus, Check, X } from "lucide-react";
 import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
-export const CollectionsModal = ({ isOpen, onClose, postId }) => {
+export const CollectionsModal = ({ isOpen, onClose, postId, reelId }) => {
   const [collections, setCollections] = useState([]);
   const [newCollectionName, setNewCollectionName] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (isOpen) {
-      fetchCollections();
-    }
-  }, [isOpen]);
-
-  const fetchCollections = async () => {
+  const fetchCollections = useCallback(async () => {
     try {
       const res = await api.get("/post/collections");
       if (res.data.success) {
@@ -25,7 +19,26 @@ export const CollectionsModal = ({ isOpen, onClose, postId }) => {
     } catch {
       snackbar.error("Failed to load collections.");
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (isOpen) {
+      api
+        .get("/post/collections")
+        .then((res) => {
+          if (isMounted && res.data.success) {
+            setCollections(res.data.collections || []);
+          }
+        })
+        .catch(() => {
+          if (isMounted) snackbar.error("Failed to load collections.");
+        });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen]);
 
   const handleCreateCollection = async (e) => {
     e.preventDefault();
@@ -49,7 +62,7 @@ export const CollectionsModal = ({ isOpen, onClose, postId }) => {
 
   const handleAddToCollection = async (collectionId) => {
     try {
-      const res = await api.post("/post/collections/add-post", { collectionId, postId });
+      const res = await api.post("/post/collections/add-post", { collectionId, postId, reelId });
       if (res.data.success) {
         snackbar.success("Updated collection!");
         fetchCollections();
@@ -120,7 +133,9 @@ export const CollectionsModal = ({ isOpen, onClose, postId }) => {
               <p className="text-xs text-text-muted text-center py-6">No custom collections yet.</p>
             ) : (
               collections.map((col) => {
-                const inCol = col.posts?.some((p) => (p._id || p) === postId);
+                const inCol =
+                  (postId && col.posts?.some((p) => (p._id || p) === postId)) ||
+                  (reelId && col.reels?.some((r) => (r._id || r) === reelId));
                 return (
                   <div
                     key={col._id}

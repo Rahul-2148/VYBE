@@ -84,12 +84,53 @@ const postSchema = new mongoose.Schema(
           type: String,
           required: true,
         },
+        likes: [
+          {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+          },
+        ],
+        isPinned: {
+          type: Boolean,
+          default: false,
+        },
+        replies: [
+          {
+            author: {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: "User",
+              required: true,
+            },
+            message: {
+              type: String,
+              required: true,
+            },
+            replyingTo: {
+              type: String,
+              default: "",
+            },
+            likes: [
+              {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "User",
+              },
+            ],
+            createdAt: {
+              type: Date,
+              default: Date.now,
+            },
+          },
+        ],
         createdAt: {
           type: Date,
           default: Date.now,
         },
       },
     ],
+    commentsDisabled: {
+      type: Boolean,
+      default: false,
+    },
     location: {
       type: String,
       default: "",

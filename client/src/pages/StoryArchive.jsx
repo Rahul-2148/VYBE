@@ -8,13 +8,11 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import moment from "moment";
 import api from "../lib/axios";
-import StoryHighlighterModal from "../components/StoryHighlighterModal";
 
 export const StoryArchive = () => {
   const navigate = useNavigate();
   const [stories, setStories] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [isHighlightModalOpen, setIsHighlightModalOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState("all"); // all, image, video, text
   const [sortOrder, setSortOrder] = useState("newest"); // newest, oldest
 
@@ -74,9 +72,19 @@ export const StoryArchive = () => {
     return { all: stories.length, image, video, text };
   }, [stories]);
 
-  // Filtered & Sorted Stories
+  const [nowTimestamp] = useState(() => Date.now());
+
+  // Filtered & Sorted Stories with precomputed daysLeft
   const displayedStories = useMemo(() => {
-    let result = [...stories];
+    const now = nowTimestamp;
+    let result = stories.map((s) => {
+      const refDate = s.archivedAt ? new Date(s.archivedAt).getTime() : new Date(s.createdAt).getTime();
+      const daysPassed = Math.floor((now - refDate) / (1000 * 60 * 60 * 24));
+      return {
+        ...s,
+        daysLeft: Math.max(30 - daysPassed, 1),
+      };
+    });
 
     if (activeFilter === "image") {
       result = result.filter((s) => s.mediaType === "image");
@@ -93,16 +101,7 @@ export const StoryArchive = () => {
     });
 
     return result;
-  }, [stories, activeFilter, sortOrder]);
-
-  // Calculate days remaining before 30-day auto-purge
-  const getDaysLeft = (story) => {
-    const refDate = story.archivedAt ? new Date(story.archivedAt) : new Date(story.createdAt);
-    const msPassed = Date.now() - refDate.getTime();
-    const daysPassed = Math.floor(msPassed / (1000 * 60 * 60 * 24));
-    const left = 30 - daysPassed;
-    return Math.max(left, 1);
-  };
+  }, [stories, activeFilter, sortOrder, nowTimestamp]);
 
   return (
     <div className="min-h-screen bg-bg text-text p-4 md:p-8 max-w-5xl mx-auto space-y-6">
@@ -125,28 +124,34 @@ export const StoryArchive = () => {
         </div>
 
         <button
-          onClick={() => setIsHighlightModalOpen(true)}
+          onClick={() => navigate("/profile")}
           className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-pink-500 to-rose-600 text-white text-xs font-semibold rounded-xl transition shadow-lg hover:opacity-95 cursor-pointer"
         >
           <Plus className="w-4 h-4" />
-          <span>New Highlight</span>
+          <span>Highlights in Profile</span>
         </button>
       </div>
 
       {/* Archive Selector Tabs & 30-Day Policy Note */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex gap-2 bg-surface p-1 rounded-xl border border-border w-fit">
+        <div className="flex gap-2 bg-surface p-1 rounded-xl border border-border w-fit overflow-x-auto">
           <button
             onClick={() => navigate("/story/archive")}
-            className="px-4 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow-md cursor-pointer"
+            className="px-4 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow-md cursor-pointer shrink-0"
           >
             Stories Archive
           </button>
           <button
             onClick={() => navigate("/post/archive")}
-            className="px-4 py-1.5 rounded-lg text-xs font-bold text-text-secondary hover:text-text cursor-pointer"
+            className="px-4 py-1.5 rounded-lg text-xs font-bold text-text-secondary hover:text-text cursor-pointer shrink-0"
           >
             Posts & Reels Archive
+          </button>
+          <button
+            onClick={() => navigate("/live/archive")}
+            className="px-4 py-1.5 rounded-lg text-xs font-bold text-text-secondary hover:text-text cursor-pointer shrink-0"
+          >
+            Live Archive
           </button>
         </div>
 
@@ -237,12 +242,10 @@ export const StoryArchive = () => {
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
-          {displayedStories.map((story) => {
-            const daysLeft = getDaysLeft(story);
-            return (
-              <motion.div
-                key={story._id}
-                initial={{ opacity: 0, scale: 0.95 }}
+          {displayedStories.map((story) => (
+            <motion.div
+              key={story._id}
+              initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 className="relative aspect-[9/16] rounded-2xl overflow-hidden bg-surface border border-border/70 group shadow-xs cursor-pointer"
               >
@@ -259,7 +262,7 @@ export const StoryArchive = () => {
                 {/* Expiration Countdown Tag */}
                 <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-md flex items-center gap-1 text-[10px] font-semibold text-amber-300 shadow">
                   <Clock className="w-2.5 h-2.5" />
-                  <span>{daysLeft}d left</span>
+                  <span>{story.daysLeft}d left</span>
                 </div>
 
                 {/* Gradient Hover Overlay */}
@@ -296,8 +299,7 @@ export const StoryArchive = () => {
                   </div>
                 </div>
               </motion.div>
-            );
-          })}
+            ))}
         </div>
       )}
 

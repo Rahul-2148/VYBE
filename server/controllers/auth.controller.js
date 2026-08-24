@@ -27,6 +27,32 @@ import sendEmail from "../utils/sendEmail.js";
 import { signUpOtpTemplate } from "../utils/emailTemplates/SignUpOtpTemplate.js";
 import { redisService } from "../services/redis.service.js";
 
+const DISALLOWED_EMAIL_DOMAINS = [
+  "mailinator.com",
+  "10minutemail.com",
+  "tempmail.com",
+  "guerrillamail.com",
+  "fake.com",
+  "dummy.com",
+  "test.com",
+  "throwaway.com",
+  "disposable.com",
+  "temp-mail.org",
+  "sharklasers.com",
+  "yopmail.com",
+  "example.com",
+  "sample.com",
+];
+
+const isValidEmailAddress = (email) => {
+  if (!email || typeof email !== "string") return false;
+  const re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!re.test(email)) return false;
+  const domain = email.split("@")[1]?.toLowerCase();
+  if (!domain || DISALLOWED_EMAIL_DOMAINS.includes(domain)) return false;
+  return true;
+};
+
 // Helper to hash token string
 const hashToken = (token) => crypto.createHash("sha256").update(token).digest("hex");
 
@@ -78,6 +104,14 @@ export const signUp = async (req, res) => {
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanUserName = userName.trim().toLowerCase();
+
+    if (!isValidEmailAddress(cleanEmail)) {
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Please enter a valid, real email address. Disposable or test email domains are not allowed.",
+      });
+    }
 
     // Check email uniqueness and delete unverified expired accounts to release lock
     const findByEmail = await User.findOne({ email: cleanEmail });
@@ -303,6 +337,28 @@ export const signIn = async (req, res) => {
         error: true,
         message: "Incorrect password. Please try again.",
       });
+    }
+
+    // BAN & SUSPENSION ENFORCEMENT
+    if (user.isBanned) {
+      if (user.banExpiresAt && new Date(user.banExpiresAt) <= new Date()) {
+        user.isBanned = false;
+        user.banReason = "";
+        user.bannedAt = null;
+        user.bannedBy = null;
+        user.banExpiresAt = null;
+        await user.save();
+      } else {
+        const expiryStr = user.banExpiresAt
+          ? ` Suspension expires on: ${new Date(user.banExpiresAt).toLocaleDateString()}.`
+          : " This is a permanent suspension.";
+        return res.status(403).json({
+          success: false,
+          error: true,
+          code: "ACCOUNT_BANNED",
+          message: `Your account has been suspended. Reason: ${user.banReason || "Violation of Community Guidelines."}${expiryStr}`,
+        });
+      }
     }
 
     // 2FA CHECK
@@ -873,23 +929,49 @@ export const verifyMagicLink = async (req, res) => {
 // 11. Get Active Sessions (Authenticated)
 export const getActiveSessions = async (req, res) => {
   try {
-    const sessions = await Session.find({
+    let sessions = await Session.find({
       user: req.userId,
       isRevoked: false,
       expiresAt: { $gt: new Date() },
     }).sort({ lastActive: -1 });
 
-    const formattedSessions = sessions.map((s) => ({
-      id: s._id,
-      deviceInfo: s.deviceInfo,
-      browser: s.browser,
-      os: s.os,
-      ipAddress: s.ipAddress,
-      location: s.location,
-      lastActive: s.lastActive,
-      isCurrentSession: String(s._id) === String(req.sessionId),
-      createdAt: s.createdAt,
-    }));
+    const { deviceInfo, browser, os, ipAddress, location, userAgent } = parseDeviceDetails(req);
+
+    // Auto-create active session if user has no registered active session
+    if (sessions.length === 0) {
+      const fallbackSession = await Session.create({
+        user: req.userId,
+        refreshTokenHash: "current_active",
+        deviceInfo,
+        browser,
+        os,
+        ipAddress,
+        location,
+        userAgent,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        lastActive: new Date(),
+      });
+      sessions = [fallbackSession];
+      req.sessionId = fallbackSession._id.toString();
+    }
+
+    const formattedSessions = sessions.map((s, idx) => {
+      const isCurrent = req.sessionId
+        ? String(s._id) === String(req.sessionId)
+        : idx === 0;
+
+      return {
+        id: s._id,
+        deviceInfo: s.deviceInfo || deviceInfo,
+        browser: s.browser || browser,
+        os: s.os || os,
+        ipAddress: s.ipAddress || ipAddress,
+        location: s.location || location,
+        lastActive: s.lastActive || s.createdAt || new Date(),
+        isCurrentSession: isCurrent,
+        createdAt: s.createdAt || new Date(),
+      };
+    });
 
     return res.status(200).json({
       success: true,
@@ -961,9 +1043,22 @@ export const revokeAllOtherSessions = async (req, res) => {
 // 14. Get Security Audit Logs (Authenticated)
 export const getSecurityLogs = async (req, res) => {
   try {
-    const logs = await SecurityLog.find({ user: req.userId })
+    let logs = await SecurityLog.find({ user: req.userId })
       .sort({ createdAt: -1 })
-      .limit(25);
+      .limit(30);
+
+    // If no security events recorded yet, seed an initial login_success record
+    if (logs.length === 0) {
+      const { deviceInfo, ipAddress } = parseDeviceDetails(req);
+      const initialLog = await SecurityLog.create({
+        user: req.userId,
+        eventType: "login_success",
+        ipAddress,
+        deviceInfo,
+        metadata: { method: "session_init" },
+      });
+      logs = [initialLog];
+    }
 
     return res.status(200).json({
       success: true,

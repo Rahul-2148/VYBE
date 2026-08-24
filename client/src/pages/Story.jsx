@@ -11,19 +11,24 @@ const Story = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { feed } = useSelector((s) => s.story);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => {
+    if (state?.stories && state.stories.length > 0) return false;
+    if (state?.initialUserIndex !== undefined && feed?.length > 0) return false;
+    return !feed || feed.length === 0;
+  });
 
   useEffect(() => {
     // If state has highlight/story data, we are ready
     if (state?.stories && state.stories.length > 0) return;
     if (state?.initialUserIndex !== undefined && feed?.length > 0) return;
 
+    let isMounted = true;
     // If Redux feed is empty, fetch feed from API
     if (!feed || feed.length === 0) {
-      setLoading(true);
       api
         .get("/story/feed")
         .then((res) => {
+          if (!isMounted) return;
           if (res.data?.success && res.data.feed?.length > 0) {
             dispatch(setStoryFeed(res.data.feed));
           } else {
@@ -31,12 +36,16 @@ const Story = () => {
           }
         })
         .catch(() => {
-          navigate("/");
+          if (isMounted) navigate("/");
         })
         .finally(() => {
-          setLoading(false);
+          if (isMounted) setLoading(false);
         });
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, [state, feed, dispatch, navigate]);
 
   if (loading) {

@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useCallback } from "react";
 import {
   X,
   Type,
@@ -43,6 +43,10 @@ import { useNavigate } from "react-router-dom";
 import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import { setStoryFeed } from "../redux/features/storySlice";
+import {
+  generateDraftThumbnail,
+  saveDraftMediaLocal,
+} from "../lib/draftStorage";
 import StoryMusicPickerModal from "./StoryMusicPickerModal";
 import StoryStickersDrawer from "./StoryStickersDrawer";
 import CloseFriendsModal from "./CloseFriendsModal";
@@ -186,69 +190,7 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
   // Multi-item Queue state (upload multiple stories in 1 go)
   const [items, setItems] = useState([]);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [sharedEntityData, setSharedEntityData] = useState(initialState?.sharedEntity || null);
-
-  // Helper to convert File to persistent base64 Data URL
-  const fileToDataUrl = (file, fallback = "") => {
-    return new Promise((resolve) => {
-      if (!file) return resolve(fallback);
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => resolve(fallback);
-      reader.readAsDataURL(file);
-    });
-  };
-
-  useEffect(() => {
-    if (initialState?.resumedDraft) {
-      const draft = initialState.resumedDraft;
-      if (draft.caption) {
-        setTextContent(draft.caption);
-        setCustomOverlayText(draft.caption);
-      }
-      if (draft.audioTrack) setSelectedMusic(draft.audioTrack);
-      if (draft.filter) handleSetFilter(draft.filter);
-      if (draft.mediaPreview) {
-        const isVid =
-          draft.mediaPreview.startsWith("data:video") ||
-          draft.mediaPreview.includes(".mp4") ||
-          draft.mediaPreview.includes("/video/");
-        setItems([
-          {
-            preview: draft.mediaPreview,
-            mediaType: isVid ? "video" : "image",
-            file: null,
-            stickers: [],
-            filter: draft.filter || "none",
-            isShared: false,
-          },
-        ]);
-        setMode("media");
-      } else if (draft.caption) {
-        setMode("text");
-      }
-      snackbar.success("Story draft loaded! ✏️");
-    } else if (initialState?.initialMediaUrl) {
-      const isVid = initialState.initialMediaUrl.endsWith(".mp4") || initialState.initialMediaUrl.includes("/video/");
-      setItems([
-        {
-          preview: initialState.initialMediaUrl,
-          mediaType: isVid ? "video" : "image",
-          file: null,
-          stickers: [],
-          filter: "none",
-          isShared: true,
-        },
-      ]);
-    }
-  }, [initialState]);
-
-  const activeItem = items[activeIndex] || null;
-  const mediaPreview = activeItem?.preview || null;
-  const mediaType = activeItem?.mediaType || "image";
-  const selectedFile = activeItem?.file || null;
-  const stickers = activeItem?.stickers || [];
-  const filter = activeItem?.filter || "none";
+  const [sharedEntityData] = useState(initialState?.sharedEntity || null);
 
   // Camera State
   const [useCamera, setUseCamera] = useState(false);
@@ -297,7 +239,75 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
   const containerRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushColor, setBrushColor] = useState("#f43f5e");
-  const [brushSize, setBrushSize] = useState(6);
+  const [brushSize, _setBrushSize] = useState(6);
+
+  const activeItem = items[activeIndex] || null;
+  const mediaPreview = activeItem?.preview || null;
+  const mediaType = activeItem?.mediaType || "image";
+  const stickers = activeItem?.stickers || [];
+  const filter = activeItem?.filter || "none";
+
+  const handleSetFilter = useCallback((newFilterId) => {
+    setItems((prev) => {
+      if (!prev[activeIndex]) return prev;
+      const next = [...prev];
+      next[activeIndex] = {
+        ...next[activeIndex],
+        filter: newFilterId,
+      };
+      return next;
+    });
+  }, [activeIndex]);
+
+  useEffect(() => {
+    if (initialState?.resumedDraft) {
+      const draft = initialState.resumedDraft;
+      const timer = setTimeout(() => {
+        if (draft.caption) {
+          setTextContent(draft.caption);
+          setCustomOverlayText(draft.caption);
+        }
+        if (draft.audioTrack) setSelectedMusic(draft.audioTrack);
+        if (draft.filter) handleSetFilter(draft.filter);
+        if (draft.mediaPreview) {
+          const isVid =
+            draft.mediaPreview.startsWith("data:video") ||
+            draft.mediaPreview.includes(".mp4") ||
+            draft.mediaPreview.includes("/video/");
+          setItems([
+            {
+              preview: draft.mediaPreview,
+              mediaType: isVid ? "video" : "image",
+              file: null,
+              stickers: [],
+              filter: draft.filter || "none",
+              isShared: false,
+            },
+          ]);
+          setMode("media");
+        } else if (draft.caption) {
+          setMode("text");
+        }
+        snackbar.success("Story draft loaded! ✏️");
+      }, 0);
+      return () => clearTimeout(timer);
+    } else if (initialState?.initialMediaUrl) {
+      const isVid = initialState.initialMediaUrl.endsWith(".mp4") || initialState.initialMediaUrl.includes("/video/");
+      const timer = setTimeout(() => {
+        setItems([
+          {
+            preview: initialState.initialMediaUrl,
+            mediaType: isVid ? "video" : "image",
+            file: null,
+            stickers: [],
+            filter: "none",
+            isShared: true,
+          },
+        ]);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [initialState, handleSetFilter]);
 
   // Save Story to Drafts
   const handleSaveStoryDraft = async () => {
@@ -307,9 +317,12 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
     }
     setIsLoading(true);
     try {
-      let persistentPreview = mediaPreview || "";
+      let persistentPreview = "";
       if (activeItem?.file) {
-        persistentPreview = await fileToDataUrl(activeItem.file, mediaPreview);
+        persistentPreview = await generateDraftThumbnail(activeItem.file);
+      }
+      if (!persistentPreview && mediaPreview?.startsWith("data:")) {
+        persistentPreview = mediaPreview;
       }
 
       const res = await api.post("/post/drafts", {
@@ -319,10 +332,13 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
         mediaPreview: persistentPreview,
         filter: filter || "normal",
         audioTrack: selectedMusic,
+        mediaItems: activeItem ? [{ preview: persistentPreview, type: activeItem.type || "image" }] : [],
       });
 
-      if (res.data?.draft?._id) {
-        setCurrentDraftId(res.data.draft._id);
+      const savedDraftId = res.data?.draft?._id || currentDraftId;
+      if (savedDraftId && activeItem?.file) {
+        setCurrentDraftId(savedDraftId);
+        await saveDraftMediaLocal(savedDraftId, [activeItem]);
       }
 
       snackbar.success(currentDraftId ? "Story draft updated! 📝" : "Story saved to Drafts! 📝");
@@ -331,7 +347,7 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
       else navigate(-1);
     } catch (err) {
       console.warn("Failed to save story draft:", err);
-      snackbar.error("Failed to save story draft");
+      snackbar.error(err?.response?.data?.message || "Failed to save story draft");
     } finally {
       setIsLoading(false);
       setShowExitPrompt(false);
@@ -365,7 +381,7 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
       setUseCamera(true);
       setItems([]);
       setActiveIndex(0);
-    } catch (err) {
+    } catch {
       snackbar.error("Could not access camera. Please check permissions.");
     }
   };
@@ -413,10 +429,34 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
   };
 
   useEffect(() => {
-    if (useCamera) {
-      startCamera();
-    }
-  }, [facingMode]);
+    if (!useCamera) return;
+    let isCancelled = false;
+
+    const initCam = async () => {
+      try {
+        const mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode },
+          audio: false,
+        });
+        if (isCancelled) {
+          mediaStream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        setStream(mediaStream);
+        if (videoRef.current) {
+          videoRef.current.srcObject = mediaStream;
+        }
+      } catch {
+        snackbar.error("Could not access camera. Please check permissions.");
+      }
+    };
+
+    initCam();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [useCamera, facingMode]);
 
   useEffect(() => {
     return () => {
@@ -427,7 +467,7 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
   }, [stream]);
 
   // 2. Drag & Drop Sticker Repositioning
-  const handleStartDrag = (e, index) => {
+  const handleStartDrag = useCallback((e, index) => {
     e.preventDefault();
     setActiveDragIdx(index);
     setSelectedStickerIdx(index);
@@ -440,7 +480,7 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
         y: sticker.position?.y || 50,
       };
     }
-  };
+  }, [items, activeIndex]);
 
   useEffect(() => {
     const handleMove = (e) => {
@@ -553,18 +593,6 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
       window.removeEventListener("touchend", handleEnd);
     };
   }, [activeDragIdx, activeIndex, isOverTrash]);
-
-  const handleSetFilter = (newFilterId) => {
-    setItems((prev) => {
-      if (!prev[activeIndex]) return prev;
-      const next = [...prev];
-      next[activeIndex] = {
-        ...next[activeIndex],
-        filter: newFilterId,
-      };
-      return next;
-    });
-  };
 
   // Apply Theme Template
   const handleSelectTheme = (theme) => {

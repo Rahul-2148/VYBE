@@ -5,7 +5,6 @@ import { useDispatch, useSelector } from "react-redux";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ClipLoader } from "react-spinners";
 import logo from "../assets/logo.png";
-import logo2 from "../assets/logo2.png";
 import { setUserData } from "../redux/features/userSlice";
 import { GoogleLogin } from "@react-oauth/google";
 import api from "../lib/axios";

@@ -63,7 +63,7 @@ export const checkMessagePrivacy = async (conversation, userId) => {
 export const sendMessage = async (req, res) => {
   try {
     const userId = req.userId;
-    let { conversationId, recipientId, type, messageType, text, sharedType, sharedId, sharedData, replyTo, voiceDuration, locationData, clientMessageId } = req.body;
+    let { conversationId, recipientId, type, messageType, text, sharedType, sharedId, sharedData, replyTo, isForwarded, forwardedFrom, voiceDuration, locationData, clientMessageId } = req.body;
 
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
@@ -189,6 +189,10 @@ export const sendMessage = async (req, res) => {
     ) {
       const mUrl = sharedData?.mediaUrl || req.body.mediaUrl || req.body.stickerUrl;
       content.media = [{ url: mUrl, type: "sticker" }];
+    } else if (req.body.media && Array.isArray(req.body.media)) {
+      content.media = req.body.media;
+    } else if (req.body.content?.media && Array.isArray(req.body.content.media)) {
+      content.media = req.body.content.media;
     } else if (
       !rawEffectiveType.startsWith("shared_") &&
       !effectiveType.startsWith("shared_") &&
@@ -219,6 +223,7 @@ export const sendMessage = async (req, res) => {
       if (rawType === "reel") normalizedModelType = "Reel";
       else if (rawType === "story") normalizedModelType = "Story";
       else if (rawType === "profile" || rawType === "user") normalizedModelType = "User";
+      else if (rawType === "audio" || rawType === "music") normalizedModelType = "Audio";
 
       content.shared = { type: normalizedModelType };
       if (sharedId && mongoose.Types.ObjectId.isValid(sharedId)) {
@@ -266,6 +271,8 @@ export const sendMessage = async (req, res) => {
         type: req.files && req.files.length > 0 ? content.media[0].type : effectiveType,
         content,
         replyTo,
+        isForwarded: Boolean(isForwarded),
+        forwardedFrom: forwardedFrom || undefined,
         status: "sent",
         disappear: disappearConfig.enabled ? disappearConfig : undefined,
         clientMessageId: clientMessageId || undefined,
@@ -561,12 +568,13 @@ export const getMessages = async (req, res) => {
     }
 
     let query = Message.find(filter)
-      .populate("sender", "userName profileImage isVerified")
+      .populate("sender", "userName name profileImage isVerified")
+      .populate("reactions.user", "userName name profileImage isVerified")
       .populate({
         path: "replyTo",
         populate: {
           path: "sender",
-          select: "userName profileImage isVerified",
+          select: "userName name profileImage isVerified",
         },
       });
 
@@ -869,73 +877,81 @@ export const reactMessage = async (req, res) => {
     const { messageId } = req.params;
     const { emoji } = req.body;
 
-    const message = await Message.findById(messageId);
-    if (!message) return res.status(404).json({ message: "Message not found" });
+    const emojiStr =
+      typeof emoji === "object" && emoji !== null
+        ? emoji.emoji || emoji.native || emoji.unified || ""
+        : String(emoji || "").trim();
 
-    const conversation = await Conversation.findById(message.conversation);
-    if (!conversation || !conversation.participants.some((p) => p.toString() === userId.toString())) {
-      return res.status(403).json({ message: "Not authorized" });
+    if (!emojiStr) {
+      return res.status(400).json({ success: false, message: "Emoji is required" });
     }
 
-    const existingIndex = message.reactions.findIndex((r) => r.user?.toString() === userId.toString());
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ success: false, message: "Invalid message ID" });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) return res.status(404).json({ success: false, message: "Message not found" });
+
+    const conversation = await Conversation.findById(message.conversation);
+    if (conversation && !conversation.participants.some((p) => (p?._id || p?.id || p)?.toString() === userId?.toString())) {
+      return res.status(403).json({ success: false, message: "Not authorized" });
+    }
+
+    if (!Array.isArray(message.reactions)) {
+      message.reactions = [];
+    }
+
+    const myUserIdStr = userId?.toString();
+    const existingIndex = message.reactions.findIndex(
+      (r) => (r.user?._id || r.user?.id || r.user)?.toString() === myUserIdStr
+    );
 
     if (existingIndex !== -1) {
-      if (message.reactions[existingIndex].emoji === emoji) {
+      if (message.reactions[existingIndex].emoji === emojiStr) {
+        // Toggle off if clicking the same emoji
         message.reactions.splice(existingIndex, 1);
       } else {
-        message.reactions[existingIndex].emoji = emoji;
+        // Switch to new emoji
+        message.reactions[existingIndex].emoji = emojiStr;
         message.reactions[existingIndex].reactedAt = new Date();
       }
     } else {
-      message.reactions.push({ user: userId, emoji, reactedAt: new Date() });
+      // Add new reaction
+      message.reactions.push({ user: userId, emoji: emojiStr, reactedAt: new Date() });
     }
 
     await message.save();
-    const populated = await message.populate("sender", "userName profileImage");
+
+    const populated = await Message.findById(message._id)
+      .populate("sender", "userName name profileImage isVerified")
+      .populate("reactions.user", "userName name profileImage isVerified");
 
     const io = req.app.locals.io;
     if (io && conversation) {
       conversation.participants.forEach((pid) => {
-        io.to(`user_${pid}`).emit("message-reaction-updated", {
-          messageId,
-          conversationId: message.conversation.toString(),
-          reactions: message.reactions,
-        });
+        const idStr = (pid?._id || pid?.id || pid)?.toString();
+        if (idStr) {
+          io.to(`user_${idStr}`).emit("message-reaction-updated", {
+            messageId: message._id.toString(),
+            conversationId: message.conversation.toString(),
+            reactions: populated.reactions,
+          });
+        }
       });
     }
 
-    res.status(200).json({ success: true, message: populated });
+    return res.status(200).json({
+      success: true,
+      message: populated,
+      reactions: populated.reactions,
+    });
   } catch (error) {
-    res.status(500).json({ message: `reactMessage error: ${error.message}` });
+    console.error("reactMessage error:", error);
+    return res.status(500).json({ success: false, message: `reactMessage error: ${error.message}` });
   }
 };
 
-/* ================= SEARCH MESSAGES ================= */
-export const searchMessages = async (req, res) => {
-  try {
-    const userId = req.userId;
-    const { conversationId } = req.params;
-    const { q } = req.query;
-
-    if (!q) return res.json({ messages: [] });
-
-    const safeRegex = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-    const messages = await Message.find({
-      conversation: conversationId,
-      "content.text": { $regex: safeRegex, $options: "i" },
-      deletedForEveryone: { $ne: true },
-      deletedFor: { $ne: userId },
-    })
-      .populate("sender", "userName profileImage")
-      .sort({ createdAt: 1 })
-      .limit(50);
-
-    res.json({ messages });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};
 
 /* ================= GET PINNED MESSAGES ================= */
 export const getPinnedMessages = async (req, res) => {
@@ -988,3 +1004,88 @@ export const getUnreadMessageCount = async (req, res) => {
     });
   }
 };
+
+/* ================= ADVANCED IN-CHAT SEARCH MESSAGES ================= */
+export const searchMessages = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const { q, query, type, limit = 100 } = req.query;
+    const userId = req.userId;
+
+    const searchTerm = (q || query || "").trim();
+
+    // Verify conversation access
+    const conv = await Conversation.findOne({
+      _id: conversationId,
+      participants: userId,
+    });
+    if (!conv) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+
+    const filter = {
+      conversation: conversationId,
+      deletedForEveryone: { $ne: true },
+      deletedFor: { $ne: userId },
+    };
+
+    // Filter by type if provided (media, links, files, voice)
+    if (type === "media") {
+      filter["$or"] = [
+        { type: { $in: ["image", "video", "gif"] } },
+        { "content.media.type": { $in: ["image", "video"] } },
+      ];
+    } else if (type === "links") {
+      filter["$or"] = [
+        { "content.linkPreview.url": { $exists: true, $ne: "" } },
+        { "content.text": { $regex: "https?://", $options: "i" } },
+      ];
+    } else if (type === "files" || type === "docs") {
+      filter["$or"] = [
+        { type: "file" },
+        { "content.media.type": "document" },
+      ];
+    } else if (type === "voice" || type === "audio") {
+      filter.type = { $in: ["voice", "audio"] };
+    }
+
+    // Text search query if provided
+    if (searchTerm) {
+      const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const textConditions = [
+        { "content.text": { $regex: escaped, $options: "i" } },
+        { "content.media.name": { $regex: escaped, $options: "i" } },
+        { "content.contactData.name": { $regex: escaped, $options: "i" } },
+        { "content.locationData.name": { $regex: escaped, $options: "i" } },
+        { "content.linkPreview.title": { $regex: escaped, $options: "i" } },
+      ];
+
+      if (filter["$or"]) {
+        // If type filter already added an $or condition, combine them using $and
+        filter["$and"] = [
+          { $or: filter["$or"] },
+          { $or: textConditions },
+        ];
+        delete filter["$or"];
+      } else {
+        filter["$or"] = textConditions;
+      }
+    }
+
+    const messages = await Message.find(filter)
+      .populate("sender", "userName profileImage isVerified name")
+      .populate("replyTo")
+      .sort({ createdAt: 1 })
+      .limit(Number(limit));
+
+    return res.status(200).json({
+      success: true,
+      count: messages.length,
+      messages,
+    });
+  } catch (error) {
+    console.error("searchMessages error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+

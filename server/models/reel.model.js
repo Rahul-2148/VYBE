@@ -22,10 +22,18 @@ const reelSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
-    // Remix Reel reference
+    // Remix & Reshare Reel references
     isRemix: {
       type: Boolean,
       default: false,
+    },
+    isReshare: {
+      type: Boolean,
+      default: false,
+    },
+    resharedThoughts: {
+      type: String,
+      default: "",
     },
     originalReel: {
       type: mongoose.Schema.Types.ObjectId,
@@ -64,12 +72,53 @@ const reelSchema = new mongoose.Schema(
           type: String,
           required: true,
         },
+        likes: [
+          {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+          },
+        ],
+        isPinned: {
+          type: Boolean,
+          default: false,
+        },
+        replies: [
+          {
+            author: {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: "User",
+              required: true,
+            },
+            message: {
+              type: String,
+              required: true,
+            },
+            replyingTo: {
+              type: String,
+              default: "",
+            },
+            likes: [
+              {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "User",
+              },
+            ],
+            createdAt: {
+              type: Date,
+              default: Date.now,
+            },
+          },
+        ],
         createdAt: {
           type: Date,
           default: Date.now,
         },
       },
     ],
+    commentsDisabled: {
+      type: Boolean,
+      default: false,
+    },
     views: {
       type: Number,
       default: 0,

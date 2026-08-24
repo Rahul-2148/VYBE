@@ -25,7 +25,7 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { userData } = useSelector((s) => s.user);
-  const { conversations } = useSelector((s) => s.message);
+  const { conversations, onlineUsers = [] } = useSelector((s) => s.message);
   const currentUserId = userData?.user?._id || userData?._id;
 
   const conversation = conversations.find((c) => (c._id || c.conversationId)?.toString() === conversationId?.toString());
@@ -221,7 +221,11 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
 
           {!isGroup && otherUser && (
             <p className="text-xs text-text-muted mt-0.5">
-              {otherUser.isOnline ? "Active now" : otherUser.lastSeen ? `Active ${moment(otherUser.lastSeen).fromNow()}` : "Offline"}
+              {(() => {
+                const otherId = (otherUser?._id || otherUser)?.toString();
+                const isOnline = otherId && (Boolean(otherUser?.isOnline) || onlineUsers.includes(otherId));
+                return isOnline ? "Active now" : otherUser?.lastSeen ? `Active ${moment(otherUser.lastSeen).fromNow()}` : "Offline";
+              })()}
             </p>
           )}
 
@@ -342,8 +346,8 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
             <div className="flex items-center gap-3">
               <Palette className="w-5 h-5 text-purple-400" />
               <div>
-                <p className="text-sm text-text font-medium">Theme & Customization</p>
-                <p className="text-[11px] text-text-muted capitalize">{activeTheme || "Default Gradient"}</p>
+                <p className="text-sm text-text font-medium">Theme, Wallpaper & Font Settings</p>
+                <p className="text-[11px] text-text-muted capitalize">Wallpaper • Font size • Typography</p>
               </div>
             </div>
             <ChevronRight className="w-4 h-4 text-text-muted group-hover:text-text-secondary transition" />
@@ -402,9 +406,13 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
                         {isAdmin && !isOwnerRole && <span className="text-[10px] text-blue-400 font-semibold ml-2">Admin</span>}
                       </p>
                     </div>
-                    {memberObj.isOnline && (
-                      <div className="w-2 h-2 bg-green-500 rounded-full shrink-0" />
-                    )}
+                    {(() => {
+                      const mId = (memberObj?._id || memberObj)?.toString();
+                      const isMemOnline = mId && (Boolean(memberObj?.isOnline) || onlineUsers.includes(mId));
+                      return isMemOnline ? (
+                        <div className="w-2 h-2 bg-green-500 rounded-full shrink-0" />
+                      ) : null;
+                    })()}
                   </div>
                 );
               })}
@@ -488,10 +496,10 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
               if (activeMediaTab === "link") {
                 const linkUrl = msg?.content?.linkPreview?.url || (msg?.content?.text?.match(/https?:\/\/[^\s]+/i)?.[0]);
                 if (linkUrl) {
-                  let hostname = "";
+                  let hostname;
                   try {
                     hostname = new URL(linkUrl).hostname.replace(/^www\./, "");
-                  } catch (e) {
+                  } catch {
                     hostname = linkUrl;
                   }
                   items.push({
@@ -664,6 +672,7 @@ const ChatInfoDrawer = ({ conversationId, isGroup, otherUser, onClose }) => {
         isOpen={showThemePicker}
         onClose={() => setShowThemePicker(false)}
         conversationId={conversationId}
+        chatName={isGroup ? (details?.groupName || conversation?.groupName || "Group") : otherUser?.userName}
         currentTheme={activeTheme}
         onThemeChanged={(newTheme) => {
           setActiveTheme(newTheme);

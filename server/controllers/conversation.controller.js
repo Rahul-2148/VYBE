@@ -5,6 +5,7 @@ import { Message } from "../models/message.model.js";
 import { User } from "../models/user.model.js";
 import deleteFromCloudinary from "../config/deleteFromCloudinary.js";
 import { getBlockedUserIds } from "../utils/blockHelper.js";
+import { isUserOnline } from "../socket.js";
 
 /* ================= HELPERS ================= */
 const isAdmin = (conversation, userId) =>
@@ -428,13 +429,20 @@ export const getUserConversations = async (req, res) => {
 
       // GROUP CHAT
       if (conv.isGroup) {
+        const enrichedParticipants = (conv.participants || []).map((p) => {
+          if (!p) return p;
+          const pid = (p._id || p)?.toString();
+          const online = pid ? isUserOnline(pid) : false;
+          return p.toObject ? { ...p.toObject(), isOnline: online || Boolean(p.isOnline) } : p;
+        });
+
         results.push({
           _id: conv._id,
           isGroup: true,
           name: conv.groupName,
           description: conv.description,
           avatar: conv.groupImage?.url,
-          participants: conv.participants,
+          participants: enrichedParticipants,
           admins: conv.admins,
           lastMessage: conv.lastMessage,
           unreadCount: userUnread,
@@ -462,10 +470,15 @@ export const getUserConversations = async (req, res) => {
       if (!otherUserId || seenDmUsers.has(otherUserId)) return;
       seenDmUsers.add(otherUserId);
 
+      const isOtherOnline = isUserOnline(otherUserId);
+      const participantObj = otherUser.toObject
+        ? { ...otherUser.toObject(), isOnline: isOtherOnline || Boolean(otherUser.isOnline) }
+        : { ...otherUser, isOnline: isOtherOnline || Boolean(otherUser.isOnline) };
+
       results.push({
         _id: conv._id,
         isGroup: false,
-        participant: otherUser,
+        participant: participantObj,
         lastMessage: conv.lastMessage,
         unreadCount: userUnread,
         isPinned,
@@ -729,22 +742,18 @@ export const updateChatTheme = async (req, res) => {
     if (!conversation.participants.some((p) => p.toString() === userId))
       return res.status(403).json({ message: "Unauthorized" });
 
-    conversation.theme = theme || "default";
-    conversation.customThemeColor = customColor || null;
-    await conversation.save();
-
+    // Personal chat wallpaper preference: only notify caller's socket
     const io = req.app.locals.io;
     if (io) {
-      conversation.participants.forEach((pid) => {
-        io.to(`user_${pid}`).emit("chat-theme-updated", {
-          conversationId,
-          theme: conversation.theme,
-          customThemeColor: conversation.customThemeColor,
-        });
+      io.to(`user_${userId}`).emit("chat-theme-updated", {
+        conversationId,
+        theme,
+        customThemeColor: customColor,
+        userId,
       });
     }
 
-    res.json({ success: true, theme: conversation.theme });
+    res.json({ success: true, theme });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -796,18 +805,47 @@ export const getConversationDetails = async (req, res) => {
 
     const conversation = await Conversation.findById(conversationId)
       .populate("participants", "userName profileImage isOnline lastSeen name bio")
-      .populate("admins.user", "userName profileImage")
+      .populate("admins.user", "userName profileImage name")
       .populate("pinnedMessages.message")
       .populate("pinnedMessages.pinnedBy", "userName");
 
-    if (!conversation) return res.status(404).json({ message: "Not found" });
+    if (!conversation) return res.status(404).json({ success: false, message: "Not found" });
 
-    if (!conversation.participants.some((p) => p._id.toString() === userId))
-      return res.status(403).json({ message: "Not a participant" });
+    const isParticipant = conversation.participants.some(
+      (p) => (p._id || p).toString() === userId.toString()
+    );
+    if (!isParticipant) {
+      return res.status(403).json({ success: false, message: "Not a participant" });
+    }
 
-    res.json({ success: true, conversation });
+    const participant = conversation.participants.find(
+      (p) => (p._id || p).toString() !== userId.toString()
+    );
+
+    const enrichedParticipants = conversation.participants.map((p) => {
+      if (!p) return p;
+      const pid = (p._id || p)?.toString();
+      const online = pid ? isUserOnline(pid) : false;
+      return p.toObject ? { ...p.toObject(), isOnline: online || Boolean(p.isOnline) } : p;
+    });
+
+    const enrichedParticipant = participant
+      ? {
+          ...(participant.toObject ? participant.toObject() : participant),
+          isOnline: isUserOnline((participant._id || participant)?.toString()) || Boolean(participant.isOnline),
+        }
+      : participant;
+
+    res.json({
+      success: true,
+      conversation: {
+        ...conversation.toObject(),
+        participants: enrichedParticipants,
+        participant: enrichedParticipant,
+      },
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 

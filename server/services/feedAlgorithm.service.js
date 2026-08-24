@@ -13,11 +13,11 @@ export const calculatePostScore = (post, currentUser) => {
 
   // Relationship Affinity Multiplier
   let affinityMultiplier = 1.0;
-  const authorId = post.author?._id?.toString() || post.author?.toString();
+  const authorId = (post.author?._id || post.author)?.toString();
 
   if (currentUser && authorId) {
-    const followingIds = currentUser.following?.map((id) => id.toString()) || [];
-    const closeFriendIds = currentUser.closeFriends?.map((id) => id.toString()) || [];
+    const followingIds = (currentUser.following || []).map((id) => (id?._id || id)?.toString());
+    const closeFriendIds = (currentUser.closeFriends || []).map((id) => (id?._id || id)?.toString());
 
     if (closeFriendIds.includes(authorId)) {
       affinityMultiplier = 5.0; // High priority boost for Close Friends
@@ -39,24 +39,35 @@ export const rankPostsForUser = (posts = [], currentUser = null, mode = "for-you
   let filteredPosts = [...posts];
 
   if (mode === "following" && currentUser) {
-    const followingIds = currentUser.following?.map((id) => id.toString()) || [];
-    const filtered = filteredPosts.filter((p) => {
-      const authorId = p.author?._id?.toString() || p.author?.toString();
-      return followingIds.includes(authorId) || authorId === currentUser._id?.toString();
+    const followingIds = new Set((currentUser.following || []).map((id) => (id?._id || id)?.toString()));
+    const currentUserIdStr = (currentUser._id || currentUser)?.toString();
+    filteredPosts = filteredPosts.filter((p) => {
+      const authorId = (p.author?._id || p.author)?.toString();
+      return authorId && (followingIds.has(authorId) || authorId === currentUserIdStr);
     });
-    // Fallback: If user follows nobody or no posts from followed users, show discovery posts
-    filteredPosts = filtered.length > 0 ? filtered : [...posts];
-  } else if (mode === "favorites" && currentUser) {
-    const closeFriendIds = currentUser.closeFriends?.map((id) => id.toString()) || [];
-    const filtered = filteredPosts.filter((p) => {
-      const authorId = p.author?._id?.toString() || p.author?.toString();
-      return closeFriendIds.includes(authorId);
+    // Reverse-chronological for Following
+    return filteredPosts.sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeB - timeA;
     });
-    // Fallback if favorites is empty
-    filteredPosts = filtered.length > 0 ? filtered : [...posts];
   }
 
-  // Rank by calculated score and break ties with recency
+  if (mode === "favorites" && currentUser) {
+    const closeFriendIds = new Set((currentUser.closeFriends || []).map((id) => (id?._id || id)?.toString()));
+    filteredPosts = filteredPosts.filter((p) => {
+      const authorId = (p.author?._id || p.author)?.toString();
+      return authorId && closeFriendIds.has(authorId);
+    });
+    // Reverse-chronological for Favorites
+    return filteredPosts.sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+  }
+
+  // Default "for-you": Rank by multi-signal calculated score and break ties with recency
   return filteredPosts.sort((a, b) => {
     const scoreA = calculatePostScore(a, currentUser);
     const scoreB = calculatePostScore(b, currentUser);

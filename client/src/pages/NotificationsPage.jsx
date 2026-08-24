@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from "react";
-import { Heart, MessageSquare, UserPlus, ArrowLeft, Check, Bell, Settings, Phone, Sparkles } from "lucide-react";
+import React, { useEffect, useState, useCallback } from "react";
+import { Heart, MessageSquare, ArrowLeft, Bell, Phone, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { useDispatch } from "react-redux";
 import moment from "moment";
 import { snackbar } from "../lib/snackbar";
@@ -31,62 +31,57 @@ export const NotificationsPage = () => {
     directMessages: true,
   });
 
-  async function fetchNotifications(pageNo = 1, append = false) {
+  const fetchNotifications = useCallback(async (pageNo = 1, append = false) => {
     try {
-      if (pageNo === 1) setLoading(true);
-      let url = `/notification/feed?limit=30`;
-      if (append && notifications.length > 0) {
-        const oldestNotif = notifications[notifications.length - 1];
-        url += `&before=${encodeURIComponent(oldestNotif.createdAt)}`;
-      } else {
-        url += `&page=${pageNo}`;
-      }
+      if (pageNo === 1 && !append) setLoading(true);
+      const url = `/notification/feed?limit=30&page=${pageNo}`;
       const res = await api.get(url);
-      if (res.data.success) {
+      if (res.data?.success) {
         const fetched = res.data.notifications || [];
         setNotifications((prev) => (append ? [...prev, ...fetched] : fetched));
         setHasMore(res.data.hasMore !== false && fetched.length === 30);
       }
-    } catch (e) {
+    } catch {
       snackbar.error("Failed to load notifications.");
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  async function fetchFollowRequests() {
+  const fetchFollowRequests = useCallback(async () => {
     try {
       const res = await api.get("/user/follow-requests");
-      if (res.data.success) {
+      if (res.data?.success) {
         setRequests(res.data.requests || []);
       }
     } catch (e) {
       console.warn("NotificationsPage: fetchFollowRequests failed", e);
     }
-  }
+  }, []);
 
-  async function markAsRead() {
+  const markAsRead = useCallback(async () => {
     try {
       await api.post("/notification/read");
       dispatch(clearUnreadNotifications());
     } catch (e) {
       console.warn("NotificationsPage: markAsRead failed", e);
     }
-  }
+  }, [dispatch]);
 
   useEffect(() => {
     let active = true;
-    (async () => {
-      await fetchNotifications(1);
+    const initData = async () => {
+      await fetchNotifications(1, false);
       if (!active) return;
       await fetchFollowRequests();
       if (!active) return;
       await markAsRead();
-    })();
+    };
+    initData();
     return () => {
       active = false;
     };
-  }, []);
+  }, [fetchNotifications, fetchFollowRequests, markAsRead]);
 
   useEffect(() => {
     const socket = getSocket();
@@ -115,7 +110,7 @@ export const NotificationsPage = () => {
         snackbar.success(action === "accept" ? "Follow request accepted" : "Follow request declined");
         setRequests((prev) => prev.filter((u) => u._id !== targetUserId));
       }
-    } catch (e) {
+    } catch {
       snackbar.error("Action failed.");
     }
   };
@@ -345,8 +340,29 @@ export const NotificationsPage = () => {
 };
 
 const NotificationItem = ({ notif, navigate, isFresh }) => {
-  const sender = notif.sender;
+  if (!notif) return null;
+  const sender = typeof notif.sender === "object" && notif.sender !== null ? notif.sender : null;
   if (!sender) return null;
+
+  const senderName = sender.userName || sender.name || "user";
+  const senderAvatar = sender.profileImage?.url || (typeof sender.profileImage === "string" ? sender.profileImage : dp);
+
+  const mediaThumb =
+    notif.post?.media?.url ||
+    (typeof notif.post?.media === "string" ? notif.post.media : null) ||
+    notif.post?.mediaItems?.[0]?.url ||
+    notif.reel?.media?.url ||
+    (typeof notif.reel?.media === "string" ? notif.reel.media : null) ||
+    null;
+
+  const postTargetId = notif.post?._id || (typeof notif.post === "string" ? notif.post : null);
+  const reelTargetId = notif.reel?._id || (typeof notif.reel === "string" ? notif.reel : null);
+
+  const handleMediaClick = () => {
+    triggerHaptic("light");
+    if (postTargetId) navigate(`/post/${postTargetId}`);
+    else if (reelTargetId) navigate(`/reel/${reelTargetId}`);
+  };
 
   return (
     <motion.div 
@@ -363,12 +379,12 @@ const NotificationItem = ({ notif, navigate, isFresh }) => {
       <div className="flex items-center gap-3.5 flex-1 min-w-0">
         <div className="relative shrink-0">
           <img
-            src={sender.profileImage?.url || dp}
+            src={senderAvatar}
             alt=""
             className="w-10 h-10 rounded-full object-cover border border-border cursor-pointer shrink-0 interactive-tap"
             onClick={() => {
               triggerHaptic("light");
-              navigate(`/profile/${sender.userName}`);
+              navigate(`/profile/${senderName}`);
             }}
           />
           {isFresh && (
@@ -381,14 +397,15 @@ const NotificationItem = ({ notif, navigate, isFresh }) => {
               className="font-bold cursor-pointer hover:underline" 
               onClick={() => {
                 triggerHaptic("light");
-                navigate(`/profile/${sender.userName}`);
+                navigate(`/profile/${senderName}`);
               }}
             >
-              @{sender.userName}
+              @{senderName}
             </span>{" "}
             {notif.type === "like" && "liked your post."}
-            {notif.type === "comment" && `commented: "${notif.commentText}"`}
+            {notif.type === "comment" && `commented: "${notif.commentText || "nice!"}"`}
             {notif.type === "follow" && "started following you."}
+            {notif.type === "follow_accept" && "accepted your follow request."}
             {notif.type === "mention" && "mentioned you in a caption."}
             {notif.type === "contact_request" && "requested your contact phone number."}
             {notif.type === "call" && `called you: ${notif.commentText || "Voice/Video Call"}`}
@@ -418,15 +435,12 @@ const NotificationItem = ({ notif, navigate, isFresh }) => {
         <div className="p-2 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-full shrink-0 ml-3">
           <Phone className="w-4 h-4" />
         </div>
-      ) : notif.post?.media?.url ? (
+      ) : mediaThumb ? (
         <img 
-          src={notif.post.media.url} 
+          src={mediaThumb} 
           alt="" 
           className="w-10 h-10 rounded-xl object-cover border border-border shrink-0 ml-3 cursor-pointer hover:scale-105 transition" 
-          onClick={() => {
-            triggerHaptic("light");
-            if (notif.post?._id) navigate(`/post/${notif.post._id}`);
-          }}
+          onClick={handleMediaClick}
         />
       ) : null}
     </motion.div>

@@ -19,6 +19,16 @@ const channelSchema = new mongoose.Schema(
       enum: ["text", "voice", "video"],
       required: true,
     },
+    category: {
+      type: String,
+      default: "TEXT CHANNELS",
+      trim: true,
+    },
+    topic: {
+      type: String,
+      default: "",
+      maxlength: 500,
+    },
     description: {
       type: String,
       default: "",
@@ -27,6 +37,18 @@ const channelSchema = new mongoose.Schema(
     position: {
       type: Number,
       default: 0,
+    },
+    isPrivate: {
+      type: Boolean,
+      default: false,
+    },
+    allowedRoles: {
+      type: [String],
+      default: [],
+    },
+    slowmode: {
+      type: Number,
+      default: 0, // In seconds (0 = disabled)
     },
   },
   { timestamps: true }

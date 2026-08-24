@@ -17,7 +17,11 @@ import {
   FolderOpen,
   Crop,
   Tv,
-  CheckCircle2
+  CheckCircle2,
+  Crosshair,
+  Compass,
+  X,
+  Loader2
 } from "lucide-react";
 import { getHighQualityUploads, setHighQualityUploads } from "../lib/mediaQualitySettings";
 import { useDispatch, useSelector } from "react-redux";
@@ -26,9 +30,19 @@ import { ClipLoader } from "react-spinners";
 import VideoPlayer from "../components/VideoPlayer";
 import AICreationModal from "../components/AICreationModal";
 import StoryCreator from "../components/StoryCreator";
+import VybeLiveModal from "../components/VybeLiveModal";
 import StoryMusicPickerModal from "../components/StoryMusicPickerModal";
 import DraftsModal from "../components/DraftsModal";
 import AIInfoModal from "../components/AIInfoModal";
+import LocationPickerModal from "../components/LocationPickerModal";
+import { searchPlaces, getCurrentGPSLocation, reverseGeocode } from "../lib/locationService";
+import { detectAIMetadata } from "../lib/aiMetadataDetector";
+import {
+  generateDraftThumbnail,
+  saveDraftMediaLocal,
+  getDraftMediaLocal,
+  deleteDraftMediaLocal,
+} from "../lib/draftStorage";
 import { setReelData } from "../redux/features/reelSlice";
 import { setPostData } from "../redux/features/postSlice";
 // removed unused setStoryFeed import
@@ -76,18 +90,17 @@ export const Upload = () => {
   const [showDraftsModal, setShowDraftsModal] = useState(false);
   const [currentDraftId, setCurrentDraftId] = useState(() => location.state?.resumedDraft?._id || null);
 
-  // Helper to convert File to persistent base64 Data URL
-  const fileToDataUrl = (file, fallback = "") => {
-    return new Promise((resolve) => {
-      if (!file) return resolve(fallback);
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => resolve(fallback);
-      reader.readAsDataURL(file);
-    });
-  };
+  // Video Duration & VYBE TV Long-Form States
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [isVybeTv, setIsVybeTv] = useState(false);
 
-  const handleResumeDraft = (draft) => {
+  // AI Content Disclosure ("Made with AI") State
+  const [isAIGenerated, setIsAIGenerated] = useState(false);
+  const [aiTool, setAiTool] = useState("");
+  const [aiContentType, setAiContentType] = useState("image");
+  const [showAIInfoDisclosureModal, setShowAIInfoDisclosureModal] = useState(false);
+
+  const handleResumeDraft = async (draft) => {
     if (!draft) return;
     if (draft._id) setCurrentDraftId(draft._id);
     const targetType = draft.draftType || "post";
@@ -96,6 +109,38 @@ export const Upload = () => {
     setLocationText(draft.location || "");
     if (draft.audioTrack) setSelectedMusic(draft.audioTrack);
 
+    // Restore AI and TV metadata
+    if (draft.aiLabel) {
+      setIsAIGenerated(!!draft.aiLabel.isAIGenerated);
+      setAiTool(draft.aiLabel.tool || "");
+      setAiContentType(draft.aiLabel.contentType || "image");
+    }
+    if (draft.isVybeTv) setIsVybeTv(true);
+    if (draft.videoDuration) setVideoDuration(draft.videoDuration);
+
+    // 1. Try to restore original binary media from IndexedDB first
+    const storedMedia = await getDraftMediaLocal(draft._id);
+    if (storedMedia && storedMedia.length > 0) {
+      const restoredItems = storedMedia.map((m) => {
+        const fileObj = m.file instanceof Blob ? m.file : null;
+        return {
+          file: fileObj,
+          preview: fileObj ? URL.createObjectURL(fileObj) : draft.mediaPreview || "",
+          type: m.type || (fileObj?.type?.includes("video") ? "video" : "image"),
+          mediaType: m.type || (fileObj?.type?.includes("video") ? "video" : "image"),
+          altText: m.altText || "",
+          aspectRatio: m.aspectRatio || "aspect-square",
+          tags: [],
+        };
+      });
+
+      setItems(restoredItems);
+      setActiveIndex(0);
+      snackbar.success("Draft loaded with full media! ✏️");
+      return;
+    }
+
+    // 2. Fallback to server thumbnail preview
     const previewUrl =
       draft.mediaPreview ||
       draft.mediaItems?.[0]?.preview ||
@@ -128,6 +173,8 @@ export const Upload = () => {
           type: isVideo ? "video" : "image",
           mediaType: isVideo ? "video" : "image",
           altText: draft.altText || "",
+          aspectRatio: "aspect-square",
+          tags: [],
         },
       ]);
       setActiveIndex(0);
@@ -138,26 +185,19 @@ export const Upload = () => {
   // Resume Draft from route navigation if provided
   useEffect(() => {
     if (location.state?.resumedDraft) {
-      handleResumeDraft(location.state.resumedDraft);
+      const draft = location.state.resumedDraft;
+      const timer = setTimeout(() => {
+        handleResumeDraft(draft);
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [location.state]);
+  }, [location.state?.resumedDraft]);
 
-  // Autocomplete Suggestions
+  // Autocomplete Suggestions & Location Modal
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [gpsLoading, setGpsLoading] = useState(false);
   const [locationSuggestions, setLocationSuggestions] = useState([]);
   const [userSuggestions, setUserSuggestions] = useState([]);
-
-  const POPULAR_LOCATIONS = [
-    "New York, USA",
-    "Los Angeles, California",
-    "London, United Kingdom",
-    "Paris, France",
-    "Tokyo, Japan",
-    "Mumbai, India",
-    "New Delhi, India",
-    "Berlin, Germany",
-    "Sydney, Australia",
-    "Dubai, United Arab Emirates"
-  ];
 
   const handleLocationChange = async (val) => {
     setLocationText(val);
@@ -166,26 +206,31 @@ export const Upload = () => {
       return;
     }
 
-    const filtered = POPULAR_LOCATIONS.filter((loc) =>
-      loc.toLowerCase().includes(val.toLowerCase())
-    );
-
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&limit=5`
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const apiLocs = data.map((d) => d.display_name.split(",").slice(0, 3).join(","));
-        const combined = Array.from(new Set([...filtered, ...apiLocs])).slice(0, 7);
-        setLocationSuggestions(combined);
-        return;
+      const results = await searchPlaces(val, { limit: 6 });
+      setLocationSuggestions(results || []);
+    } catch (e) {
+      console.warn("Upload: handleLocationChange failed", e);
+      setLocationSuggestions([]);
+    }
+  };
+
+  const handleUseCurrentGPS = async () => {
+    try {
+      setGpsLoading(true);
+      triggerHaptic("selection");
+      const coords = await getCurrentGPSLocation();
+      const rev = await reverseGeocode(coords.latitude, coords.longitude);
+      if (rev) {
+        setLocationText(rev.name || rev.title);
+        setLocationSuggestions([]);
+        snackbar.success(`Located at ${rev.title}! 📍`);
       }
     } catch (e) {
-      console.warn("Upload: handleLocationChange reverse geocode failed", e);
+      snackbar.error(e.message || "Failed to retrieve GPS location.");
+    } finally {
+      setGpsLoading(false);
     }
-
-    setLocationSuggestions(filtered);
   };
 
   const handleUserTagChange = async (val) => {
@@ -215,7 +260,9 @@ export const Upload = () => {
   };
 
   const selectLocation = (loc) => {
-    setLocationText(loc);
+    triggerHaptic("selection");
+    const locName = typeof loc === "string" ? loc : loc.name || loc.title;
+    setLocationText(locName);
     setLocationSuggestions([]);
   };
 
@@ -305,21 +352,19 @@ export const Upload = () => {
   const [scheduledPublishTime, setScheduledPublishTime] = useState("");
   const [highQualityUpload, setHighQualityUpload] = useState(getHighQualityUploads());
 
-  // Video Duration & VYBE TV Long-Form States
-  const [videoDuration, setVideoDuration] = useState(0);
-  const [isVybeTv, setIsVybeTv] = useState(false);
-
-  // AI Content Disclosure ("Made with AI") State
-  const [isAIGenerated, setIsAIGenerated] = useState(false);
-  const [aiTool, setAiTool] = useState("");
-  const [aiContentType, setAiContentType] = useState("image");
-  const [showAIInfoDisclosureModal, setShowAIInfoDisclosureModal] = useState(false);
-
   // Modals & Loaders
   const [showAIModal, setShowAIModal] = useState(false);
   const [showMusicPicker, setShowMusicPicker] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [uploadProgressText, setUploadProgressText] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStats, setUploadStats] = useState({
+    speed: "0 KB/s",
+    loadedFormatted: "0 MB",
+    totalFormatted: "0 MB",
+    eta: "Calculating...",
+    stage: "uploading",
+  });
 
   const mediaInput = useRef(null);
   const { postData } = useSelector((state) => state.post);
@@ -402,6 +447,19 @@ export const Upload = () => {
       return next;
     });
     
+    // Automatically scan uploaded files for C2PA, SynthID, and AI generation metadata
+    files.forEach((file) => {
+      detectAIMetadata(file).then((detected) => {
+        if (detected && detected.isAIGenerated) {
+          setIsAIGenerated(true);
+          if (detected.tool) setAiTool(detected.tool);
+          if (file.type.includes("video")) setAiContentType("video");
+          else setAiContentType("image");
+          snackbar.info(`✨ AI Generated media detected (${detected.tool}) — "Made with AI" label applied automatically!`);
+        }
+      }).catch(() => {});
+    });
+
     // Set active item if first time
     if (items.length === 0) {
       setActiveIndex(0);
@@ -443,6 +501,60 @@ export const Upload = () => {
     }
   };
 
+  // Helper to create live speed & progress tracking
+  const createUploadProgressHandler = () => {
+    const startTime = Date.now();
+    setUploadProgress(1);
+    setUploadStats({
+      speed: "Calculating...",
+      loadedFormatted: "0.0 MB",
+      totalFormatted: "0.0 MB",
+      eta: "Starting...",
+      stage: "uploading",
+    });
+
+    return (progressEvent) => {
+      const { loaded, total } = progressEvent;
+      if (total) {
+        const percent = Math.min(Math.round((loaded * 100) / total), 99);
+        setUploadProgress(percent);
+        const elapsedSec = (Date.now() - startTime) / 1000;
+        const bytesPerSec = elapsedSec > 0.2 ? loaded / elapsedSec : 0;
+
+        let speedStr = "Calculating...";
+        if (bytesPerSec >= 1024 * 1024) {
+          speedStr = `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+        } else if (bytesPerSec > 0) {
+          speedStr = `${(bytesPerSec / 1024).toFixed(0)} KB/s`;
+        }
+
+        const loadedMB = (loaded / (1024 * 1024)).toFixed(1);
+        const totalMB = (total / (1024 * 1024)).toFixed(1);
+
+        const remainingBytes = Math.max(total - loaded, 0);
+        const remainingSec = bytesPerSec > 0 ? Math.ceil(remainingBytes / bytesPerSec) : 0;
+        const etaStr =
+          remainingSec > 60
+            ? `${Math.floor(remainingSec / 60)}m ${remainingSec % 60}s`
+            : `${remainingSec}s`;
+
+        setUploadStats({
+          speed: speedStr,
+          loadedFormatted: `${loadedMB} MB`,
+          totalFormatted: `${totalMB} MB`,
+          eta: remainingSec > 0 ? `${etaStr} left` : "Processing...",
+          stage: percent >= 98 ? "processing" : "uploading",
+        });
+
+        if (percent >= 98) {
+          setUploadProgressText("Processing & optimizing 4K stream on cloud servers...");
+        } else {
+          setUploadProgressText(`Uploading ${percent}% (${speedStr})`);
+        }
+      }
+    };
+  };
+
   // 1. Upload Carousel or Single Post Controller Trigger
   const uploadPostFlow = async () => {
     if (items.length === 0) {
@@ -454,6 +566,7 @@ export const Upload = () => {
     if (!isSafe) return;
 
     setIsLoading(true);
+    const progressHandler = createUploadProgressHandler();
     setUploadProgressText("Uploading media to cloud...");
 
     try {
@@ -506,6 +619,7 @@ export const Upload = () => {
         
         result = await api.post("/post/upload", formData, {
           headers: { "Content-Type": "multipart/form-data" },
+          onUploadProgress: progressHandler,
         });
       } else {
         // Carousel file upload
@@ -517,15 +631,19 @@ export const Upload = () => {
 
         result = await api.post("/post/upload-carousel", formData, {
           headers: { "Content-Type": "multipart/form-data" },
+          onUploadProgress: progressHandler,
         });
       }
 
+      setUploadProgress(100);
+      setUploadStats((prev) => ({ ...prev, stage: "publishing", eta: "Done!" }));
       snackbar.success(result.data.message || "Post published successfully!");
       if (result.data.post) {
         dispatch(setPostData([result.data.post, ...(postData || [])]));
       }
       if (currentDraftId) {
         api.delete(`/post/drafts/${currentDraftId}`).catch(() => {});
+        deleteDraftMediaLocal(currentDraftId).catch(() => {});
       }
       setIsLoading(false);
       navigate("/");
@@ -552,7 +670,8 @@ export const Upload = () => {
     if (!isSafe) return;
 
     setIsLoading(true);
-    setUploadProgressText("Processing reel video...");
+    const progressHandler = createUploadProgressHandler();
+    setUploadProgressText("Uploading reel video to cloud...");
 
     try {
       const formData = new FormData();
@@ -580,14 +699,18 @@ export const Upload = () => {
 
       const result = await api.post("/reel/upload", formData, {
         headers: { "Content-Type": "multipart/form-data" },
+        onUploadProgress: progressHandler,
       });
 
+      setUploadProgress(100);
+      setUploadStats((prev) => ({ ...prev, stage: "publishing", eta: "Done!" }));
       const uploadedReel = result.data.reel;
       if (uploadedReel) {
         dispatch(setReelData([uploadedReel, ...(reelData || [])]));
       }
       if (currentDraftId) {
         api.delete(`/post/drafts/${currentDraftId}`).catch(() => {});
+        deleteDraftMediaLocal(currentDraftId).catch(() => {});
       }
       snackbar.success("Reel published successfully!");
       setIsLoading(false);
@@ -618,9 +741,14 @@ export const Upload = () => {
       const hashtagsList = caption.match(/#[a-zA-Z0-9_]+/g) || [];
       const cleanHashtags = hashtagsList.map((h) => h.replace("#", ""));
       
-      let persistentPreview = items[0]?.preview || "";
-      if (items[0]?.file) {
-        persistentPreview = await fileToDataUrl(items[0].file, items[0].preview);
+      // Generate ultra-lightweight, crisp JPEG thumbnail for instant preview (<60KB)
+      const primaryFile = items[0]?.file;
+      let persistentPreview = "";
+      if (primaryFile) {
+        persistentPreview = await generateDraftThumbnail(primaryFile);
+      }
+      if (!persistentPreview && items[0]?.preview?.startsWith("data:")) {
+        persistentPreview = items[0].preview;
       }
 
       const res = await api.post("/post/drafts", {
@@ -633,16 +761,28 @@ export const Upload = () => {
         aspectRatio: "4:5",
         filter: "normal",
         audioTrack: selectedMusic,
+        aiLabel: isAIGenerated
+          ? {
+              isAIGenerated: true,
+              tool: aiTool,
+              contentType: aiContentType,
+            }
+          : null,
+        isVybeTv,
+        videoDuration,
         mediaItems: items.map((it) => ({
-          preview: it.preview,
-          type: it.type || it.mediaType || "image",
+          preview: persistentPreview || "",
+          type: it.type || it.mediaType || (uploadType === "reel" ? "video" : "image"),
           altText: it.altText || "",
         })),
         altText: items[activeIndex]?.altText || "",
       });
 
-      if (res.data?.draft?._id) {
-        setCurrentDraftId(res.data.draft._id);
+      const savedDraftId = res.data?.draft?._id || currentDraftId;
+      if (savedDraftId) {
+        setCurrentDraftId(savedDraftId);
+        // Persist original binary files in IndexedDB
+        await saveDraftMediaLocal(savedDraftId, items);
       }
 
       snackbar.success(currentDraftId ? "Draft updated! 📝" : "Saved to Drafts! 📝");
@@ -650,7 +790,7 @@ export const Upload = () => {
       setShowDraftsModal(true);
     } catch (err) {
       console.warn("Failed to save draft:", err);
-      snackbar.error("Failed to save draft");
+      snackbar.error(err?.response?.data?.message || "Failed to save draft");
       setIsLoading(false);
     }
   };
@@ -678,6 +818,21 @@ export const Upload = () => {
     );
   }
 
+  if (uploadType === "live") {
+    return (
+      <VybeLiveModal
+        isOpen={true}
+        onClose={() => {
+          if (queryType === "live") {
+            navigate(-1);
+          } else {
+            setUploadType(previousUploadType || "post");
+          }
+        }}
+      />
+    );
+  }
+
   const activeItem = items[activeIndex];
 
   return (
@@ -692,7 +847,7 @@ export const Upload = () => {
             <MdOutlineKeyboardBackspace className="w-6 h-6" />
           </button>
           <h1 className="text-lg font-black tracking-tight uppercase">
-            Create {uploadType === "reel" ? "Reel" : uploadType === "story" ? "Story" : "Post"}
+            Create {uploadType === "reel" ? "Reel" : uploadType === "story" ? "Story" : uploadType === "live" ? "Live" : "Post"}
           </h1>
         </div>
 
@@ -720,16 +875,16 @@ export const Upload = () => {
       </div>
 
       {/* MODE SELECTOR */}
-      <div className="w-[90%] max-w-[500px] mx-auto mt-6 p-1 bg-surface/60 border border-border/80 rounded-full flex justify-around items-center shrink-0">
-        {["post", "story", "reel"].map((t) => (
+      <div className="w-[94%] max-w-[540px] mx-auto mt-6 p-1 bg-surface/60 border border-border/80 rounded-full flex justify-around items-center shrink-0">
+        {["post", "story", "reel", "live"].map((t) => (
           <button
             key={t}
             onClick={() => handleSwitchType(t)}
-            className={`w-[32%] py-2 text-xs font-extrabold rounded-full transition capitalize cursor-pointer ${
+            className={`w-[24%] py-2 text-xs font-extrabold rounded-full transition capitalize cursor-pointer ${
               uploadType === t ? "bg-rose-600 text-text shadow-lg shadow-rose-600/10" : "text-text-muted hover:text-text"
             }`}
           >
-            {t === "reel" ? "Reels" : t}
+            {t === "reel" ? "Reels" : t === "live" ? "🔴 Live" : t}
           </button>
         ))}
       </div>
@@ -961,34 +1116,101 @@ export const Upload = () => {
           {uploadType !== "story" && (
             <div className="bg-surface/35 border border-border p-5 rounded-3xl flex flex-col gap-4">
               {/* Location Picker */}
-              <div className="flex items-center gap-3 relative">
-                <div className="w-9 h-9 rounded-xl bg-surface border border-border flex items-center justify-center text-text-secondary">
-                  <MapPin className="w-4 h-4" />
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-black text-text-muted uppercase tracking-wider flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Location</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleUseCurrentGPS}
+                      disabled={gpsLoading}
+                      className="px-2.5 py-1 rounded-full bg-surface hover:bg-surface-hover border border-border text-[10px] font-bold text-rose-400 flex items-center gap-1 transition cursor-pointer active:scale-95 disabled:opacity-50"
+                      title="Use Current GPS Location"
+                    >
+                      {gpsLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Crosshair className="w-3 h-3" />}
+                      <span>GPS</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic("selection");
+                        setShowLocationModal(true);
+                      }}
+                      className="px-2.5 py-1 rounded-full bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-[10px] font-bold text-rose-400 flex items-center gap-1 transition cursor-pointer active:scale-95"
+                      title="Open Interactive Real Map"
+                    >
+                      <Compass className="w-3 h-3" />
+                      <span>Pick on Map</span>
+                    </button>
+                  </div>
                 </div>
-                <div className="flex-1 relative">
-                  <label className="block text-[9px] font-black text-text-muted uppercase tracking-wider">Location</label>
-                  <input
-                    type="text"
-                    value={locationText}
-                    onChange={(e) => handleLocationChange(e.target.value)}
-                    placeholder="Add location details..."
-                    className="w-full bg-transparent text-xs text-text outline-none border-b border-transparent focus:border-rose-500/40 py-0.5"
-                  />
-                  {locationSuggestions.length > 0 && (
-                    <div className="absolute left-0 right-0 mt-1 bg-surface-inset border border-border rounded-xl shadow-2xl overflow-hidden z-50">
-                      {locationSuggestions.map((loc, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => selectLocation(loc)}
-                          className="w-full text-left px-3 py-2 hover:bg-surface text-xs text-text transition cursor-pointer"
-                        >
-                          {loc}
-                        </button>
-                      ))}
+
+                {locationText ? (
+                  <div className="flex items-center justify-between p-3 rounded-2xl bg-surface-inset border border-rose-500/30 shadow-xs">
+                    <div
+                      onClick={() => setShowLocationModal(true)}
+                      className="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0"
+                    >
+                      <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-rose-500 to-pink-600 flex items-center justify-center text-white shadow shrink-0">
+                        <MapPin className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="truncate">
+                        <p className="text-xs font-bold text-text truncate">{locationText}</p>
+                        <p className="text-[10px] text-rose-400 font-medium">Click to adjust on Real Map</p>
+                      </div>
                     </div>
-                  )}
-                </div>
+                    <button
+                      type="button"
+                      onClick={() => setLocationText("")}
+                      className="p-1 text-text-muted hover:text-text rounded-full hover:bg-surface transition cursor-pointer"
+                      title="Remove Location"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={locationText}
+                      onChange={(e) => handleLocationChange(e.target.value)}
+                      placeholder="Search cities, cafes, landmarks..."
+                      className="w-full bg-surface-inset border border-border/80 focus:border-rose-500 rounded-2xl px-4 py-2.5 text-xs text-text outline-none transition shadow-inner"
+                    />
+                    {locationSuggestions.length > 0 && (
+                      <div className="absolute left-0 right-0 mt-1 bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden z-50 p-1 flex flex-col gap-0.5 max-h-48 overflow-y-auto">
+                        {locationSuggestions.map((loc, i) => {
+                          const title = loc.title || loc.name || loc;
+                          const subtitle = loc.subtitle || "";
+                          return (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => selectLocation(loc)}
+                              className="w-full text-left p-2.5 hover:bg-surface-hover rounded-xl text-xs text-text transition cursor-pointer flex items-center justify-between gap-2"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                                <div className="truncate">
+                                  <p className="font-bold text-xs truncate">{title}</p>
+                                  {subtitle && <p className="text-[10px] text-text-muted truncate">{subtitle}</p>}
+                                </div>
+                              </div>
+                              {loc.category && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-surface-inset text-text-muted shrink-0">
+                                  {loc.category}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Tag Users Input */}
@@ -1420,6 +1642,107 @@ export const Upload = () => {
         }}
         authorName="You"
       />
+
+      {/* INTERACTIVE REAL MAP LOCATION PICKER MODAL */}
+      {showLocationModal && (
+        <LocationPickerModal
+          isOpen={showLocationModal}
+          onClose={() => setShowLocationModal(false)}
+          title="Add Location"
+          initialLocation={locationText ? { name: locationText } : null}
+          onSendLocation={(loc) => {
+            selectLocation(loc);
+            setShowLocationModal(false);
+          }}
+        />
+      )}
+
+      {/* REAL-TIME INSTAGRAM UPLOAD PROGRESS & SPEED HUD MODAL */}
+      {isLoading && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl animate-in fade-in duration-200 select-none">
+          <div className="w-full max-w-sm bg-surface border border-border rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center space-y-5 animate-in zoom-in-95 duration-200">
+            {/* Circular Progress Ring */}
+            <div className="relative w-28 h-28 flex items-center justify-center">
+              {/* Background track circle */}
+              <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="42"
+                  className="stroke-surface-active"
+                  strokeWidth="8"
+                  fill="transparent"
+                />
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="42"
+                  className="stroke-rose-500 transition-all duration-300 ease-out"
+                  strokeWidth="8"
+                  strokeDasharray={264}
+                  strokeDashoffset={264 - (264 * uploadProgress) / 100}
+                  strokeLinecap="round"
+                  fill="transparent"
+                />
+              </svg>
+
+              <div className="absolute flex flex-col items-center justify-center">
+                <span className="text-2xl font-black text-text tracking-tight">
+                  {uploadProgress}%
+                </span>
+                <span className="text-[10px] uppercase font-bold text-rose-500 tracking-wider">
+                  {uploadStats.stage === "publishing" ? "Finalizing" : uploadStats.stage === "processing" ? "Optimizing" : "Uploading"}
+                </span>
+              </div>
+            </div>
+
+            {/* Title & Stage Description */}
+            <div className="space-y-1 w-full">
+              <h3 className="text-base font-extrabold text-text">
+                {uploadStats.stage === "publishing"
+                  ? "Publishing to Feed ✨"
+                  : uploadStats.stage === "processing"
+                  ? "Processing & Optimizing 4K Video..."
+                  : `Uploading ${uploadType === "reel" ? "Reel" : "Post"}...`}
+              </h3>
+              <p className="text-xs text-text-secondary line-clamp-2 px-2">
+                {uploadProgressText || "Please keep the app open while we upload your content."}
+              </p>
+            </div>
+
+            {/* Glowing Linear Progress Bar */}
+            <div className="w-full space-y-1.5">
+              <div className="w-full h-2.5 bg-surface-active rounded-full overflow-hidden p-0.5">
+                <div
+                  className="h-full bg-gradient-to-r from-rose-500 via-purple-500 to-cyan-400 rounded-full transition-all duration-200 shadow-[0_0_12px_rgba(244,63,94,0.5)]"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-[11px] font-semibold text-text-secondary px-0.5">
+                <span>{uploadStats.loadedFormatted} of {uploadStats.totalFormatted}</span>
+                <span className="text-rose-500 font-bold">{uploadStats.eta}</span>
+              </div>
+            </div>
+
+            {/* Live Metrics Grid (Speed & ETA Badges) */}
+            <div className="grid grid-cols-2 gap-2.5 w-full pt-1">
+              <div className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-surface-hover border border-border">
+                <span className="text-[10px] uppercase font-bold text-text-muted">Speed</span>
+                <span className="text-xs font-black text-text flex items-center gap-1 mt-0.5">
+                  ⚡ {uploadStats.speed}
+                </span>
+              </div>
+
+              <div className="flex flex-col items-center justify-center p-2.5 rounded-2xl bg-surface-hover border border-border">
+                <span className="text-[10px] uppercase font-bold text-text-muted">Time Left</span>
+                <span className="text-xs font-black text-text flex items-center gap-1 mt-0.5">
+                  ⏱️ {uploadStats.eta}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

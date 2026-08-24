@@ -15,11 +15,11 @@ export class CallTransportProvider {
     throw new Error("leave() must be implemented");
   }
 
-  publishTrack(track) {
+  publishTrack() {
     throw new Error("publishTrack() must be implemented");
   }
 
-  unpublishTrack(track) {
+  unpublishTrack() {
     throw new Error("unpublishTrack() must be implemented");
   }
 

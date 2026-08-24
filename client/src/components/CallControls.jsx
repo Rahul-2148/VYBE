@@ -1,416 +1,625 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
-  Mic, MicOff, Video, VideoOff, Monitor, Settings, PhoneOff,
-  Smile, Hand, ShieldAlert, Tv, Sparkles, MoreHorizontal, X, ChevronUp
+  Mic,
+  MicOff,
+  Video,
+  VideoOff,
+  Monitor,
+  PhoneOff,
+  Smile,
+  Hand,
+  Sparkles,
+  MoreVertical,
+  ChevronUp,
+  Info,
+  Users,
+  MessageSquare,
+  LayoutGrid,
+  Settings,
+  Maximize2,
+  Minimize2,
+  Check,
 } from "lucide-react";
+import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
+import { snackbar } from "../lib/snackbar";
+import { AnimatedEmoji, StaticNotoEmoji } from "./CallReactionStream";
+
+/**
+ * Hover-to-Animate Emoji Reaction Button (Static Google Noto Emoji by Default, Animated on Hover)
+ */
+const InteractiveEmojiButton = ({ emoji, onSelect }) => {
+  const [isHovered, setIsHovered] = React.useState(false);
+
+  return (
+    <button
+      type="button"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      onTouchStart={() => setIsHovered(true)}
+      onTouchEnd={() => setIsHovered(false)}
+      onClick={(e) => onSelect(emoji, e)}
+      className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center p-1 rounded-full hover:bg-white/15 hover:scale-130 active:scale-90 transform transition-all duration-150 cursor-pointer"
+      title={`Send ${emoji}`}
+    >
+      {isHovered ? (
+        <AnimatedEmoji emoji={emoji} className="w-6 h-6 sm:w-7 sm:h-7 pointer-events-none" />
+      ) : (
+        <StaticNotoEmoji emoji={emoji} className="w-5.5 h-5.5 sm:w-6 sm:h-6 pointer-events-none" />
+      )}
+    </button>
+  );
+};
+/**
+ * Google Meet Official Hand Icon
+ */
+export const GoogleMeetHandIcon = ({ className = "w-5 h-5", isRaised = false }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill={isRaised ? "currentColor" : "none"}
+    stroke="currentColor"
+    strokeWidth={isRaised ? "0.5" : "1.8"}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path
+      fill={isRaised ? "currentColor" : "none"}
+      d="M13 24c-3.258 0-6.169-1.271-8.32-3.334l-4.68-4.666 1.414-1.414 4.586 3.586v-13.172c0-.552.448-1 1-1s1 .448 1 1v7h1v-10c0-.552.448-1 1-1s1 .448 1 1v10h1v-11c0-.552.448-1 1-1s1 .448 1 1v11h1v-9c0-.552.448-1 1-1s1 .448 1 1v13.5c0 3.584-2.916 6.5-6.5 6.5z"
+    />
+  </svg>
+);
 
 export const CallControls = ({
   isMuted,
   isVideoOff,
   isScreenSharing,
+  isHandRaised,
   onToggleMute,
   onToggleVideo,
   onToggleScreenShare,
+  onToggleHand,
   onEndCall,
-  audioInputDevices,
-  videoDevices,
-  audioOutputDevices,
+  onSendReaction,
+  activeSidebar, // 'chat', 'activities', 'people', 'info', or null
+  onToggleSidebar, // (sidebarName) => void
+  unreadChatCount = 0,
+  participantCount = 1,
+  roomTitle = "VYBE Meeting",
+  onOpenSettings,
+  onToggleFullscreen,
+  isFullscreen = false,
+  isFloating = false,
+  audioInputDevices = [],
+  videoDevices = [],
   selectedAudioInput,
   setSelectedAudioInput,
   selectedVideo,
   setSelectedVideo,
-  selectedAudioOutput,
-  setSelectedAudioOutput,
-  onSendReaction,
-  onToggleHand,
-  isHandRaised,
-  isHost,
-  onMuteAll,
-  onToggleWatchParty,
-  isWatchPartyActive,
-  videoFilter,
-  onChangeVideoFilter,
+  isHost = false,
+  hostSettings = {
+    allowScreenShare: true,
+    allowChat: true,
+    allowMic: true,
+    allowCamera: true,
+    allowReactions: true,
+  },
 }) => {
-  const [showSettings, setShowSettings] = useState(false);
-  const [showReactions, setShowReactions] = useState(false);
-  const [showFilters, setShowFilters] = useState(false);
+  const [showReactionsPill, setShowReactionsPill] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showAudioDropdown, setShowAudioDropdown] = useState(false);
+  const [showVideoDropdown, setShowVideoDropdown] = useState(false);
+  const [currentTime, setCurrentTime] = useState("");
+
+  const reactionsList = ["💖", "👍", "🎉", "👏", "😂", "😮", "😢", "👎", "💯", "🔥", "✨"];
   const moreMenuRef = useRef(null);
 
-  const reactionsList = ["👍", "❤️", "😂", "🎉", "😮", "😢"];
-
-  // Close "More" menu when clicking outside
+  // Live Time Formatter (GMeet format: 11:45 PM)
   useEffect(() => {
-    const handleClickOutside = (e) => {
+    const updateTime = () => {
+      const now = new Date();
+      setCurrentTime(
+        now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      );
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Close menus on outside click
+  useEffect(() => {
+    const handleOutside = (e) => {
       if (moreMenuRef.current && !moreMenuRef.current.contains(e.target)) {
         setShowMoreMenu(false);
+        setShowAudioDropdown(false);
+        setShowVideoDropdown(false);
+        setShowReactionsPill(false);
       }
     };
-    if (showMoreMenu) {
-      document.addEventListener("mousedown", handleClickOutside);
-      document.addEventListener("touchstart", handleClickOutside);
-    }
+    document.addEventListener("mousedown", handleOutside);
+    document.addEventListener("touchstart", handleOutside);
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("touchstart", handleClickOutside);
+      document.removeEventListener("mousedown", handleOutside);
+      document.removeEventListener("touchstart", handleOutside);
     };
-  }, [showMoreMenu]);
+  }, []);
 
-  // Close all panels when "More" menu is closed
-  const closeAllPanels = () => {
-    setShowSettings(false);
-    setShowReactions(false);
-    setShowFilters(false);
-  };
-
-  const toggleMoreMenu = () => {
-    if (showMoreMenu) {
-      closeAllPanels();
+  const handleReactionClick = (emoji, e) => {
+    triggerHaptic("medium");
+    microAudio?.playPop?.();
+    let originPercent = 50;
+    if (e && e.currentTarget) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const clickCenterX = rect.left + rect.width / 2;
+      originPercent = Math.max(8, Math.min(92, (clickCenterX / window.innerWidth) * 100));
     }
-    setShowMoreMenu(!showMoreMenu);
+    onSendReaction?.(emoji, originPercent);
   };
-
-  // Count active secondary features for badge indicator on "More" button
-  const activeSecondaryCount = [isHandRaised, isWatchPartyActive, videoFilter !== "none"].filter(Boolean).length;
 
   return (
-    <div className="relative flex flex-col items-center gap-2 w-full max-w-2xl mx-auto z-50" ref={moreMenuRef}>
+    <div
+      ref={moreMenuRef}
+      className={
+        isFloating || isFullscreen
+          ? "flex items-center gap-1.5 sm:gap-2.5 bg-[#181a1d]/90 backdrop-blur-2xl border border-white/20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full shadow-2xl text-white select-none relative animate-in fade-in zoom-in-95 duration-200"
+          : "w-full bg-[#1e1f20] border-t border-zinc-700/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between z-50 text-white select-none shadow-2xl relative"
+      }
+    >
+      {/* ============================================================
+          1. LEFT SECTION: TIME & MEETING INFO (Hidden in floating mode)
+          ============================================================ */}
+      {!isFloating && !isFullscreen && (
+        <div className="flex items-center gap-3 min-w-0 shrink-0 hidden md:flex">
+          <span className="text-xs font-semibold text-zinc-300 font-mono tracking-tight">
+            {currentTime || "12:00 PM"}
+          </span>
+          <span className="text-zinc-600 text-xs">|</span>
+          <span className="text-xs font-bold text-white truncate max-w-[160px] lg:max-w-[240px]">
+            {roomTitle}
+          </span>
+        </div>
+      )}
 
       {/* ============================================================
-          POPOVERS â€” Positioned above the control bar
+          2. CORE CALL BUTTONS
           ============================================================ */}
-
-      {/* Settings Panel Popover */}
-      {showSettings && (
-        <div className="absolute bottom-full mb-3 left-4 right-4 md:left-auto md:right-auto md:w-80 bg-surface border border-border p-4 rounded-2xl shadow-2xl flex flex-col gap-3 z-50 animate-in fade-in slide-in-from-bottom-2 duration-200">
-          <div className="flex items-center justify-between">
-            <h4 className="text-xs font-bold text-text-secondary uppercase tracking-wider flex items-center gap-1.5">
-              <Settings className="w-3.5 h-3.5" />
-              Device Settings
-            </h4>
-            <button onClick={() => setShowSettings(false)} className="text-text-muted hover:text-text cursor-pointer">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Camera Input */}
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-bold text-text-muted">Camera Input</label>
-            <select
-              value={selectedVideo}
-              onChange={(e) => setSelectedVideo(e.target.value)}
-              className="bg-bg text-text text-xs p-2 rounded-lg border border-border outline-none"
-            >
-              {videoDevices.map((d) => (
-                <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${d.deviceId.slice(0, 5)}`}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Microphone Input */}
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-bold text-text-muted">Microphone Input</label>
-            <select
-              value={selectedAudioInput}
-              onChange={(e) => setSelectedAudioInput(e.target.value)}
-              className="bg-bg text-text text-xs p-2 rounded-lg border border-border outline-none"
-            >
-              {audioInputDevices.map((d) => (
-                <option key={d.deviceId} value={d.deviceId}>{d.label || `Mic ${d.deviceId.slice(0, 5)}`}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Speaker Output */}
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-bold text-text-muted">Speaker Output</label>
-            <select
-              value={selectedAudioOutput}
-              onChange={(e) => setSelectedAudioOutput(e.target.value)}
-              className="bg-bg text-text text-xs p-2 rounded-lg border border-border outline-none"
-            >
-              {audioOutputDevices.map((d) => (
-                <option key={d.deviceId} value={d.deviceId}>{d.label || `Speaker ${d.deviceId.slice(0, 5)}`}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      )}
-
-      {/* Emoji Drawer Popover */}
-      {showReactions && (
-        <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 flex gap-2 bg-surface border border-border px-3 py-2 rounded-full shadow-2xl animate-in zoom-in duration-200 z-50">
-          {reactionsList.map((emoji) => (
-            <button
-              key={emoji}
-              onClick={() => {
-                onSendReaction(emoji);
-                setShowReactions(false);
-                setShowMoreMenu(false);
-              }}
-              className="text-2xl hover:scale-125 active:scale-95 transition transform cursor-pointer"
-            >
-              {emoji}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Visual Filters Popover */}
-      {showFilters && (
-        <div className="absolute bottom-full mb-3 left-4 right-4 md:left-auto md:right-auto bg-surface border border-border p-4 rounded-2xl shadow-2xl flex flex-col gap-2 z-50 animate-in fade-in slide-in-from-bottom-2 duration-200 w-72">
-          <div className="flex items-center justify-between">
-            <h4 className="text-xs font-bold text-text-secondary uppercase tracking-wider flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-pink-400" />
-              Video Effects
-            </h4>
-            <button onClick={() => setShowFilters(false)} className="text-text-muted hover:text-text cursor-pointer">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="grid grid-cols-4 gap-2">
-            {[
-              { id: "none", label: "Normal" },
-              { id: "grayscale", label: "Noir" },
-              { id: "sepia", label: "Vintage" },
-              { id: "invert", label: "Cyber" },
-              { id: "contrast", label: "Drama" },
-              { id: "warm", label: "Warm" },
-              { id: "cool", label: "Cool" },
-              { id: "blur", label: "Blur" },
-            ].map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() => {
-                  onChangeVideoFilter(opt.id);
-                }}
-                className={`flex flex-col items-center gap-1 p-2 rounded-xl transition cursor-pointer ${
-                  videoFilter === opt.id
-                    ? "bg-pink-600/10 border border-pink-500/40 text-pink-400 font-bold scale-105"
-                    : "bg-bg border border-border text-text hover:bg-surface-inset"
-                }`}
-              >
-                <div className={`w-8 h-8 rounded-lg ${
-                  opt.id === "grayscale" ? "bg-zinc-600" :
-                  opt.id === "sepia" ? "bg-amber-700/80" :
-                  opt.id === "invert" ? "bg-indigo-600" :
-                  opt.id === "contrast" ? "bg-emerald-600" :
-                  opt.id === "warm" ? "bg-orange-400" :
-                  opt.id === "cool" ? "bg-sky-400" :
-                  opt.id === "blur" ? "bg-zinc-800/40 blur-[1.5px]" : "bg-zinc-800"
-                }`} />
-                <span className="text-[9px] truncate w-full text-center">{opt.label}</span>
-              </button>
+      <div className={`flex items-center gap-1.5 sm:gap-2.5 relative ${isFloating || isFullscreen ? "" : "mx-auto"}`}>
+        {/* FLOATING GMEET REACTION BAR (EMOJI PILL) */}
+        {showReactionsPill && (
+          <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-[#28292a]/95 backdrop-blur-2xl border border-zinc-700 px-3 py-1.5 rounded-full shadow-2xl animate-in zoom-in-95 duration-150 z-50">
+            {reactionsList.map((emoji) => (
+              <InteractiveEmojiButton
+                key={emoji}
+                emoji={emoji}
+                onSelect={handleReactionClick}
+              />
             ))}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ============================================================
-          "MORE" MENU â€” Secondary actions grid (Google Meet / Zoom style)
-          Opens above the primary bar
-          ============================================================ */}
-      {showMoreMenu && (
-        <div className="w-full bg-black/60 backdrop-blur-2xl border border-white/10 rounded-2xl p-3 shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-200">
-          <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
-            
-            {/* Screen Share â€” visible in More menu on MOBILE only (desktop has it in primary bar) */}
-            <button
-              onClick={() => { onToggleScreenShare(); setShowMoreMenu(false); }}
-              className="md:hidden flex flex-col items-center gap-1.5 p-3 rounded-2xl transition cursor-pointer group"
-            >
-              <div className={`p-2.5 rounded-xl transition border ${
-                isScreenSharing
-                  ? "bg-purple-600/20 border-purple-500 text-purple-400"
-                  : "bg-white/5 border-white/10 text-white group-hover:bg-white/10"
-              }`}>
-                <Monitor className="w-5 h-5" />
-              </div>
-              <span className="text-[9px] font-semibold text-text-muted">{isScreenSharing ? "Stop" : "Share"}</span>
-            </button>
-
-            {/* Watch Party */}
-            <button
-              onClick={() => { onToggleWatchParty(); setShowMoreMenu(false); }}
-              className="flex flex-col items-center gap-1.5 p-3 rounded-2xl transition cursor-pointer group"
-            >
-              <div className={`p-2.5 rounded-xl transition border ${
-                isWatchPartyActive
-                  ? "bg-pink-600/20 border-pink-500 text-pink-400"
-                  : "bg-white/5 border-white/10 text-white group-hover:bg-white/10"
-              }`}>
-                <Tv className="w-5 h-5" />
-              </div>
-              <span className="text-[9px] font-semibold text-text-muted">Watch Party</span>
-            </button>
-
-            {/* Raise Hand */}
-            <button
-              onClick={() => { onToggleHand(); setShowMoreMenu(false); }}
-              className="flex flex-col items-center gap-1.5 p-3 rounded-2xl transition cursor-pointer group"
-            >
-              <div className={`p-2.5 rounded-xl transition border ${
-                isHandRaised
-                  ? "bg-amber-600/20 border-amber-500 text-amber-500"
-                  : "bg-white/5 border-white/10 text-white group-hover:bg-white/10"
-              }`}>
-                <Hand className="w-5 h-5" />
-              </div>
-              <span className="text-[9px] font-semibold text-text-muted">{isHandRaised ? "Lower" : "Raise"} Hand</span>
-            </button>
-
-            {/* Reactions */}
-            <button
-              onClick={() => {
-                setShowReactions(!showReactions);
-                setShowSettings(false);
-                setShowFilters(false);
-              }}
-              className="flex flex-col items-center gap-1.5 p-3 rounded-2xl transition cursor-pointer group"
-            >
-              <div className={`p-2.5 rounded-xl transition border ${
-                showReactions
-                  ? "bg-amber-600/20 border-amber-500 text-amber-500"
-                  : "bg-white/5 border-white/10 text-white group-hover:bg-white/10"
-              }`}>
-                <Smile className="w-5 h-5" />
-              </div>
-              <span className="text-[9px] font-semibold text-text-muted">Reactions</span>
-            </button>
-
-            {/* Video Effects */}
-            <button
-              onClick={() => {
-                setShowFilters(!showFilters);
-                setShowReactions(false);
-                setShowSettings(false);
-              }}
-              className="flex flex-col items-center gap-1.5 p-3 rounded-2xl transition cursor-pointer group"
-            >
-              <div className={`p-2.5 rounded-xl transition border ${
-                showFilters || (videoFilter && videoFilter !== "none")
-                  ? "bg-pink-600/20 border-pink-500 text-pink-400"
-                  : "bg-white/5 border-white/10 text-white group-hover:bg-white/10"
-              }`}>
-                <Sparkles className="w-5 h-5" />
-              </div>
-              <span className="text-[9px] font-semibold text-text-muted">Effects</span>
-            </button>
-
-            {/* Device Settings */}
-            <button
-              onClick={() => {
-                setShowSettings(!showSettings);
-                setShowReactions(false);
-                setShowFilters(false);
-              }}
-              className="flex flex-col items-center gap-1.5 p-3 rounded-2xl transition cursor-pointer group"
-            >
-              <div className={`p-2.5 rounded-xl transition border ${
-                showSettings
-                  ? "bg-blue-600/20 border-blue-500 text-blue-400"
-                  : "bg-white/5 border-white/10 text-white group-hover:bg-white/10"
-              }`}>
-                <Settings className="w-5 h-5" />
-              </div>
-              <span className="text-[9px] font-semibold text-text-muted">Settings</span>
-            </button>
-
-            {/* Host Controls */}
-            {isHost && (
-              <button
-                onClick={() => { onMuteAll(); setShowMoreMenu(false); }}
-                className="flex flex-col items-center gap-1.5 p-3 rounded-2xl transition cursor-pointer group"
-              >
-                <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-800 text-rose-400 group-hover:bg-rose-900/40 transition">
-                  <ShieldAlert className="w-5 h-5" />
-                </div>
-                <span className="text-[9px] font-semibold text-rose-400">Mute All</span>
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================
-          PRIMARY CONTROL BAR â€” Always visible, most important actions
-          Layout: [Mic] [Video] [Screen Share (desktop)] ... [More â‹¯] [End Call]
+        {/* 🎤 MICROPHONE BUTTON + DEVICE SELECTOR */}
+        <div className="relative flex items-center">
+          <button
+            type="button"
+            onClick={() => {
+              if (!isHost && hostSettings.allowMic === false && isMuted) {
+                snackbar.warning("The meeting host has turned off microphones for attendees 🔇");
+                return;
+              }
+              triggerHaptic("selection");
+              onToggleMute();
+            }}
+            className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all shadow-md cursor-pointer hover:scale-105 active:scale-95 ${
+              isMuted
+                ? "bg-[#ea4335] hover:bg-[#d93025] text-white ring-2 ring-rose-400/40"
+                : "bg-[#3c4043] hover:bg-[#474b50] text-white"
+            }`}
+            title={isMuted ? "Turn on microphone" : "Turn off microphone"}
+          >
+            {isMuted ? <MicOff className="w-4.5 h-4.5 sm:w-5 sm:h-5" /> : <Mic className="w-4.5 h-4.5 sm:w-5 sm:h-5" />}
+          </button>
           
-          UX Pattern: Google Meet, Zoom, Discord â€” critical actions never hidden
-          - Mic & Video: Most used, always visible
-          - Screen Share: Important enough for desktop primary bar
-          - End Call: MUST always be visible and prominent (red)
-          - Everything else: "More" menu
-          ============================================================ */}
-      <div className="flex items-center justify-center gap-3 md:gap-4 bg-black/40 backdrop-blur-xl border border-white/10 p-3 md:p-4 rounded-3xl w-full shadow-2xl">
-        
-        {/* Toggle Audio â€” ALWAYS VISIBLE */}
-        <button
-          onClick={onToggleMute}
-          className={`p-3 md:p-3.5 rounded-2xl transition border ${
-            isMuted
-              ? "bg-rose-600/20 border-rose-500 text-rose-500 hover:bg-rose-600/30"
-              : "bg-white/5 border-white/10 hover:bg-white/10 text-white"
-          }`}
-          title={isMuted ? "Unmute Mic" : "Mute Mic"}
-        >
-          {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-        </button>
-
-        {/* Toggle Video â€” ALWAYS VISIBLE */}
-        <button
-          onClick={onToggleVideo}
-          className={`p-3 md:p-3.5 rounded-2xl transition border ${
-            isVideoOff
-              ? "bg-rose-600/20 border-rose-500 text-rose-500 hover:bg-rose-600/30"
-              : "bg-white/5 border-white/10 hover:bg-white/10 text-white"
-          }`}
-          title={isVideoOff ? "Turn Video On" : "Turn Video Off"}
-        >
-          {isVideoOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
-        </button>
-
-        {/* Screen Share â€” Visible on DESKTOP only, hidden on mobile (in More menu) */}
-        <button
-          onClick={onToggleScreenShare}
-          className={`hidden md:flex p-3.5 rounded-2xl transition border ${
-            isScreenSharing
-              ? "bg-purple-600/20 border-purple-500 text-purple-400 hover:bg-purple-600/30"
-              : "bg-white/5 border-white/10 hover:bg-white/10 text-white"
-          }`}
-          title={isScreenSharing ? "Stop Sharing" : "Share Screen"}
-        >
-          <Monitor className="w-5 h-5" />
-        </button>
-
-        {/* MORE BUTTON â€” Opens secondary actions grid */}
-        <button
-          onClick={toggleMoreMenu}
-          className={`relative p-3 md:p-3.5 rounded-2xl transition border ${
-            showMoreMenu
-              ? "bg-blue-600/20 border-blue-500 text-blue-400"
-              : "bg-white/5 border-white/10 hover:bg-white/10 text-white"
-          }`}
-          title="More Actions"
-        >
-          {showMoreMenu ? <ChevronUp className="w-5 h-5" /> : <MoreHorizontal className="w-5 h-5" />}
-          {/* Activity badge â€” shows count of active secondary features */}
-          {activeSecondaryCount > 0 && !showMoreMenu && (
-            <span className="absolute -top-1 -right-1 w-4 h-4 bg-pink-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center shadow-lg animate-pulse">
-              {activeSecondaryCount}
-            </span>
+          {audioInputDevices.length > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowAudioDropdown(!showAudioDropdown);
+                setShowVideoDropdown(false);
+                setShowMoreMenu(false);
+              }}
+              className="p-1 -ml-1 text-zinc-400 hover:text-white transition cursor-pointer"
+              title="Select Microphone"
+            >
+              <ChevronUp className="w-3.5 h-3.5" />
+            </button>
           )}
+
+          {/* AUDIO INPUT DEVICE POPUP */}
+          {showAudioDropdown && (
+            <div className="absolute bottom-full mb-3 left-0 w-64 bg-[#28292a]/95 backdrop-blur-2xl border border-zinc-700/80 rounded-2xl p-1.5 shadow-2xl animate-in zoom-in-95 duration-150 z-50 text-white space-y-1">
+              <div className="px-3 py-1.5 text-[11px] font-bold text-zinc-400 uppercase tracking-wider border-b border-zinc-700/50">
+                Select Microphone
+              </div>
+              {audioInputDevices.map((d) => (
+                <button
+                  key={d.deviceId}
+                  type="button"
+                  onClick={() => {
+                    setSelectedAudioInput?.(d.deviceId);
+                    setShowAudioDropdown(false);
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition cursor-pointer text-left ${
+                    selectedAudioInput === d.deviceId
+                      ? "bg-purple-600/30 text-purple-300 font-bold border border-purple-500/40"
+                      : "hover:bg-white/10 text-zinc-300"
+                  }`}
+                >
+                  <span className="truncate pr-2">{d.label || `Microphone (${d.deviceId.slice(0, 8)}...)`}</span>
+                  {selectedAudioInput === d.deviceId && <Check className="w-3.5 h-3.5 text-purple-400 shrink-0" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 📹 CAMERA BUTTON + DEVICE SELECTOR */}
+        <div className="relative flex items-center">
+          <button
+            type="button"
+            onClick={() => {
+              if (!isHost && hostSettings?.allowCamera === false && isVideoOff) {
+                snackbar.warning("The meeting host has turned off cameras for attendees 📷");
+                return;
+              }
+              triggerHaptic("selection");
+              onToggleVideo();
+            }}
+            className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all shadow-md cursor-pointer hover:scale-105 active:scale-95 ${
+              isVideoOff
+                ? "bg-[#ea4335] hover:bg-[#d93025] text-white ring-2 ring-rose-400/40"
+                : "bg-[#3c4043] hover:bg-[#474b50] text-white"
+            }`}
+            title={isVideoOff ? "Turn on camera" : "Turn off camera"}
+          >
+            {isVideoOff ? <VideoOff className="w-4.5 h-4.5 sm:w-5 sm:h-5" /> : <Video className="w-4.5 h-4.5 sm:w-5 sm:h-5" />}
+          </button>
+
+          {videoDevices.length > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowVideoDropdown(!showVideoDropdown);
+                setShowAudioDropdown(false);
+                setShowMoreMenu(false);
+              }}
+              className="p-1 -ml-1 text-zinc-400 hover:text-white transition cursor-pointer"
+              title="Select Camera"
+            >
+              <ChevronUp className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {/* VIDEO DEVICE POPUP */}
+          {showVideoDropdown && (
+            <div className="absolute bottom-full mb-3 left-0 w-64 bg-[#28292a]/95 backdrop-blur-2xl border border-zinc-700/80 rounded-2xl p-1.5 shadow-2xl animate-in zoom-in-95 duration-150 z-50 text-white space-y-1">
+              <div className="px-3 py-1.5 text-[11px] font-bold text-zinc-400 uppercase tracking-wider border-b border-zinc-700/50">
+                Select Camera
+              </div>
+              {videoDevices.map((d) => (
+                <button
+                  key={d.deviceId}
+                  type="button"
+                  onClick={() => {
+                    setSelectedVideo?.(d.deviceId);
+                    setShowVideoDropdown(false);
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition cursor-pointer text-left ${
+                    selectedVideo === d.deviceId
+                      ? "bg-purple-600/30 text-purple-300 font-bold border border-purple-500/40"
+                      : "hover:bg-white/10 text-zinc-300"
+                  }`}
+                >
+                  <span className="truncate pr-2">{d.label || `Camera (${d.deviceId.slice(0, 8)}...)`}</span>
+                  {selectedVideo === d.deviceId && <Check className="w-3.5 h-3.5 text-purple-400 shrink-0" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ✋ RAISE HAND BUTTON */}
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic("selection");
+            onToggleHand();
+          }}
+          className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all shadow-md cursor-pointer hover:scale-105 active:scale-95 ${
+            isHandRaised
+              ? "bg-[#8ab4f8] text-[#202124] ring-2 ring-blue-400/50 shadow-blue-500/30"
+              : "bg-[#3c4043] hover:bg-[#474b50] text-white"
+          }`}
+          title={isHandRaised ? "Lower hand" : "Raise hand"}
+        >
+          <GoogleMeetHandIcon className="w-4.5 h-4.5 sm:w-5 sm:h-5" isRaised={isHandRaised} />
         </button>
 
-        {/* END CALL â€” ALWAYS VISIBLE, prominent red */}
+        {/* 😊 EMOJI / REACTION BUTTON */}
         <button
-          onClick={onEndCall}
-          className="p-3 md:p-3.5 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white transition shadow-xl transform active:scale-95 border border-rose-500"
-          title="Hang Up"
+          type="button"
+          onClick={() => {
+            if (!isHost && hostSettings.allowReactions === false) {
+              snackbar.warning("The meeting host has disabled emoji reactions 🚫");
+              return;
+            }
+            triggerHaptic("selection");
+            setShowReactionsPill(!showReactionsPill);
+            setShowMoreMenu(false);
+          }}
+          className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all shadow-md cursor-pointer hover:scale-105 active:scale-95 ${
+            showReactionsPill
+              ? "bg-[#8ab4f8] text-[#202124]"
+              : "bg-[#3c4043] hover:bg-[#474b50] text-white"
+          }`}
+          title="Send a reaction"
         >
-          <PhoneOff className="w-5 h-5" />
+          <Smile className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+        </button>
+
+        {/* 🖥️ PRESENT NOW / SCREEN SHARE */}
+        <button
+          type="button"
+          onClick={() => {
+            if (!isHost && hostSettings.allowScreenShare === false && !isScreenSharing) {
+              snackbar.warning("The meeting host has disabled screen sharing 🛑");
+              return;
+            }
+            triggerHaptic("selection");
+            onToggleScreenShare();
+          }}
+          className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all shadow-md cursor-pointer hover:scale-105 active:scale-95 ${
+            isScreenSharing
+              ? "bg-[#8ab4f8] text-[#202124] ring-2 ring-blue-400/50"
+              : "bg-[#3c4043] hover:bg-[#474b50] text-white"
+          }`}
+          title={isScreenSharing ? "Stop presenting" : "Present now (Share Screen)"}
+        >
+          <Monitor className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+        </button>
+
+        {/* IN FLOATING / FULLSCREEN MODE: INTEGRATE CHAT & ACTIVITIES DIRECTLY */}
+        {(isFloating || isFullscreen) && (
+          <>
+            {/* 💬 In-Call Chat */}
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic("selection");
+                onToggleSidebar(activeSidebar === "chat" ? null : "chat");
+              }}
+              className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all shadow-md cursor-pointer relative hover:scale-105 active:scale-95 ${
+                activeSidebar === "chat"
+                  ? "bg-[#8ab4f8] text-[#202124]"
+                  : "bg-[#3c4043] hover:bg-[#474b50] text-white"
+              }`}
+              title="Chat with everyone"
+            >
+              <MessageSquare className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+              {unreadChatCount > 0 && activeSidebar !== "chat" && (
+                <span className="absolute -top-1 -right-1 px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-bold animate-pulse shadow-md">
+                  {unreadChatCount}
+                </span>
+              )}
+            </button>
+
+            {/* 👥 People */}
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic("selection");
+                onToggleSidebar(activeSidebar === "people" ? null : "people");
+              }}
+              className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all shadow-md cursor-pointer relative hover:scale-105 active:scale-95 ${
+                activeSidebar === "people"
+                  ? "bg-[#8ab4f8] text-[#202124]"
+                  : "bg-[#3c4043] hover:bg-[#474b50] text-white"
+              }`}
+              title="Participants"
+            >
+              <Users className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+              {participantCount > 1 && (
+                <span className="absolute -top-1 -right-1 px-1.5 py-0.2 rounded-full bg-blue-600 text-white text-[10px] font-bold">
+                  {participantCount}
+                </span>
+              )}
+            </button>
+
+            {/* ▦ Activities (9-Dot) */}
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic("selection");
+                onToggleSidebar(activeSidebar === "activities" ? null : "activities");
+              }}
+              className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all shadow-md cursor-pointer hover:scale-105 active:scale-95 ${
+                activeSidebar === "activities"
+                  ? "bg-[#8ab4f8] text-[#202124]"
+                  : "bg-[#3c4043] hover:bg-[#474b50] text-white"
+              }`}
+              title="Activities (Whiteboard, Recording, Polls, Q&A, Effects)"
+            >
+              <LayoutGrid className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+            </button>
+          </>
+        )}
+
+        {/* ⚙️ MORE OPTIONS (3 DOTS) */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic("selection");
+              setShowMoreMenu(!showMoreMenu);
+              setShowAudioDropdown(false);
+              setShowVideoDropdown(false);
+            }}
+            className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all shadow-md cursor-pointer hover:scale-105 active:scale-95 ${
+              showMoreMenu
+                ? "bg-[#8ab4f8] text-[#202124]"
+                : "bg-[#3c4043] hover:bg-[#474b50] text-white"
+            }`}
+            title="More options"
+          >
+            <MoreVertical className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+          </button>
+
+          {/* MORE OPTIONS DROPDOWN (GMEET STYLE) */}
+          {showMoreMenu && (
+            <div className="absolute bottom-full mb-3 right-0 sm:left-1/2 sm:-translate-x-1/2 w-60 bg-[#28292a]/95 backdrop-blur-2xl border border-zinc-700/80 rounded-2xl p-1.5 shadow-2xl animate-in zoom-in-95 duration-150 z-50 text-white space-y-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  onToggleSidebar("activities");
+                }}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 transition cursor-pointer text-left"
+              >
+                <Sparkles className="w-4 h-4 text-pink-400" />
+                <span>Visual Effects & Backgrounds</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  onToggleFullscreen?.();
+                }}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 transition cursor-pointer text-left"
+              >
+                {isFullscreen ? (
+                  <>
+                    <Minimize2 className="w-4 h-4 text-blue-400" />
+                    <span>Exit Full screen</span>
+                  </>
+                ) : (
+                  <>
+                    <Maximize2 className="w-4 h-4 text-blue-400" />
+                    <span>Full screen</span>
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  onOpenSettings?.();
+                }}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 transition cursor-pointer text-left"
+              >
+                <Settings className="w-4 h-4 text-zinc-400" />
+                <span>Call Settings</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* 🔴 END CALL (RED PILL) */}
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic("heavy");
+            onEndCall();
+          }}
+          className="h-10 sm:h-11 px-4 sm:px-6 rounded-full bg-[#ea4335] hover:bg-[#d93025] active:scale-95 text-white flex items-center justify-center transition shadow-lg shadow-rose-600/30 cursor-pointer"
+          title="Leave call"
+        >
+          <PhoneOff className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
         </button>
       </div>
+
+      {/* ============================================================
+          3. RIGHT SECTION: SIDEBAR TOGGLES (Normal mode only)
+          ============================================================ */}
+      {!isFloating && !isFullscreen && (
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          {/* ℹ️ Meeting Info */}
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic("selection");
+              onToggleSidebar(activeSidebar === "info" ? null : "info");
+            }}
+            className={`p-2 sm:p-2.5 rounded-full transition cursor-pointer ${
+              activeSidebar === "info"
+                ? "bg-[#8ab4f8] text-[#202124]"
+                : "text-zinc-300 hover:text-white hover:bg-white/10"
+            }`}
+            title="Meeting details"
+          >
+            <Info className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+          </button>
+
+          {/* 👥 People / Participants */}
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic("selection");
+              onToggleSidebar(activeSidebar === "people" ? null : "people");
+            }}
+            className={`relative p-2 sm:p-2.5 rounded-full transition cursor-pointer ${
+              activeSidebar === "people"
+                ? "bg-[#8ab4f8] text-[#202124]"
+                : "text-zinc-300 hover:text-white hover:bg-white/10"
+            }`}
+            title="People"
+          >
+            <Users className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+            {participantCount > 1 && (
+              <span className="absolute -top-0.5 -right-0.5 px-1.5 py-0.2 rounded-full bg-blue-600 text-white text-[10px] font-bold">
+                {participantCount}
+              </span>
+            )}
+          </button>
+
+          {/* 💬 In-Call Messages / Chat Sidebar */}
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic("selection");
+              onToggleSidebar(activeSidebar === "chat" ? null : "chat");
+            }}
+            className={`relative p-2 sm:p-2.5 rounded-full transition cursor-pointer ${
+              activeSidebar === "chat"
+                ? "bg-[#8ab4f8] text-[#202124]"
+                : "text-zinc-300 hover:text-white hover:bg-white/10"
+            }`}
+            title="Chat with everyone"
+          >
+            <MessageSquare className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+            {unreadChatCount > 0 && activeSidebar !== "chat" && (
+              <span className="absolute -top-0.5 -right-0.5 px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-bold animate-pulse">
+                {unreadChatCount}
+              </span>
+            )}
+          </button>
+
+          {/* ▦ Activities / 9-Dot Button (Google Meet Iconic) */}
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic("selection");
+              onToggleSidebar(activeSidebar === "activities" ? null : "activities");
+            }}
+            className={`p-2 sm:p-2.5 rounded-full transition cursor-pointer ${
+              activeSidebar === "activities"
+                ? "bg-[#8ab4f8] text-[#202124]"
+                : "text-zinc-300 hover:text-white hover:bg-white/10"
+            }`}
+            title="Activities (Whiteboard, Recording, Polls, Q&A, Effects)"
+          >
+            <LayoutGrid className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

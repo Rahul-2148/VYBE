@@ -15,16 +15,21 @@ export const CreateGroupModal = ({ isOpen, onClose, onGroupCreated }) => {
 
   useEffect(() => {
     if (!isOpen) return;
-    setLoadingUsers(true);
+    let isMounted = true;
     api
       .get("/user/suggested")
       .then((res) => {
-        if (res.data?.users) {
+        if (isMounted && res.data?.users) {
           setUserList(res.data.users);
         }
       })
       .catch(() => {})
-      .finally(() => setLoadingUsers(false));
+      .finally(() => {
+        if (isMounted) setLoadingUsers(false);
+      });
+    return () => {
+      isMounted = false;
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -62,7 +67,7 @@ export const CreateGroupModal = ({ isOpen, onClose, onGroupCreated }) => {
       snackbar.success(`Group "${groupName.trim()}" created! 🎉`);
       if (onGroupCreated) onGroupCreated(res.data);
       onClose();
-    } catch (err) {
+    } catch {
       // Try direct conversation endpoint
       try {
         const res2 = await api.post("/conversation/create-group", {

@@ -10,11 +10,14 @@ import {
   getSearchHistory,
   removeSearchHistoryItem,
   getLocationDetails,
+  searchPlaces,
 } from "../controllers/search.controller.js";
 
 const searchRouter = express.Router();
 
 searchRouter.get("/query", isAuthenticated, searchAll);
+searchRouter.get("/users", isAuthenticated, searchAll);
+searchRouter.get("/places", isAuthenticated, searchPlaces);
 searchRouter.get("/explore", isAuthenticated, getExploreFeed);
 searchRouter.get("/tag/:hashtag", isAuthenticated, getHashtagDetails);
 searchRouter.get("/location/:locationName", isAuthenticated, getLocationDetails);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Star, Search, X, Check, Users, Trash2, Sparkles, CheckCircle2 } from "lucide-react";
+import { Star, Search, X, Check, Users, Trash2, CheckCircle2 } from "lucide-react";
 import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import dp from "../assets/dp3.png";
@@ -14,6 +14,7 @@ export const CloseFriendsModal = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState("list"); // 'list' | 'suggestions'
   const [loading, setLoading] = useState(true);
   const [togglingId, setTogglingId] = useState(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -42,9 +43,6 @@ export const CloseFriendsModal = ({ isOpen, onClose }) => {
 
   const handleToggleCloseFriend = async (targetUser) => {
     const targetUserId = targetUser._id || targetUser;
-    const isCurrentlyIn = closeFriends.some(
-      (f) => (f._id || f).toString() === targetUserId.toString()
-    );
 
     triggerHaptic("light");
     setTogglingId(targetUserId);
@@ -74,8 +72,6 @@ export const CloseFriendsModal = ({ isOpen, onClose }) => {
     }
   };
 
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
-
   const handleClearAll = async () => {
     if (closeFriends.length === 0) return;
     try {
@@ -86,7 +82,7 @@ export const CloseFriendsModal = ({ isOpen, onClose }) => {
         setShowClearConfirm(false);
         snackbar.success("Cleared all Close Friends ⭐️");
       }
-    } catch (err) {
+    } catch {
       snackbar.error("Failed to clear close friends list.");
     }
   };
@@ -138,53 +134,62 @@ export const CloseFriendsModal = ({ isOpen, onClose }) => {
             <div className="flex items-center gap-1">
               {closeFriends.length > 0 && (
                 showClearConfirm ? (
-                  <button
-                    onClick={handleClearAll}
-                    className="text-[11px] font-bold text-white bg-red-600 hover:bg-red-500 px-2.5 py-1 rounded-lg shadow transition cursor-pointer"
-                  >
-                    Confirm Clear?
-                  </button>
+                  <div className="flex items-center gap-1 bg-rose-500/10 border border-rose-500/30 rounded-xl p-1 animate-in fade-in">
+                    <button
+                      onClick={handleClearAll}
+                      className="px-2 py-1 text-[10px] bg-rose-600 text-white font-bold rounded-lg hover:bg-rose-500 transition cursor-pointer"
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      onClick={() => setShowClearConfirm(false)}
+                      className="p-1 text-zinc-400 hover:text-white rounded-lg cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 ) : (
                   <button
                     onClick={() => setShowClearConfirm(true)}
-                    className="text-[11px] font-bold text-red-400 hover:text-red-300 px-2.5 py-1 rounded-lg hover:bg-red-500/10 transition cursor-pointer"
-                    title="Clear all close friends"
+                    className="p-2 text-zinc-400 hover:text-rose-400 rounded-xl hover:bg-zinc-900 transition cursor-pointer"
+                    title="Clear list"
                   >
-                    Clear all
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 )
               )}
+
               <button
                 onClick={onClose}
-                className="p-1.5 text-zinc-400 hover:text-white rounded-full hover:bg-zinc-800 transition cursor-pointer"
+                className="p-2 text-zinc-400 hover:text-white rounded-xl hover:bg-zinc-900 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
           </div>
 
-          {/* Search bar */}
+          {/* Search Bar */}
           <div className="relative mt-3 shrink-0">
-            <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3" />
+            <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search followers or friends..."
+              placeholder="Search friends..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-8 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-xs outline-none text-white focus:border-emerald-500 placeholder-zinc-500 transition"
+              className="w-full bg-zinc-900/80 border border-zinc-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 outline-none focus:border-emerald-500 transition"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery("")}
-                className="absolute right-2.5 top-2.5 text-zinc-400 hover:text-white"
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
 
-          {/* Tab Navigation */}
-          <div className="flex items-center justify-between mt-3 p-1 bg-zinc-900 border border-zinc-800 rounded-2xl shrink-0">
+          {/* Custom Tabs */}
+          <div className="flex items-center gap-1.5 p-1 bg-zinc-900 rounded-2xl mt-3 border border-zinc-800 shrink-0">
             <button
               onClick={() => setActiveTab("list")}
               className={`flex-1 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-1.5 cursor-pointer ${
@@ -193,9 +198,10 @@ export const CloseFriendsModal = ({ isOpen, onClose }) => {
                   : "text-zinc-400 hover:text-white"
               }`}
             >
-              <Star className={`w-3 h-3 ${activeTab === "list" ? "fill-black" : "fill-none"}`} />
+              <Star className="w-3 h-3 fill-current" />
               <span>Your List ({closeFriends.length})</span>
             </button>
+
             <button
               onClick={() => setActiveTab("suggestions")}
               className={`flex-1 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-1.5 cursor-pointer ${

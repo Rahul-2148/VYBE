@@ -2,10 +2,10 @@
 import express from "express";
 import { searchMusic, getCategoryMusic, getAIRecommendedMusic } from "../controllers/music.controller.js";
 
-const router = express.Router();
+const musicRouter = express.Router();
 
-router.get("/search", searchMusic);
-router.get("/recommend", getAIRecommendedMusic);
-router.get("/category/:category", getCategoryMusic);
+musicRouter.get("/search", searchMusic);
+musicRouter.get("/recommend", getAIRecommendedMusic);
+musicRouter.get("/category/:category", getCategoryMusic);
 
-export default router;
+export default musicRouter;

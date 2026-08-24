@@ -1,22 +1,23 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import logo from "../assets/logo.png";
 import { FaRegHeart } from "react-icons/fa";
 import StoryDp from "./StoryDp";
+import LiveStoryDp from "./LiveStoryDp";
 import Navbar from "./Navbar";
 import { useSelector, useDispatch } from "react-redux";
 import Post from "./Post";
 import SponsoredPost from "./SponsoredPost";
 import FeedFilterBar from "./FeedFilterBar";
-import { MessageCircle, Loader2, Sparkles, Users, Plus } from "lucide-react";
+import CloseFriendsModal from "./CloseFriendsModal";
+import { MessageCircle, Loader2, Sparkles, Users, Star, Compass, UserPlus, Plus } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../lib/axios";
+import { getSocket } from "../lib/socket";
 import { useGetRankedFeedPostsQuery, useGetMonetizationAdsQuery } from "../redux/api/apiSlice";
 import { setPostData } from "../redux/features/postSlice";
 import GetStoryFeed from "../hooks/GetStoryFeed";
-import { useTheme } from "../lib/themeContext";
 
 const Feed = () => {
-  const themeCtx = useTheme();
   const feedRef = useRef(null);
 
   useEffect(() => {
@@ -36,22 +37,81 @@ const Feed = () => {
   const targetPostId = searchParams.get("postId");
 
   const [feedMode, setFeedMode] = useState("for-you");
+  const [showCloseFriendsModal, setShowCloseFriendsModal] = useState(false);
+  const [activeLives, setActiveLives] = useState([]);
+
+  // Fetch active live broadcasts on mount and listen to socket
+  useEffect(() => {
+    let mounted = true;
+    const fetchActiveLives = async () => {
+      try {
+        const res = await api.get("/live/active");
+        if (res.data.success && mounted) {
+          setActiveLives(res.data.lives || []);
+        }
+      } catch (e) {
+        console.warn("Feed active lives load failed:", e?.message);
+      }
+    };
+    fetchActiveLives();
+
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleCreatorLive = (data) => {
+      setActiveLives((prev) => {
+        if (prev.some((l) => l._id === data.streamId)) return prev;
+        return [
+          {
+            _id: data.streamId,
+            title: data.title,
+            host: data.host,
+            isLive: true,
+          },
+          ...prev,
+        ];
+      });
+    };
+
+    const handleCreatorEnded = (data) => {
+      setActiveLives((prev) => prev.filter((l) => l._id !== data.streamId));
+    };
+
+    socket.on("live:creator-started", handleCreatorLive);
+    socket.on("live:creator-ended", handleCreatorEnded);
+
+    return () => {
+      mounted = false;
+      socket.off("live:creator-started", handleCreatorLive);
+      socket.off("live:creator-ended", handleCreatorEnded);
+    };
+  }, []);
 
   // RTK Query hooks with instant memory cache & stale-while-revalidate
-  const { data: feedData, isLoading: isFeedLoading, refetch: refetchFeed } = useGetRankedFeedPostsQuery(feedMode, {
+  const {
+    data: feedData,
+    isLoading: isFeedLoading,
+    isFetching: isFeedFetching,
+    refetch: _refetchFeed,
+  } = useGetRankedFeedPostsQuery(feedMode, {
     refetchOnMountOrArgChange: true,
   });
   const { data: adsData } = useGetMonetizationAdsQuery();
 
-  const posts = feedData?.posts || postData || [];
+  // If feedData has been returned for current mode, use it; otherwise fallback to postData
+  const posts = useMemo(
+    () => (feedData?.posts !== undefined ? feedData.posts : postData || []),
+    [feedData, postData]
+  );
   const feedAds = adsData?.ads || [];
+  const isSwitchingModes = isFeedFetching && (!feedData || feedData.mode !== feedMode);
 
   // Sync to Redux slice for any legacy consumers
   useEffect(() => {
-    if (feedData?.posts) {
+    if (feedData?.posts && feedData.mode === feedMode) {
       dispatch(setPostData(feedData.posts));
     }
-  }, [feedData, dispatch]);
+  }, [feedData, feedMode, dispatch]);
 
   useEffect(() => {
     if (targetPostId && posts?.length > 0) {
@@ -123,8 +183,13 @@ const Feed = () => {
         </div>
       </div>
 
-      {/* Stories Tray */}
+      {/* Stories & Live Tray */}
       <div className="w-full h-28 flex items-center justify-start overflow-x-auto gap-4 px-4 border-b border-border/80 hide-scrollbar bg-bg z-10 shrink-0">
+        {/* Active Live Broadcasts (Top Priority Glowing Rings) */}
+        {activeLives.map((stream) => (
+          <LiveStoryDp key={stream._id} stream={stream} />
+        ))}
+
         {yourStory && yourStory.stories?.length > 0 ? (
           <>
             <StoryDp
@@ -164,18 +229,87 @@ const Feed = () => {
 
       {/* Feed Content */}
       <div className="w-full flex flex-col items-center gap-6 p-2 md:p-4 pb-24 max-w-[540px]">
-        {isFeedLoading && posts.length === 0 ? (
+        {(isFeedLoading || isSwitchingModes) && posts.length === 0 ? (
           <div className="flex flex-col items-center gap-3 text-text-muted py-16 text-xs font-medium">
             <Loader2 className="w-6 h-6 animate-spin text-rose-500" />
-            <span>Curating your feed...</span>
+            <span>Curating {feedMode === "following" ? "Following" : feedMode === "favorites" ? "Favorites" : "For You"} feed...</span>
           </div>
         ) : posts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
-            <div className="w-14 h-14 rounded-full bg-surface flex items-center justify-center border border-border">
-              <Sparkles className="w-6 h-6 text-rose-500" />
-            </div>
-            <h3 className="text-text text-base font-bold">No posts found</h3>
-            <p className="text-xs text-text-secondary max-w-xs">Follow users or explore popular posts to populate your feed.</p>
+          <div className="w-full flex flex-col items-center justify-center gap-4 py-16 px-6 text-center bg-surface/40 border border-border/70 rounded-3xl backdrop-blur-sm shadow-sm mt-4">
+            {feedMode === "following" ? (
+              <>
+                <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
+                  <Users className="w-7 h-7 text-indigo-400" />
+                </div>
+                <div className="space-y-1 max-w-xs">
+                  <h3 className="text-text text-base font-bold">No Posts from Following</h3>
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    You haven't followed any creators who have posted yet, or their posts haven't appeared.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <button
+                    onClick={() => navigate("/explore")}
+                    className="flex items-center gap-1.5 py-2 px-4 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition shadow-sm active:scale-95 cursor-pointer"
+                  >
+                    <Compass className="w-3.5 h-3.5" />
+                    <span>Explore Creators</span>
+                  </button>
+                  <button
+                    onClick={() => setFeedMode("for-you")}
+                    className="py-2 px-3.5 rounded-xl text-xs font-bold bg-surface border border-border hover:bg-surface-hover text-text transition active:scale-95 cursor-pointer"
+                  >
+                    For You
+                  </button>
+                </div>
+              </>
+            ) : feedMode === "favorites" ? (
+              <>
+                <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                  <Star className="w-7 h-7 text-amber-400 fill-amber-400/20" />
+                </div>
+                <div className="space-y-1 max-w-xs">
+                  <h3 className="text-text text-base font-bold">No Favorites Posts</h3>
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    Add close friends and favorite creators to your Favorites list to see their latest posts here.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <button
+                    onClick={() => setShowCloseFriendsModal(true)}
+                    className="flex items-center gap-1.5 py-2 px-4 rounded-xl text-xs font-bold bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white transition shadow-sm active:scale-95 cursor-pointer"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>Manage Favorites</span>
+                  </button>
+                  <button
+                    onClick={() => setFeedMode("for-you")}
+                    className="py-2 px-3.5 rounded-xl text-xs font-bold bg-surface border border-border hover:bg-surface-hover text-text transition active:scale-95 cursor-pointer"
+                  >
+                    For You
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
+                  <Sparkles className="w-7 h-7 text-rose-500" />
+                </div>
+                <div className="space-y-1 max-w-xs">
+                  <h3 className="text-text text-base font-bold">No Posts Found</h3>
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    Follow more creators or explore trending posts to curate your personalized feed.
+                  </p>
+                </div>
+                <button
+                  onClick={() => navigate("/explore")}
+                  className="flex items-center gap-1.5 py-2 px-4 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white transition shadow-sm active:scale-95 cursor-pointer mt-2"
+                >
+                  <Compass className="w-3.5 h-3.5" />
+                  <span>Explore Trending</span>
+                </button>
+              </>
+            )}
           </div>
         ) : (
           posts.map((post, index) => {
@@ -191,6 +325,14 @@ const Feed = () => {
           })
         )}
       </div>
+
+      {/* Close Friends / Favorites Management Modal */}
+      {showCloseFriendsModal && (
+        <CloseFriendsModal
+          isOpen={showCloseFriendsModal}
+          onClose={() => setShowCloseFriendsModal(false)}
+        />
+      )}
 
       {/* Navigation Bar (Mobile / Tablet bottom dock) */}
       <Navbar />

@@ -7,6 +7,7 @@ import {
   MessageCircle, 
   Heart, 
   PlusSquare, 
+  Plus,
   User, 
   ShieldCheck, 
   LogOut, 
@@ -14,7 +15,9 @@ import {
   Sun,
   Moon,
   Monitor,
-  Users
+  Users,
+  Radio,
+  Video,
 } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -31,6 +34,7 @@ import {
   setUnreadMessagesCount,
 } from "../redux/features/notificationSlice";
 import SearchModal from "./SearchModal";
+import VybeLiveModal from "./VybeLiveModal";
 import api from "../lib/axios";
 import { useTheme } from "../lib/themeContext";
 import { removeLinkedAccount, getNextAccount, setActiveAccountId } from "../lib/accountManager";
@@ -45,6 +49,7 @@ const LeftHome = () => {
   const location = useLocation();
 
   const [showSearchModal, setShowSearchModal] = useState(false);
+  const [showLiveModal, setShowLiveModal] = useState(false);
   const themeCtx = useTheme();
 
   const currentUserId = userData?.user?._id || userData?._id;
@@ -149,8 +154,8 @@ const LeftHome = () => {
       }
       disconnectSocket();
       snackbar.success("Logged out");
-      navigate("/signin");
-    } catch (error) {
+      navigate("/signin", { replace: true });
+    } catch {
       snackbar.error("Logout failed");
     }
   };
@@ -191,12 +196,14 @@ const LeftHome = () => {
       hasDot: unreadMessagesCount > 0 && !isMessagesActive 
     },
     { label: "Communities", icon: Users, path: "/communities" },
+    { label: "Vybe Meet", icon: Video, path: "/meet" },
     { 
       label: "Notifications", 
       icon: Heart, 
       path: "/notifications", 
       hasDot: unreadNotificationsCount > 0 && !isNotificationsActive 
     },
+    { label: "Go Live", icon: Radio, action: () => setShowLiveModal(true) },
     { label: "Create", icon: PlusSquare, path: "/upload" },
     { label: "Monetization", icon: ShieldCheck, path: "/monetization" },
     { label: "Security Center", icon: ShieldAlert, path: "/security" },
@@ -212,17 +219,67 @@ const LeftHome = () => {
     <aside className="w-[72px] xl:w-[245px] h-full border-r border-border bg-bg text-text hidden md:flex flex-col justify-between p-3 xl:py-4 xl:px-3 z-40 select-none overflow-hidden shrink-0">
       {/* Top Logo & Navigation */}
       <div className="flex-1 flex flex-col min-h-0 overflow-y-auto hide-scrollbar space-y-4 xl:space-y-5 pr-0.5 pb-4">
-        {/* Logo Header */}
-        <div 
-          onClick={() => {
-            triggerHaptic("light");
-            navigate("/");
-          }} 
-          className="px-3 pt-2 cursor-pointer flex items-center gap-3 transition transform active:scale-95"
-        >
-          <img src={logo} alt="VYBE" className="h-7 w-auto object-contain hidden xl:block theme-logo-adaptive" />
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-pink-500 to-rose-600 flex items-center justify-center xl:hidden font-black text-white text-sm shadow-lg">
-            V
+        {/* Logo & Quick Header Actions */}
+        <div className="flex items-center justify-between px-2 pt-1">
+          <div 
+            onClick={() => {
+              triggerHaptic("light");
+              navigate("/");
+            }} 
+            className="cursor-pointer flex items-center gap-2.5 transition transform active:scale-95 group"
+            title="VYBE Home"
+          >
+            <img src={logo} alt="VYBE" className="h-7 w-auto object-contain hidden xl:block theme-logo-adaptive" />
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-pink-500 to-rose-600 flex items-center justify-center xl:hidden font-black text-white text-sm shadow-lg">
+              V
+            </div>
+          </div>
+
+          {/* Right Action Icons: Notification & Plus */}
+          <div className="hidden xl:flex items-center gap-1">
+            {/* Notification Button with live unread badge */}
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic("light");
+                navigate("/notifications");
+              }}
+              className={`relative p-2 rounded-xl transition-all duration-200 cursor-pointer ${
+                location.pathname === "/notifications"
+                  ? "bg-surface text-rose-500 font-bold shadow-xs"
+                  : "text-text-secondary hover:text-text hover:bg-surface/80"
+              }`}
+              title="Notifications"
+              aria-label="Notifications"
+            >
+              <Heart className={`w-5 h-5 transition-transform duration-200 hover:scale-110 ${
+                location.pathname === "/notifications" ? "fill-rose-500 text-rose-500" : ""
+              }`} />
+              {unreadNotificationsCount > 0 && location.pathname !== "/notifications" && (
+                <span className="absolute top-1.5 right-1.5 flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500 ring-2 ring-bg"></span>
+                </span>
+              )}
+            </button>
+
+            {/* Plus / Create Button */}
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic("medium");
+                navigate("/upload");
+              }}
+              className={`relative p-2 rounded-xl transition-all duration-200 cursor-pointer ${
+                location.pathname === "/upload"
+                  ? "bg-rose-500 text-white shadow-md shadow-rose-500/20"
+                  : "text-text-secondary hover:text-text hover:bg-surface/80"
+              }`}
+              title="Create Post, Reel, or Story"
+              aria-label="Create"
+            >
+              <Plus className="w-5 h-5 transition-transform duration-200 hover:scale-110" />
+            </button>
           </div>
         </div>
 
@@ -342,6 +399,9 @@ const LeftHome = () => {
 
       {/* Search Modal */}
       {showSearchModal && <SearchModal isOpen={showSearchModal} onClose={() => setShowSearchModal(false)} />}
+
+      {/* Live Stream Broadcast Modal */}
+      {showLiveModal && <VybeLiveModal isOpen={showLiveModal} onClose={() => setShowLiveModal(false)} />}
     </aside>
   );
 };

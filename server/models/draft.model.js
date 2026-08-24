@@ -53,6 +53,18 @@ const draftSchema = new mongoose.Schema(
       type: Object,
       default: null,
     },
+    aiLabel: {
+      type: Object,
+      default: null,
+    },
+    isVybeTv: {
+      type: Boolean,
+      default: false,
+    },
+    videoDuration: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true }
 );

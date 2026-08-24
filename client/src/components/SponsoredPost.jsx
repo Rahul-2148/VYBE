@@ -1,18 +1,15 @@
-import React, { useState } from "react";
+import React from "react";
 import { ExternalLink, Sparkles, Heart, MessageCircle, Share2, Megaphone } from "lucide-react";
 import dp from "../assets/dp3.png";
 import api from "../lib/axios";
 
 export const SponsoredPost = ({ ad }) => {
-  const [hasClicked, setHasClicked] = useState(false);
-
   const handleCtaClick = async () => {
     try {
       await api.post(`/monetization/ad/click/${ad._id}`, { type: "click" });
     } catch (e) {
       console.warn("SponsoredPost: handleCtaClick failed", e);
     }
-    setHasClicked(true);
     window.open(ad.targetUrl, "_blank");
   };
 

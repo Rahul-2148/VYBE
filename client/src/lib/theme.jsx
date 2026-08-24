@@ -7,8 +7,10 @@ import { useSelector } from "react-redux";
 import api from "./axios";
 import ThemeContext from "./themeContext";
 
-const STORAGE_KEY = "vybe-theme";
+const DEFAULT_STORAGE_KEY = "vybe-theme";
 const THEMES = ["light", "dark", "system"];
+
+const getUserStorageKey = (uid) => (uid ? `vybe-theme-${uid}` : DEFAULT_STORAGE_KEY);
 
 /**
  * Resolves "system" to actual theme based on OS preference.
@@ -32,12 +34,16 @@ function applyThemeToDOM(resolvedTheme) {
 }
 
 /**
- * Gets the stored theme preference, defaulting to "system".
+ * Gets the stored theme preference for a specific user, defaulting to "system".
  */
-function getStoredTheme() {
+function getStoredTheme(uid) {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const key = getUserStorageKey(uid);
+    const stored = localStorage.getItem(key);
     if (stored && THEMES.includes(stored)) return stored;
+    // Fallback to default key
+    const defaultStored = localStorage.getItem(DEFAULT_STORAGE_KEY);
+    if (defaultStored && THEMES.includes(defaultStored)) return defaultStored;
   } catch {
     // localStorage may be unavailable (private browsing, etc.)
   }
@@ -46,37 +52,27 @@ function getStoredTheme() {
 
 /**
  * ThemeProvider — Wraps the app and provides theme context.
- * 
- * Architecture:
- * - Stores user preference ("light" | "dark" | "system") in localStorage
- * - Resolves "system" to actual theme via matchMedia
- * - Applies CSS class to <html> — all styling is handled by CSS custom properties
- * - Listens for OS theme changes when preference is "system"
- * - Automatically fetches user preference from server when logged in
- * - Persists changes to both local storage and user server settings
  */
 export function ThemeProvider({ children, defaultTheme = "system" }) {
-  const [theme, setThemeState] = useState(() => getStoredTheme() || defaultTheme);
-  const [resolvedTheme, setResolvedTheme] = useState(() => {
-    const stored = getStoredTheme() || defaultTheme;
-    return stored === "system" ? getSystemTheme() : stored;
-  });
-
   const userData = useSelector((state) => state.user.userData);
   const userId = userData?._id || userData?.user?._id;
+
+  const [theme, setThemeState] = useState(() => getStoredTheme(userId) || defaultTheme);
+  const [resolvedTheme, setResolvedTheme] = useState(() => {
+    const stored = getStoredTheme(userId) || defaultTheme;
+    return stored === "system" ? getSystemTheme() : stored;
+  });
 
   const [mounted, setMounted] = useState(false);
 
   // Apply theme on mount and when theme changes
   useEffect(() => {
     const resolved = theme === "system" ? getSystemTheme() : theme;
-    // Defer to avoid calling setState synchronously within the effect body
     const id = setTimeout(() => setResolvedTheme(resolved), 0);
     applyThemeToDOM(resolved);
 
     if (!mounted) {
       const mountId = setTimeout(() => setMounted(true), 0);
-      // Briefly disable transitions to prevent flash on initial mount
       document.documentElement.classList.add("no-transitions");
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -89,31 +85,44 @@ export function ThemeProvider({ children, defaultTheme = "system" }) {
     return () => clearTimeout(id);
   }, [theme, mounted]);
 
-  // Sync theme from server when user logs in
+  // Sync theme when user logs in or switches accounts
   useEffect(() => {
     if (!userId) return;
 
-    const fetchUserTheme = async () => {
-      try {
-        const res = await api.get("/user/theme");
-        if (res.data?.success && res.data?.theme) {
+    let isMounted = true;
+    // 1. Immediately read cached theme for this specific user
+    const localUserTheme = getStoredTheme(userId);
+    let timer = null;
+    if (localUserTheme && THEMES.includes(localUserTheme)) {
+      timer = setTimeout(() => {
+        if (isMounted) setThemeState(localUserTheme);
+      }, 0);
+    }
+
+    // 2. Fetch fresh theme from server for this user
+    api
+      .get("/user/theme")
+      .then((res) => {
+        if (isMounted && res.data?.success && res.data?.theme) {
           const serverTheme = res.data.theme;
           setThemeState(serverTheme);
           try {
-            localStorage.setItem(STORAGE_KEY, serverTheme);
+            localStorage.setItem(getUserStorageKey(userId), serverTheme);
+            localStorage.setItem(DEFAULT_STORAGE_KEY, serverTheme);
           } catch {
-            // ignore storage errors (private mode, quota, etc.)
+            // ignore storage errors
           }
         }
-      } catch (err) {
-        console.error("Failed to fetch theme from server:", err);
-      }
+      })
+      .catch((err) => {
+        console.error("Failed to fetch user theme from server:", err);
+      });
+
+    return () => {
+      isMounted = false;
+      if (timer) clearTimeout(timer);
     };
-
-    fetchUserTheme();
   }, [userId]);
-
-
 
   // Listen for OS theme changes when in "system" mode
   useEffect(() => {
@@ -134,7 +143,8 @@ export function ThemeProvider({ children, defaultTheme = "system" }) {
     if (!THEMES.includes(newTheme)) return;
     setThemeState(newTheme);
     try {
-      localStorage.setItem(STORAGE_KEY, newTheme);
+      localStorage.setItem(getUserStorageKey(userId), newTheme);
+      localStorage.setItem(DEFAULT_STORAGE_KEY, newTheme);
     } catch {
       // Silently fail if localStorage is unavailable
     }

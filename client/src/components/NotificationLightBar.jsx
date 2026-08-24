@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Heart, MessageSquare, UserPlus, Sparkles, X, Bell } from "lucide-react";
+import { Heart, MessageCircle, UserPlus, AtSign, X, Bell } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate, useLocation } from "react-router-dom";
 import { getSocket } from "../lib/socket";
@@ -68,7 +68,7 @@ export const NotificationLightBar = () => {
       }, 4500);
     };
 
-    const handleMessage = (data) => {
+    const handleMessage = () => {
       if (location.pathname.startsWith("/messages")) return;
       dispatch(incrementUnreadMessages());
       microAudio.playBubble();
@@ -87,12 +87,17 @@ export const NotificationLightBar = () => {
   // Fallback to latestNotification from Redux
   useEffect(() => {
     if (latestNotification && lightBarActive) {
-      setActiveBanner(latestNotification);
-      const timer = setTimeout(() => {
+      const showTimer = setTimeout(() => {
+        setActiveBanner(latestNotification);
+      }, 0);
+      const dismissTimer = setTimeout(() => {
         setActiveBanner((current) => (current?._id === latestNotification._id ? null : current));
         dispatch(dismissLightBar());
       }, 4500);
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(showTimer);
+        clearTimeout(dismissTimer);
+      };
     }
   }, [latestNotification, lightBarActive, dispatch]);
 

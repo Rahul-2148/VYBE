@@ -34,6 +34,13 @@ export const AICreationModal = ({ isOpen, onClose, mode = "caption", onSelectRes
     }
   };
 
+  const handleCopy = (text) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    snackbar.success("Copied to clipboard!");
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const handleUseResult = (text) => {
     if (onSelectResult) onSelectResult(text);
     snackbar.success("Applied to input!");
@@ -118,7 +125,23 @@ export const AICreationModal = ({ isOpen, onClose, mode = "caption", onSelectRes
           {/* Results Display */}
           {generatedResult && (
             <div className="p-4 bg-surface border border-border rounded-2xl space-y-3">
-              <p className="text-xs font-bold text-rose-400 uppercase tracking-wider">Generated Output</p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold text-rose-400 uppercase tracking-wider">Generated Output</p>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleCopy(
+                      mode === "caption"
+                        ? `${generatedResult.caption}\n\n${generatedResult.hashtags?.join(" ")}`
+                        : generatedResult.bio
+                    )
+                  }
+                  className="p-1.5 rounded-lg bg-surface-secondary text-text-secondary hover:text-text transition cursor-pointer"
+                  title="Copy to clipboard"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
 
               {mode === "caption" ? (
                 <div className="space-y-2 text-xs">

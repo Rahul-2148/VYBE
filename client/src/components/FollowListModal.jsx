@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { X, Search, Users, UserCheck, UserPlus, Loader2, Sparkles, Lock } from "lucide-react";
@@ -6,7 +6,6 @@ import dp from "../assets/dp3.png";
 import VerifiedBadge from "./VerifiedBadge";
 import FollowButton from "./FollowButton";
 import api from "../lib/axios";
-import { snackbar } from "../lib/snackbar";
 
 const FollowListModal = ({ isOpen, onClose, initialTab = "followers", userName, profileUser }) => {
   const navigate = useNavigate();
@@ -24,55 +23,59 @@ const FollowListModal = ({ isOpen, onClose, initialTab = "followers", userName, 
   // Update tab if initialTab changes
   useEffect(() => {
     if (isOpen) {
-      setActiveTab(initialTab);
-      setSearchQuery("");
+      const timer = setTimeout(() => {
+        setActiveTab(initialTab);
+        setSearchQuery("");
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [isOpen, initialTab]);
 
   // Fetch lists from backend
-  const fetchData = useCallback(async () => {
-    if (!userName || !isOpen) return;
-    setLoading(true);
-    try {
-      const [followersRes, followingRes, mutualsRes] = await Promise.all([
-        api.get(`/user/${userName}/followers`).catch(() => ({ data: { followers: [] } })),
-        api.get(`/user/${userName}/following`).catch(() => ({ data: { following: [] } })),
-        api.get(`/user/${userName}/mutuals`).catch(() => ({ data: { mutuals: [] } })),
-      ]);
-
-      const followers = followersRes.data?.followers || [];
-      const following = followingRes.data?.following || [];
-      const mutuals = mutualsRes.data?.mutuals || [];
-
-      setFollowersList(followers);
-      setFollowingList(following);
-      setMutualsList(mutuals);
-
-      setCounts({
-        followers: followersRes.data?.count ?? followers.length,
-        following: followingRes.data?.count ?? following.length,
-        mutuals: mutualsRes.data?.count ?? mutuals.length,
-      });
-    } catch (err) {
-      console.warn("FollowListModal: error fetching list", err);
-      // Fallback to local profileUser props if provided
-      if (profileUser) {
-        const fList = profileUser.followers || [];
-        const fgList = profileUser.following || [];
-        setFollowersList(fList);
-        setFollowingList(fgList);
-        setCounts({ followers: fList.length, following: fgList.length, mutuals: 0 });
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [userName, isOpen, profileUser]);
-
   useEffect(() => {
-    if (isOpen) {
-      fetchData();
-    }
-  }, [isOpen, fetchData]);
+    if (!userName || !isOpen) return;
+    let isMounted = true;
+
+    Promise.all([
+      api.get(`/user/${userName}/followers`).catch(() => ({ data: { followers: [] } })),
+      api.get(`/user/${userName}/following`).catch(() => ({ data: { following: [] } })),
+      api.get(`/user/${userName}/mutuals`).catch(() => ({ data: { mutuals: [] } })),
+    ])
+      .then(([followersRes, followingRes, mutualsRes]) => {
+        if (!isMounted) return;
+        const followers = followersRes.data?.followers || [];
+        const following = followingRes.data?.following || [];
+        const mutuals = mutualsRes.data?.mutuals || [];
+
+        setFollowersList(followers);
+        setFollowingList(following);
+        setMutualsList(mutuals);
+
+        setCounts({
+          followers: followersRes.data?.count ?? followers.length,
+          following: followingRes.data?.count ?? following.length,
+          mutuals: mutualsRes.data?.count ?? mutuals.length,
+        });
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        console.warn("FollowListModal: error fetching list", err);
+        if (profileUser) {
+          const fList = profileUser.followers || [];
+          const fgList = profileUser.following || [];
+          setFollowersList(fList);
+          setFollowingList(fgList);
+          setCounts({ followers: fList.length, following: fgList.length, mutuals: 0 });
+        }
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [userName, isOpen, profileUser]);
 
   // Filter current list by search query
   const currentList = useMemo(() => {

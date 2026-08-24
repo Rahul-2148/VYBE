@@ -5,7 +5,6 @@ import { useDispatch, useSelector } from "react-redux";
 import { getSocket, joinConversation, leaveConversation } from "../lib/socket";
 import {
   addMessage,
-  updateMessage,
   updateMessageReactionInRedux,
   markMessagesAsSeenInRedux,
   markMessageEditedInRedux,
@@ -110,10 +109,18 @@ export const useMessageSocketEvents = (conversationId) => {
       }
     };
 
-    // 8. Chat theme updated
+    // 8. Chat theme updated (Instagram / WhatsApp style)
     const handleThemeUpdated = (data) => {
       if (data.conversationId) {
         dispatch(updateConversationThemeInRedux({ conversationId: data.conversationId, theme: data.theme }));
+        if (data.systemMessage) {
+          dispatch(addMessage(data.systemMessage));
+        }
+        window.dispatchEvent(
+          new CustomEvent("chat-theme-changed", {
+            detail: { conversationId: data.conversationId, theme: data.theme },
+          })
+        );
       }
     };
 
@@ -121,6 +128,9 @@ export const useMessageSocketEvents = (conversationId) => {
     const handleDisappearingUpdated = (data) => {
       if (data.conversationId) {
         dispatch(updateConversationDisappearingInRedux({ conversationId: data.conversationId, disappearingMessages: data.disappearingMessages }));
+        if (data.systemMessage) {
+          dispatch(addMessage(data.systemMessage));
+        }
       }
     };
 
@@ -131,6 +141,7 @@ export const useMessageSocketEvents = (conversationId) => {
     socket.on("messages-seen", handleMessagesSeen);
     socket.on("message-pinned", handleMessagePinned);
     socket.on("message-forwarded", handleMessageForwarded);
+    socket.on("chat:theme-updated", handleThemeUpdated);
     socket.on("chat-theme-updated", handleThemeUpdated);
     socket.on("disappearing-messages-updated", handleDisappearingUpdated);
 
@@ -142,6 +153,7 @@ export const useMessageSocketEvents = (conversationId) => {
       socket.off("messages-seen", handleMessagesSeen);
       socket.off("message-pinned", handleMessagePinned);
       socket.off("message-forwarded", handleMessageForwarded);
+      socket.off("chat:theme-updated", handleThemeUpdated);
       socket.off("chat-theme-updated", handleThemeUpdated);
       socket.off("disappearing-messages-updated", handleDisappearingUpdated);
       leaveConversation(conversationId);

@@ -17,9 +17,9 @@ const messageSchema = new mongoose.Schema(
     type: {
       type: String,
       enum: [
-        "text", "image", "video", "audio", "voice", "file", "gif",
+        "text", "image", "video", "audio", "voice", "file", "gif", "sticker",
         "location", "share", "shared_post", "shared_reel", "shared_story",
-        "shared_profile", "shared_user", "system", "poll", "contact", "contact_request", "contact_decline",
+        "shared_profile", "shared_user", "shared_audio", "system", "poll", "contact", "contact_request", "contact_decline",
       ],
       required: true,
     },
@@ -54,10 +54,10 @@ const messageSchema = new mongoose.Schema(
       shared: {
         type: {
           type: String,
-          enum: ["Reel", "Post", "Story", "User", "post", "reel", "story", "profile"],
+          enum: ["Reel", "Post", "Story", "User", "Audio", "post", "reel", "story", "profile", "audio"],
         },
         refId: {
-          type: mongoose.Schema.Types.ObjectId,
+          type: mongoose.Schema.Types.Mixed,
           required: false,
         },
       },

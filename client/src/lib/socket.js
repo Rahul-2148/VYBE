@@ -8,8 +8,12 @@ let socket = null;
  * Should be called once during app initialization
  */
 export const initializeSocket = (userId) => {
+  const currentUid = (userId?._id || userId?.id || userId)?.toString();
+
   // If socket exists for the same user, reuse it
-  if (socket && socket.auth?.userId === userId) return socket;
+  if (socket && socket.auth?.userId === currentUid) {
+    return socket;
+  }
 
   // If socket exists for a different user (account switch), disconnect first
   if (socket) {
@@ -17,14 +21,18 @@ export const initializeSocket = (userId) => {
     socket = null;
   }
 
-  const socketURL = import.meta.env.VITE_SOCKET_URL || "http://localhost:8000";
+  const defaultHost =
+    typeof window !== "undefined" && window.location.hostname && window.location.hostname !== "localhost"
+      ? `http://${window.location.hostname}:8000`
+      : "http://localhost:8000";
+
+  const socketURL = import.meta.env.VITE_SOCKET_URL || defaultHost;
   const socketPath = import.meta.env.VITE_SOCKET_PATH || "/socket.io";
   const transports = (import.meta.env.VITE_SOCKET_TRANSPORTS || "websocket,polling")
     .split(",")
     .map((t) => t.trim());
 
   // Extract JWT from cookies to pass explicitly in auth handshake
-  // This ensures the server socket middleware can verify the token
   const getCookie = (name) => {
     const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
     return match ? match[2] : null;
@@ -38,12 +46,13 @@ export const initializeSocket = (userId) => {
     withCredentials: true, // Send cookies with the handshake request
     auth: {
       token: token || null,
-      userId: userId, // Dev fallback — server uses this only when NODE_ENV !== production
+      userId: currentUid, // Dev fallback
     },
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
     reconnectionAttempts: Infinity,
+    timeout: 20000,
   });
 
   socket.on("reconnect_attempt", () => {
@@ -54,15 +63,22 @@ export const initializeSocket = (userId) => {
   });
 
   socket.on("connect", () => {
-    console.log("✅ Socket connected:", socket.id);
+    console.log("✅ Socket connected:", socket.id, "for user:", currentUid);
+    if (currentUid) {
+      socket.emit("register-user", { userId: currentUid });
+    }
   });
 
-  socket.on("disconnect", () => {
-    console.log("❌ Socket disconnected");
+  socket.on("disconnect", (reason) => {
+    console.log("ℹ️ Socket disconnected:", reason);
   });
 
   socket.on("connect_error", (error) => {
-    console.error("❌ Socket connection error:", error);
+    if (error?.message?.includes("websocket error") || error?.type === "TransportError") {
+      console.warn("⚠️ Socket handshake notice (auto-negotiating fallback transport):", error.message);
+    } else {
+      console.error("❌ Socket connection error:", error.message || error);
+    }
   });
 
   socket.on("error", (error) => {
@@ -160,9 +176,9 @@ export const onMessageReadReceipt = (callback) => {
 /**
  * Emit typing event
  */
-export const emitTyping = (conversationId) => {
+export const emitTyping = (conversationId, meta = {}) => {
   if (!socket) return;
-  socket.emit("typing", { conversationId });
+  socket.emit("typing", { conversationId, ...meta });
 };
 
 /**

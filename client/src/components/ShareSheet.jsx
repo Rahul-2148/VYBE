@@ -21,66 +21,47 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
 
   useEffect(() => {
     if (!open) return;
+    let isMounted = true;
 
-    api.get("/message/conversations")
-      .then((res) => {
-        if (res.data?.conversations) {
-          setConversations(res.data.conversations);
-          const dmUsers = res.data.conversations
-            .filter((c) => !c.isGroup && c.participant)
-            .map((c) => c.participant);
+    const baseList = following && following.length > 0 && typeof following[0] === "object" ? following : [];
 
-          setUserList((prev) => {
-            const combined = [...dmUsers, ...prev];
-            const seen = new Set();
-            return combined.filter((u) => {
-              if (!u?._id || seen.has(u._id)) return false;
-              seen.add(u._id);
-              return true;
-            });
-          });
-        }
-      })
-      .catch(() => null);
+    Promise.all([
+      api.get("/message/conversations").catch(() => ({ data: { conversations: [] } })),
+      baseList.length === 0 ? api.get("/user/suggested").catch(() => ({ data: { users: [] } })) : Promise.resolve({ data: { users: [] } }),
+    ]).then(([convRes, suggRes]) => {
+      if (!isMounted) return;
+      if (convRes.data?.conversations) {
+        setConversations(convRes.data.conversations);
+        const dmUsers = convRes.data.conversations
+          .filter((c) => !c.isGroup && c.participant)
+          .map((c) => c.participant);
 
-    if (following && following.length > 0 && typeof following[0] === "object") {
-      setUserList((prev) => {
-        const combined = [...following, ...prev];
+        const candidates = [...baseList, ...dmUsers, ...(suggRes.data?.users || [])];
         const seen = new Set();
-        return combined.filter((u) => {
+        const deduped = candidates.filter((u) => {
           if (!u?._id || seen.has(u._id)) return false;
           seen.add(u._id);
           return true;
         });
-      });
-    } else {
-      api
-        .get("/user/suggested")
-        .then((res) => {
-          if (res.data?.users) {
-            setUserList((prev) => {
-              const combined = [...prev, ...res.data.users];
-              const seen = new Set();
-              return combined.filter((u) => {
-                if (!u?._id || seen.has(u._id)) return false;
-                seen.add(u._id);
-                return true;
-              });
-            });
-          }
-        })
-        .catch(() => {});
-    }
+        setUserList(deduped);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
   }, [open, following]);
 
-  if (!open || !entity?._id) return null;
+  if (!open || (!entity?._id && !entity?.id && !entity?.title && !entity?.userName)) return null;
 
   const getShareUrl = () => {
     const origin = window.location.origin;
-    if (entityType === "reel") return `${origin}/reel/${entity._id}`;
-    if (entityType === "profile") return `${origin}/profile/${entity.userName}`;
-    if (entityType === "story") return `${origin}/story/${entity._id}`;
-    return `${origin}/post/${entity._id}`;
+    if (entityType === "reel" || entityType === "reels") return `${origin}/reel/${entity._id || entity.id}`;
+    if (entityType === "profile" || entityType === "user") return `${origin}/profile/${entity.userName || entity._id || entity.id}`;
+    if (entityType === "story") return `${origin}/story/${entity._id || entity.id}`;
+    if (entityType === "audio" || entityType === "music") return `${origin}/audio/${encodeURIComponent(entity._id || entity.id || entity.title || "")}`;
+    if (entityType === "location" || entityType === "place") return `${origin}/explore/location/${encodeURIComponent(entity._id || entity.id || entity.title || "")}`;
+    return `${origin}/post/${entity._id || entity.id}`;
   };
 
   const filteredUsers = userList.filter(
@@ -124,8 +105,24 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
       let successCount = 0;
       let errorMessages = [];
 
-      const normType = (entityType === "reels") ? "reel" : (entityType === "user") ? "profile" : entityType;
-      const entityId = entity?._id || entity?.id;
+      const normType = (entityType === "reels") ? "reel" : (entityType === "user") ? "profile" : (entityType === "music") ? "audio" : entityType;
+      const entityId = entity?._id || entity?.id || (entityType === "audio" ? entity?.title : undefined);
+
+      const sharedDataPayload = {
+        _id: entityId || entity?.title || "",
+        id: entityId || entity?.title || "",
+        title: entity?.title || entity?.caption || "",
+        artist: entity?.artist || entity?.author?.name || entity?.author?.userName || "",
+        author: entity?.author || {
+          userName: entity?.userName || entity?.user?.userName || entity?.artist || "user",
+          name: entity?.name || entity?.user?.name || entity?.artist || "User",
+          profileImage: entity?.profileImage || entity?.user?.profileImage || entity?.coverUrl || ""
+        },
+        mediaUrl: entity?.mediaUrl || entity?.coverUrl || entity?.media?.url || (Array.isArray(entity?.media) ? entity.media[0]?.url : null) || (Array.isArray(entity?.carousel) ? entity.carousel[0]?.url : null) || entity?.profileImage?.url || "",
+        coverUrl: entity?.coverUrl || entity?.mediaUrl || "",
+        caption: entity?.caption || entity?.title || entity?.description || "",
+        audioUrl: entity?.audioUrl || "",
+      };
 
       // Send to 1-to-1 users
       for (const targetUser of selectedUsers) {
@@ -136,13 +133,8 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
           text: shareText,
           messageType: `shared_${normType}`,
           sharedType: normType,
-          ...(entityId ? { sharedId: entityId } : {}),
-          sharedData: {
-            _id: entityId,
-            author: entity?.author || { userName: entity?.userName || entity?.user?.userName, profileImage: entity?.profileImage || entity?.user?.profileImage },
-            mediaUrl: entity?.mediaUrl || entity?.media?.url || (Array.isArray(entity?.media) ? entity.media[0]?.url : null) || (Array.isArray(entity?.carousel) ? entity.carousel[0]?.url : null) || entity?.profileImage?.url || "",
-            caption: entity?.caption || entity?.title || entity?.description || "",
-          },
+          ...(entityId && entityId !== entity?.title ? { sharedId: entityId } : {}),
+          sharedData: sharedDataPayload,
         };
 
         try {
@@ -170,13 +162,8 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
           text: shareText,
           messageType: `shared_${normType}`,
           sharedType: normType,
-          ...(entityId ? { sharedId: entityId } : {}),
-          sharedData: {
-            _id: entityId,
-            author: entity?.author || { userName: entity?.userName || entity?.user?.userName, profileImage: entity?.profileImage || entity?.user?.profileImage },
-            mediaUrl: entity?.mediaUrl || entity?.media?.url || (Array.isArray(entity?.media) ? entity.media[0]?.url : null) || (Array.isArray(entity?.carousel) ? entity.carousel[0]?.url : null) || entity?.profileImage?.url || "",
-            caption: entity?.caption || entity?.title || entity?.description || "",
-          },
+          ...(entityId && entityId !== entity?.title ? { sharedId: entityId } : {}),
+          sharedData: sharedDataPayload,
         };
 
         try {
@@ -241,6 +228,7 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
     onClose();
     const mediaUrl =
       entity?.mediaUrl ||
+      entity?.coverUrl ||
       entity?.videoUrl ||
       entity?.media?.url ||
       (Array.isArray(entity?.media) ? entity.media[0]?.url : null) ||
@@ -248,9 +236,9 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
       entity?.thumbnail;
 
     const authorData = entity?.author || {
-      userName: entity?.userName || entity?.user?.userName,
-      name: entity?.name || entity?.user?.name,
-      profileImage: entity?.profileImage || entity?.user?.profileImage,
+      userName: entity?.userName || entity?.user?.userName || entity?.artist || "audio",
+      name: entity?.name || entity?.user?.name || entity?.artist || "Audio",
+      profileImage: entity?.profileImage || entity?.user?.profileImage || entity?.coverUrl,
     };
 
     navigate("/upload?type=story", {
@@ -258,12 +246,13 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
         type: "story",
         initialMediaUrl: mediaUrl,
         sharedEntity: {
-          entityId: entity?._id || entity?.id,
-          entityType: (entityType === "reels") ? "reel" : entityType,
+          entityId: entity?._id || entity?.id || entity?.title,
+          entityType: (entityType === "reels") ? "reel" : (entityType === "music") ? "audio" : entityType,
           authorName: authorData?.userName || authorData?.name || "user",
           authorAvatar: typeof authorData?.profileImage === "object" ? authorData?.profileImage?.url : authorData?.profileImage || "",
           mediaUrl: mediaUrl,
           caption: entity?.caption || entity?.title || "",
+          audioUrl: entity?.audioUrl || "",
         },
       },
     });
@@ -271,20 +260,40 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-[600] bg-surface-overlay backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
+      {open && (
         <motion.div
-          initial={{ y: "100%", opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          exit={{ y: "100%", opacity: 0 }}
-          transition={{ type: "spring", damping: 28, stiffness: 350 }}
-          className="relative w-full max-w-lg bg-surface-inset/95 border border-border/80 rounded-t-3xl sm:rounded-3xl p-5 text-text shadow-2xl space-y-4 max-h-[85vh] flex flex-col"
+          key="share-sheet-backdrop"
+          onClick={onClose}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.22 }}
+          className="fixed inset-0 z-[600] bg-black/60 backdrop-blur-[2px] flex items-end justify-center p-0 select-none"
         >
+          <motion.div
+            key="share-sheet-content"
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ type: "spring", damping: 28, stiffness: 300 }}
+            drag="y"
+            dragConstraints={{ top: 0 }}
+            dragElastic={{ top: 0, bottom: 0.4 }}
+            dragSnapToOrigin
+            onDragEnd={(e, info) => {
+              if (info.offset.y > 80 || info.velocity.y > 400) {
+                onClose();
+              }
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="relative w-full max-w-lg md:max-w-xl bg-surface/98 backdrop-blur-2xl border-t border-x border-border rounded-t-[28px] md:rounded-t-[32px] rounded-b-none shadow-[0_-12px_45px_rgba(0,0,0,0.85)] p-5 text-text h-[64vh] md:h-[62vh] max-h-[620px] flex flex-col justify-between overflow-hidden"
+          >
           {/* Header Bar */}
-          <div className="flex flex-col items-center gap-2">
-            <div className="w-10 h-1 bg-surface-active rounded-full" />
+          <div className="flex flex-col items-center gap-2 shrink-0">
+            <div className="w-10 h-1 bg-border-strong rounded-full opacity-60 cursor-pointer hover:opacity-100 transition" onClick={onClose} />
             <div className="w-full flex items-center justify-between">
               <h3 className="text-base font-bold text-text capitalize">Share {entityType}</h3>
-              <button onClick={onClose} className="p-1.5 text-text-secondary hover:text-text rounded-full bg-surface hover:bg-surface-hover transition cursor-pointer">
+              <button onClick={onClose} className="p-1.5 text-text-secondary hover:text-text rounded-full bg-surface-hover/50 hover:bg-surface-hover transition cursor-pointer">
                 <X className="w-4.5 h-4.5" />
               </button>
             </div>
@@ -433,8 +442,9 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
               <span className="text-[10px] text-text font-semibold">Copy Link</span>
             </button>
           </div>
+          </motion.div>
         </motion.div>
-      </div>
+      )}
     </AnimatePresence>
   );
 };

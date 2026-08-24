@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   ArrowLeft, Archive, Play, RefreshCw, Grid3X3, Loader2, Image as ImageIcon,
   Trash2, SlidersHorizontal, Film, Layers, Calendar, ArrowUpDown
@@ -18,27 +18,29 @@ export const PostArchive = () => {
   const [activeFilter, setActiveFilter] = useState("all"); // all, photo, reel, carousel
   const [sortOrder, setSortOrder] = useState("newest"); // newest, oldest
 
-  const fetchArchivedPosts = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await api.get("/post/archived-posts");
-      if (res.data.success) {
-        setPosts(res.data.posts || []);
-      } else {
-        setPosts([]);
-      }
-    } catch (err) {
-      console.error("Failed to load archived posts:", err);
-      snackbar.error("Failed to load archived posts.");
-      setPosts([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    fetchArchivedPosts();
-  }, [fetchArchivedPosts]);
+    let isMounted = true;
+    api
+      .get("/post/archived-posts")
+      .then((res) => {
+        if (isMounted) {
+          setPosts(res.data?.success ? res.data.posts || [] : []);
+        }
+      })
+      .catch((err) => {
+        if (isMounted) {
+          console.error("Failed to load archived posts:", err);
+          snackbar.error("Failed to load archived posts.");
+          setPosts([]);
+        }
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleUnarchive = async (postId) => {
     try {
@@ -135,18 +137,24 @@ export const PostArchive = () => {
         </div>
 
         {/* Archive Type Tabs */}
-        <div className="max-w-5xl mx-auto px-4 pb-3 flex gap-2">
+        <div className="max-w-5xl mx-auto px-4 pb-3 flex gap-2 overflow-x-auto scrollbar-none">
           <button
             onClick={() => navigate("/story/archive")}
-            className="px-4 py-1.5 rounded-lg text-xs font-bold text-text-secondary hover:text-text border border-border bg-surface hover:bg-surface-hover transition cursor-pointer"
+            className="px-4 py-1.5 rounded-lg text-xs font-bold text-text-secondary hover:text-text border border-border bg-surface hover:bg-surface-hover transition cursor-pointer shrink-0"
           >
             Stories Archive
           </button>
           <button
             onClick={() => navigate("/post/archive")}
-            className="px-4 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow-md cursor-pointer"
+            className="px-4 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow-md cursor-pointer shrink-0"
           >
             Posts & Reels Archive
+          </button>
+          <button
+            onClick={() => navigate("/live/archive")}
+            className="px-4 py-1.5 rounded-lg text-xs font-bold text-text-secondary hover:text-text border border-border bg-surface hover:bg-surface-hover transition cursor-pointer shrink-0"
+          >
+            Live Archive
           </button>
         </div>
       </div>

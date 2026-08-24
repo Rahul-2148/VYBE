@@ -6,7 +6,7 @@ import dp from "../assets/dp3.png";
 import { setProfileData, setUserData } from "../redux/features/userSlice";
 import { ClipLoader } from "react-spinners";
 import { snackbar } from "../lib/snackbar";
-import { Link2, Trash2, Plus, User, Lock, Sliders, Palette, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
+import { Link2, Trash2, Plus, User, Lock, Sliders, Palette, ChevronRight, ChevronDown, ChevronUp, ShieldCheck } from "lucide-react";
 import api from "../lib/axios";
 import { useTheme } from "../lib/themeContext";
 import VybeInput from "../components/VybeInput";
@@ -25,6 +25,7 @@ const CATEGORIES = [
 
 const SETTINGS_TABS = [
   { id: "profile", label: "Edit Profile", icon: <User className="w-4 h-4" /> },
+  { id: "security", label: "Accounts & Security", icon: <ShieldCheck className="w-4 h-4" /> },
   { id: "password", label: "Change Password", icon: <Lock className="w-4 h-4" /> },
   { id: "suggestions", label: "Content Suggestions", icon: <Sliders className="w-4 h-4" /> },
   { id: "appearance", label: "Appearance Theme", icon: <Palette className="w-4 h-4" /> },
@@ -661,6 +662,10 @@ const EditProfile = () => {
             <button
               key={tab.id}
               onClick={() => {
+                if (tab.id === "security") {
+                  navigate("/security");
+                  return;
+                }
                 setActiveTab(tab.id);
                 setActiveMobileTab(tab.id);
               }}

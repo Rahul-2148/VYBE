@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { snackbar } from "../lib/snackbar";
 import { MdOutlineKeyboardBackspace } from "react-icons/md";
 import { useDispatch, useSelector } from "react-redux";
@@ -28,6 +28,7 @@ import {
   Info,
   Mail,
   Phone,
+  Tag,
 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import ProfileQRModal from "../components/ProfileQRModal";
@@ -50,6 +51,7 @@ const PROFILE_TABS = [
   { id: "posts", label: "Posts", icon: Grid },
   { id: "reels", label: "Reels", icon: Film },
   { id: "saved", label: "Saved", icon: Bookmark },
+  { id: "tagged", label: "Tagged", icon: Tag },
 ];
 
 const resolveMediaUrl = (item) => {
@@ -243,7 +245,7 @@ const Profile = () => {
   const [loadingSaved, setLoadingSaved] = useState(false);
 
   // RTK Query with instant cache & stale-while-revalidate
-  const { data: fetchedProfile, isLoading: isProfileLoading, refetch: refetchProfile } = useGetUserFullProfileQuery(userName, {
+  const { data: fetchedProfile, refetch: refetchProfile } = useGetUserFullProfileQuery(userName, {
     skip: !userName,
   });
   const { data: fetchedHighlights } = useGetUserHighlightsQuery(userName, {
@@ -253,13 +255,15 @@ const Profile = () => {
   useEffect(() => {
     if (fetchedProfile) {
       dispatch(setProfileData(fetchedProfile));
-      setLoading(false);
+      const timer = setTimeout(() => setLoading(false), 0);
+      return () => clearTimeout(timer);
     }
   }, [fetchedProfile, dispatch]);
 
   useEffect(() => {
     if (fetchedHighlights?.highlights) {
-      setHighlights(fetchedHighlights.highlights);
+      const timer = setTimeout(() => setHighlights(fetchedHighlights.highlights), 0);
+      return () => clearTimeout(timer);
     }
   }, [fetchedHighlights]);
 
@@ -278,7 +282,7 @@ const Profile = () => {
       const result = await api.post("/auth/signout");
       dispatch(setUserData(null));
       snackbar.success(result.data.message || "Logged out");
-      navigate("/signin");
+      navigate("/signin", { replace: true });
     } catch {
       snackbar.error("Logout failed");
     }
@@ -291,30 +295,49 @@ const Profile = () => {
     );
   }, [profileData?.user?.followers, userData?.user?._id]);
 
-  const fetchSavedItems = useCallback(async () => {
-    if (!isOwnProfile) return;
-    try {
-      setLoadingSaved(true);
-      const res = await api.get("/user/saved-items");
-      if (res.data?.success) {
-        const reelsList = res.data.savedReels || [];
-        setSavedItems({
-          posts: res.data.savedPosts || [],
-          reels: reelsList,
-        });
-      }
-    } catch (err) {
-      console.warn("Profile: fetchSavedItems failed", err);
-    } finally {
-      setLoadingSaved(false);
-    }
-  }, [isOwnProfile]);
+  const [taggedItems, setTaggedItems] = useState([]);
 
   useEffect(() => {
+    let isMounted = true;
     if (isOwnProfile && postType === "saved") {
-      fetchSavedItems();
+      api
+        .get("/post/saved")
+        .then((res) => {
+          if (isMounted && res.data?.success) {
+            setSavedItems(res.data.saved || []);
+          }
+        })
+        .catch((err) => {
+          if (isMounted) console.warn("Profile: fetchSavedItems failed", err);
+        })
+        .finally(() => {
+          if (isMounted) setLoadingSaved(false);
+        });
     }
-  }, [isOwnProfile, postType, fetchSavedItems]);
+    return () => {
+      isMounted = false;
+    };
+  }, [isOwnProfile, postType]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const targetUserId = profileData?.user?._id;
+    if (postType === "tagged" && targetUserId) {
+      api
+        .get(`/post/tagged/${targetUserId}`)
+        .then((res) => {
+          if (isMounted && res.data?.success) {
+            setTaggedItems(res.data.tagged || []);
+          }
+        })
+        .catch((err) => {
+          if (isMounted) console.warn("Profile: fetchTaggedItems failed", err);
+        });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [postType, profileData?.user?._id]);
 
   const handleMessage = async () => {
     try {
@@ -342,8 +365,9 @@ const Profile = () => {
       posts: profileData?.user?.posts?.length || 0,
       reels: reelsCount,
       saved: savedCount,
+      tagged: taggedItems?.length || 0,
     };
-  }, [profileData, userData, savedItems]);
+  }, [profileData, userData, savedItems, taggedItems]);
 
   const savedFeed = useMemo(() => {
     const postsList = (savedItems.posts?.length > 0 ? savedItems.posts : profileData?.user?.savedPosts || [])
@@ -368,14 +392,17 @@ const Profile = () => {
       return (profileData?.user?.reels || []).map((item) => ({ ...item, __kind: "reel" }));
     }
     if (postType === "saved") return savedFeed;
+    if (postType === "tagged") return taggedItems;
     return (profileData?.user?.posts || []).map((item) => ({ ...item, __kind: "post" }));
-  }, [postType, profileData, savedFeed]);
+  }, [postType, profileData, savedFeed, taggedItems]);
 
   const feedEmptyState =
     postType === "reels"
       ? { title: "No reels yet", copy: isOwnProfile ? "Upload a reel to start building your short-form presence." : "This creator has not shared reels yet." }
       : postType === "saved"
       ? { title: "Nothing saved yet", copy: "Saved posts and reels will appear here for quick access." }
+      : postType === "tagged"
+      ? { title: "No tagged posts", copy: isOwnProfile ? "When people tag you in photos and reels, they'll appear here." : "No posts or reels have tagged this user yet." }
       : { title: "No posts yet", copy: isOwnProfile ? "Share your first post to fill this grid." : "This creator has not posted yet." };
   const isVerified = Boolean(profileData?.user?.isVerified);
 
@@ -651,6 +678,13 @@ const Profile = () => {
                     <ShieldCheck className="h-3.5 w-3.5" />
                     Monetization
                   </button>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-xs font-bold text-cyan-300 transition hover:border-cyan-400 hover:text-white cursor-pointer"
+                    onClick={() => navigate("/security")}
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    Security & Accounts
+                  </button>
                 </>
               ) : (
                 <>
@@ -706,7 +740,11 @@ const Profile = () => {
 
           <div className="flex gap-4 overflow-x-auto pb-1 scrollbar-none">
             {isOwnProfile && (
-              <button onClick={() => navigate("/upload?type=story")} className="flex w-[84px] shrink-0 flex-col items-center gap-2">
+              <button
+                onClick={() => setShowHighlighterModal(true)}
+                className="flex w-[84px] shrink-0 flex-col items-center gap-2 cursor-pointer"
+                title="Create New Highlight"
+              >
                 <div className="flex h-20 w-20 items-center justify-center rounded-full border border-dashed border-zinc-700 bg-zinc-950 text-zinc-400 transition hover:border-rose-500 hover:text-rose-500">
                   <Plus className="h-6 w-6" />
                 </div>
@@ -743,7 +781,7 @@ const Profile = () => {
         ) : (
           <>
             <section className="sticky top-0 z-20 rounded-3xl border border-zinc-900 bg-black/80 px-2 py-2 backdrop-blur-xl">
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-4 gap-2">
                 {PROFILE_TABS.map((tab) => {
                   const Icon = tab.icon;
                   return (
@@ -751,7 +789,7 @@ const Profile = () => {
                       key={tab.id}
                       type="button"
                       onClick={() => setPostType(tab.id)}
-                      className={`inline-flex flex-col items-center justify-center gap-1 rounded-2xl border px-3 py-3 text-xs font-bold transition ${
+                      className={`inline-flex flex-col items-center justify-center gap-1 rounded-2xl border px-2 py-3 text-xs font-bold transition ${
                         postType === tab.id
                           ? "border-rose-500/40 bg-rose-500/10 text-white"
                           : "border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:border-zinc-700 hover:text-white"
@@ -939,7 +977,7 @@ const DPOptionsModal = ({ onClose, onView, onShareQR }) => {
 };
 
 // --- Ultra-Secure DRM Fullscreen DP Viewer (100% Native HD Quality + Instant Screenshot Blackout) ---
-const FullScreenDPViewer = ({ imageUrl, userName, onClose }) => {
+const FullScreenDPViewer = ({ imageUrl, onClose }) => {
   const [screenshotAlert, setScreenshotAlert] = useState(false);
   const [isBlackout, setIsBlackout] = useState(false);
 
