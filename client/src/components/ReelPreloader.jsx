@@ -39,17 +39,7 @@ export const ReelPreloader = ({ reels = [], currentIndex = 0 }) => {
     });
   }, [items, currentIndex, dataSaver]);
 
-  return (
-    <div className="hidden" aria-hidden="true">
-      {/* Invisible video buffers to prime browser media cache */}
-      {items[currentIndex + 1]?.media?.url && (
-        <video src={items[currentIndex + 1].media.url} preload="auto" muted playsInline />
-      )}
-      {items[currentIndex + 2]?.media?.url && (
-        <video src={items[currentIndex + 2].media.url} preload="auto" muted playsInline />
-      )}
-    </div>
-  );
+  return null;
 };
 
 export default ReelPreloader;

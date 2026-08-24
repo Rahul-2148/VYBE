@@ -90,7 +90,9 @@ const Post = ({ post }) => {
   const [showHeartAnim, setShowHeartAnim] = useState(false);
   const [showTags, setShowTags] = useState(false);
 
-  // Background Audio State
+  // Background Audio & Viewport State
+  const containerRef = useRef(null);
+  const [isInViewport, setIsInViewport] = useState(false);
   const [musicMuted, setMusicMuted] = useState(true);
   const audioRef = useRef(null);
 
@@ -105,24 +107,106 @@ const Post = ({ post }) => {
   };
 
   const parsedMusic = useMemo(() => getMusicObject(post?.music), [post?.music]);
+  const dwellStartRef = useRef(null);
 
+  // Viewport Intersection Observer: pauses audio & tracks behavioral dwell time
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
+    const el = containerRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const visible = entry.isIntersecting && entry.intersectionRatio >= 0.35;
+        setIsInViewport(visible);
+
+        if (visible) {
+          dwellStartRef.current = Date.now();
+        } else {
+          if (audioRef.current) {
+            audioRef.current.pause();
+          }
+          if (dwellStartRef.current) {
+            const dwellMs = Date.now() - dwellStartRef.current;
+            dwellStartRef.current = null;
+            if (dwellMs >= 1500 && post?._id) {
+              api.post("/user/dwell-track", {
+                entityType: "post",
+                entityId: post._id,
+                text: post.caption || "",
+                hashtags: post.hashtags || [],
+                location: post.location || "",
+                dwellMs,
+              }).catch(() => null);
+            }
+          }
+        }
+      },
+      {
+        threshold: [0, 0.35, 0.7],
+        rootMargin: "0px",
+      }
+    );
+
+    observer.observe(el);
+    return () => {
+      observer.unobserve(el);
+      if (dwellStartRef.current && post?._id) {
+        const dwellMs = Date.now() - dwellStartRef.current;
+        if (dwellMs >= 1500) {
+          api.post("/user/dwell-track", {
+            entityType: "post",
+            entityId: post._id,
+            text: post.caption || "",
+            hashtags: post.hashtags || [],
+            location: post.location || "",
+            dwellMs,
+          }).catch(() => null);
+        }
+      }
+    };
+  }, [post?._id, post?.caption, post?.hashtags, post?.location]);
+
+  // Exclusive audio coordinator: if another post plays audio, pause & mute this post
+  useEffect(() => {
+    const handleMediaPlaying = (e) => {
+      const activePostId = e.detail?.postId;
+      if (activePostId && activePostId !== post?._id) {
+        setMusicMuted(true);
+        if (audioRef.current) {
+          audioRef.current.pause();
+        }
+      }
+    };
+
+    window.addEventListener("vybe:feed_media_playing", handleMediaPlaying);
+    return () => {
+      window.removeEventListener("vybe:feed_media_playing", handleMediaPlaying);
+    };
+  }, [post?._id]);
+
+  // Audio lifecycle & sync with viewport + mute state
+  useEffect(() => {
+    if (!parsedMusic?.audioUrl) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      return;
     }
 
-    if (parsedMusic?.audioUrl) {
+    if (!audioRef.current) {
       const a = new Audio(parsedMusic.audioUrl);
-      a.onended = () => {
-        a.currentTime = 0;
-        a.play().catch(() => null);
-      };
+      a.loop = true;
       audioRef.current = a;
+    } else if (audioRef.current.src !== parsedMusic.audioUrl) {
+      audioRef.current.pause();
+      audioRef.current.src = parsedMusic.audioUrl;
+    }
 
-      if (!musicMuted) {
-        a.play().catch(() => null);
-      }
+    if (isInViewport && !musicMuted) {
+      audioRef.current.play().catch(() => null);
+    } else {
+      audioRef.current.pause();
     }
 
     return () => {
@@ -130,17 +214,24 @@ const Post = ({ post }) => {
         audioRef.current.pause();
       }
     };
-  }, [parsedMusic?.audioUrl, musicMuted]);
+  }, [parsedMusic?.audioUrl, musicMuted, isInViewport]);
 
-  useEffect(() => {
-    if (audioRef.current) {
-      if (musicMuted) {
-        audioRef.current.pause();
-      } else {
-        audioRef.current.play().catch(() => null);
+  const toggleMusicMute = useCallback((e) => {
+    if (e) e.stopPropagation();
+    triggerHaptic("light");
+    setMusicMuted((prev) => {
+      const next = !prev;
+      if (!next && post?._id) {
+        window.dispatchEvent(
+          new CustomEvent("vybe:feed_media_playing", {
+            detail: { postId: post._id, mediaType: "music" },
+          })
+        );
       }
-    }
-  }, [musicMuted]);
+      return next;
+    });
+  }, [post?._id]);
+
 
   // Modals state
   const [showCollectionsModal, setShowCollectionsModal] = useState(false);
@@ -336,7 +427,11 @@ const Post = ({ post }) => {
   };
 
   return (
-    <div id={`post-${post?._id}`} className="w-full flex flex-col bg-surface-inset/90 border border-border/80 shadow-2xl rounded-2xl overflow-hidden my-3 transition-all duration-300">
+    <div
+      ref={containerRef}
+      id={`post-${post?._id}`}
+      className="w-full flex flex-col bg-surface-inset/90 border border-border/80 shadow-2xl rounded-2xl overflow-hidden my-3 transition-all duration-300"
+    >
       {/* POST HEADER */}
       <div className="w-full min-h-[56px] py-2 flex justify-between items-center px-4 border-b border-border/80 bg-bg/40">
         <div className="flex items-center gap-3">
@@ -452,9 +547,9 @@ const Post = ({ post }) => {
         className="relative w-full bg-bg flex items-center justify-center overflow-hidden min-h-[300px] cursor-pointer select-none"
       >
         {post?.mediaType === "carousel" ? (
-          <PostCarousel mediaList={post?.carouselMedia || []} />
+          <PostCarousel mediaList={post?.carouselMedia || []} postId={post?._id} />
         ) : post?.mediaType === "video" ? (
-          <VideoPlayer media={post?.media?.url} />
+          <VideoPlayer media={post?.media?.url} postId={post?._id} />
         ) : (
           <img src={ensureCloudinaryAutoFormat(post?.media?.url)} alt={post?.altText || "Post Media"} loading="lazy" className="w-full object-cover max-h-[620px]" />
         )}
@@ -469,17 +564,14 @@ const Post = ({ post }) => {
         {parsedMusic?.audioUrl && (
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              triggerHaptic("light");
-              setMusicMuted(!musicMuted);
-            }}
+            onClick={toggleMusicMute}
             className="absolute top-3 right-3 z-30 p-2.5 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white border border-white/20 shadow-xl transition cursor-pointer hover:scale-105 active:scale-95 interactive-tap"
             title={musicMuted ? "Unmute Audio" : "Mute Audio"}
           >
             {!musicMuted ? (
               <div className="flex items-center gap-1">
                 <Volume2 className="w-4 h-4 text-white animate-pulse" />
+
                 <div className="flex items-end gap-0.5 h-3">
                   <span className="w-0.5 bg-rose-400 animate-sound-wave-1 rounded-full" />
                   <span className="w-0.5 bg-rose-300 animate-sound-wave-2 rounded-full" />

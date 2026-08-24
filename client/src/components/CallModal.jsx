@@ -21,6 +21,7 @@ export const CallModal = ({
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
@@ -31,6 +32,13 @@ export const CallModal = ({
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.play().catch(() => {});
+    }
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream;
+      remoteAudioRef.current.muted = false;
+      remoteAudioRef.current.volume = 1.0;
+      remoteAudioRef.current.play().catch(() => {});
     }
   }, [remoteStream]);
 
@@ -53,6 +61,11 @@ export const CallModal = ({
   return (
     <AnimatePresence>
       <div className="fixed inset-0 z-[999] flex items-center justify-center bg-bg/90 backdrop-blur-md p-4 select-none">
+        {/* Background Remote Audio Player */}
+        {remoteStream && (
+          <audio ref={remoteAudioRef} autoPlay playsInline className="sr-only" />
+        )}
+
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -62,7 +75,7 @@ export const CallModal = ({
           {/* Main Video Area */}
           <div className="relative flex-1 w-full h-full bg-surface flex items-center justify-center overflow-hidden">
             {callType === "video" && remoteStream ? (
-              <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+              <video ref={remoteVideoRef} autoPlay playsInline muted={false} className="w-full h-full object-cover" />
             ) : (
               <div className="flex flex-col items-center gap-4">
                 <div className="relative p-1 rounded-full bg-gradient-to-tr from-pink-500 via-rose-500 to-purple-600 shadow-2xl animate-pulse">

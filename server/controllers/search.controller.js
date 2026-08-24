@@ -163,16 +163,35 @@ export const getExploreFeed = async (req, res) => {
 export const getHashtagDetails = async (req, res) => {
   try {
     const { hashtag } = req.params;
-    const cleanTag = hashtag.replace("#", "").toLowerCase();
+    const cleanTag = decodeURIComponent(hashtag).replace(/^#/, "").trim().toLowerCase();
     const blockedUserIds = await getBlockedUserIds(req.userId);
+    const tagRegex = new RegExp(`(^|\\s|#)${cleanTag}(\\b|\\s|$)`, "i");
 
     const posts = await Post.find({
       author: { $nin: blockedUserIds },
-      hashtags: { $regex: cleanTag, $options: "i" },
+      $or: [
+        { hashtags: { $regex: cleanTag, $options: "i" } },
+        { caption: { $regex: tagRegex } }
+      ],
       isArchived: { $ne: true },
     })
       .sort({ createdAt: -1 })
       .populate("author", "name userName profileImage isVerified");
+
+    const reels = await Reel.find({
+      author: { $nin: blockedUserIds },
+      $or: [
+        { hashtags: { $regex: cleanTag, $options: "i" } },
+        { caption: { $regex: tagRegex } }
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .populate("author", "name userName profileImage isVerified");
+
+    const combinedContent = [
+      ...posts.map(p => ({ ...p.toObject(), contentType: "post" })),
+      ...reels.map(r => ({ ...r.toObject(), contentType: "reel", mediaType: "video" }))
+    ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     const user = await User.findById(req.userId);
     const isFollowing = user?.followedHashtags?.includes(cleanTag) || false;
@@ -180,9 +199,9 @@ export const getHashtagDetails = async (req, res) => {
     return res.status(200).json({
       success: true,
       hashtag: cleanTag,
-      postCount: posts.length,
+      postCount: combinedContent.length,
       isFollowing,
-      posts,
+      posts: combinedContent,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: `getHashtagDetails error: ${error.message}` });

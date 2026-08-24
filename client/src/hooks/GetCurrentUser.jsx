@@ -63,39 +63,8 @@ const GetCurrentUser = () => {
           retryCount++;
           console.warn(`Connection to server failed. Retrying initial auth check (${retryCount}/${MAX_RETRIES})...`);
           setTimeout(fetchUser, 1500);
-        } else if (error.response?.status === 401 && retryCount === 0) {
-          // Attempt silent session renewal before giving up
-          retryCount++;
-          try {
-            await api.post("/auth/refresh");
-            const retryResult = await api.get("/user/current-user");
-            if (active && retryResult.data?.user) {
-              try {
-                localStorage.setItem("vybe_cached_user", JSON.stringify(retryResult.data.user));
-              } catch (e) {
-                console.warn("GetCurrentUser: failed to write cached user on retry", e);
-              }
-              dispatch(setUserData(retryResult.data.user));
-              dispatch(setAuthInitialized(true));
-
-              // Sync multi-account registry
-              addLinkedAccount(retryResult.data.user);
-              setActiveAccountId(retryResult.data.user._id);
-              return;
-            }
-          } catch (e) {
-            console.warn("GetCurrentUser: refresh attempt failed", e);
-          }
-
-          try {
-            localStorage.removeItem("vybe_cached_user");
-          } catch (e) {
-            console.warn("GetCurrentUser: failed to remove cached user after refresh failure", e);
-          }
-          dispatch(setUserData(null));
-          dispatch(setAuthInitialized(true));
         } else {
-          // For rate limits, server 5xx, or network errors, do NOT log user out
+          // If 401/403 or network retries exhausted, clear invalid cache & set unauthenticated state
           const isAuthRevoked = error.response?.status === 401 || error.response?.status === 403;
           if (isAuthRevoked) {
             try {

@@ -115,7 +115,10 @@ export function ThemeProvider({ children, defaultTheme = "system" }) {
         }
       })
       .catch((err) => {
-        console.error("Failed to fetch user theme from server:", err);
+        // Silently fall back to local cached theme when user is unauthenticated or session expired
+        if (err?.response?.status !== 401) {
+          console.warn("Theme sync:", err?.message || err);
+        }
       });
 
     return () => {

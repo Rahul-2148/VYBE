@@ -3,11 +3,12 @@ import { ArrowLeft, Search, Pin, MessageSquare, Users, Send, Edit, X, Archive, B
 import { useNavigate, useParams } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
 import ChatListItem from "../components/ChatListItem";
-import CreateGroupModal from "../components/CreateGroupModal";
+import NewMessageModal from "../components/NewMessageModal";
 import NotesBar from "../components/NotesBar";
 import MessageArea from "./MessageArea";
 import Navbar from "../components/Navbar";
 import api from "../lib/axios";
+import dp from "../assets/dp3.png";
 import { setConversations, setSelectedChatUser, togglePinInRedux, toggleMuteInRedux, toggleArchiveInRedux, removeConversationInRedux, minimizeToFloatingDock } from "../redux/features/messageSlice";
 import { snackbar } from "../lib/snackbar";
 import VerifiedBadge from "../components/VerifiedBadge";
@@ -116,10 +117,37 @@ export const Messages = () => {
   const [activeFilter, setActiveFilter] = useState("all");
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [globalSearchedUsers, setGlobalSearchedUsers] = useState([]);
+  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [showNewMessageModal, setShowNewMessageModal] = useState(false);
   const [contextMenu, setContextMenu] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
+
+  // Debounced Global User Search in Direct Messages
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setGlobalSearchedUsers([]);
+      setIsSearchingUsers(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setIsSearchingUsers(true);
+        const res = await api.get(`/user/search?q=${encodeURIComponent(searchQuery.trim())}`);
+        if (res.data?.users) {
+          setGlobalSearchedUsers(res.data.users.filter((u) => u._id?.toString() !== currentUserId?.toString()));
+        }
+      } catch (err) {
+        console.warn("Global user search error:", err);
+      } finally {
+        setIsSearchingUsers(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, currentUserId]);
 
   const fetchConversations = useCallback(async () => {
     try {
@@ -322,6 +350,34 @@ export const Messages = () => {
     setContextMenu({ x: e.clientX, y: e.clientY, chat });
   }, []);
 
+  const handleOpenUserChat = (user) => {
+    const existingConv = conversations.find(
+      (c) =>
+        !c.isGroup &&
+        ((c.participant?._id || c.participant)?.toString() === user._id?.toString() ||
+          c.participants?.some((p) => (p?._id || p)?.toString() === user._id?.toString()))
+    );
+
+    if (existingConv) {
+      dispatch(
+        setSelectedChatUser({
+          conversationId: existingConv._id || existingConv.conversationId,
+          user,
+        })
+      );
+      navigate(`/messages/${existingConv._id || existingConv.conversationId}`);
+    } else {
+      dispatch(
+        setSelectedChatUser({
+          conversationId: null,
+          user,
+        })
+      );
+      navigate(`/messages`);
+    }
+    setSearchQuery("");
+  };
+
   return (
     <div className="w-full h-screen bg-bg text-text flex overflow-hidden select-none">
       {/* LEFT INBOX SIDEBAR */}
@@ -358,7 +414,7 @@ export const Messages = () => {
               <Minimize2 className="w-4.5 h-4.5" />
             </button>
             <button
-              onClick={() => setShowCreateGroupModal(true)}
+              onClick={() => setShowNewMessageModal(true)}
               className="p-2 text-text-secondary hover:text-text rounded-xl hover:bg-surface-hover transition cursor-pointer"
               title="New Message or Group"
             >
@@ -486,7 +542,7 @@ export const Messages = () => {
           <div>
             {loading ? (
               Array.from({ length: 8 }).map((_, i) => <ChatSkeleton key={i} />)
-            ) : filteredConversations.length === 0 ? (
+            ) : filteredConversations.length === 0 && globalSearchedUsers.length === 0 ? (
               <div className="text-center py-20 px-6 space-y-3">
                 <div className="w-14 h-14 rounded-full bg-surface border border-border flex items-center justify-center mx-auto shadow-sm">
                   {activeTab === "requests" ? (
@@ -500,7 +556,7 @@ export const Messages = () => {
                   )}
                 </div>
                 <p className="text-sm font-bold text-text">
-                  {activeTab === "requests" ? "No message requests" : showArchived ? "No archived chats" : activeFilter !== "all" ? `No ${activeFilter} messages` : "No messages yet"}
+                  {activeTab === "requests" ? "No message requests" : showArchived ? "No archived chats" : activeFilter !== "all" ? `No ${activeFilter} messages` : searchQuery.trim() ? "No chats or accounts found" : "No messages yet"}
                 </p>
                 <p className="text-xs text-text-muted max-w-xs mx-auto leading-relaxed">
                   {activeTab === "requests"
@@ -513,13 +569,55 @@ export const Messages = () => {
                 </p>
               </div>
             ) : (
-              unpinnedConversations.map((chat) => (
-                <ChatListItem
-                  key={chat._id}
-                  chat={chat}
-                  onContextMenu={(e) => handleContextMenu(e, chat)}
-                />
-              ))
+              <>
+                {unpinnedConversations.map((chat) => (
+                  <ChatListItem
+                    key={chat._id}
+                    chat={chat}
+                    onContextMenu={(e) => handleContextMenu(e, chat)}
+                  />
+                ))}
+
+                {/* Global Search Users on VYBE (When Search Query is Active) */}
+                {searchQuery.trim().length > 0 && globalSearchedUsers.length > 0 && (
+                  <div className="pt-3 pb-2 border-t border-border/50 mt-2">
+                    <p className="text-[10px] font-black text-text-muted uppercase tracking-widest px-4 py-1.5 flex items-center justify-between">
+                      <span>Accounts on VYBE</span>
+                      {isSearchingUsers && <span className="text-primary text-[9px] animate-pulse">Searching...</span>}
+                    </p>
+                    {globalSearchedUsers.map((u) => {
+                      const avatar =
+                        u.profileImage?.url ||
+                        (typeof u.profileImage === "string" ? u.profileImage : null) ||
+                        u.profilePicture?.url ||
+                        (typeof u.profilePicture === "string" ? u.profilePicture : null) ||
+                        dp;
+
+                      return (
+                        <div
+                          key={u._id}
+                          onClick={() => handleOpenUserChat(u)}
+                          className="flex items-center justify-between px-4 py-2.5 hover:bg-surface-hover transition cursor-pointer"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <img src={avatar} alt="" className="w-10 h-10 rounded-full object-cover shrink-0 border border-border" />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1">
+                                <span className="text-xs font-bold text-text truncate">@{u.userName}</span>
+                                {u.isVerified && <VerifiedBadge size="xs" />}
+                              </div>
+                              <p className="text-[11px] text-text-secondary truncate">{u.name || `@${u.userName}`}</p>
+                            </div>
+                          </div>
+                          <span className="text-[11px] font-bold text-primary bg-primary/10 hover:bg-primary/20 px-2.5 py-1 rounded-xl transition">
+                            Chat
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -545,7 +643,7 @@ export const Messages = () => {
               </p>
             </div>
             <button
-              onClick={() => setShowCreateGroupModal(true)}
+              onClick={() => setShowNewMessageModal(true)}
               className="px-5 py-2.5 bg-primary hover:bg-primary-hover text-white font-bold text-xs rounded-xl transition cursor-pointer shadow-md hover:scale-105 active:scale-95"
             >
               Send message
@@ -564,11 +662,11 @@ export const Messages = () => {
         />
       )}
 
-      {/* Create Group Modal */}
-      {showCreateGroupModal && (
-        <CreateGroupModal
-          isOpen={showCreateGroupModal}
-          onClose={() => setShowCreateGroupModal(false)}
+      {/* New Message / Group Modal */}
+      {showNewMessageModal && (
+        <NewMessageModal
+          isOpen={showNewMessageModal}
+          onClose={() => setShowNewMessageModal(false)}
           onGroupCreated={() => fetchConversations()}
         />
       )}

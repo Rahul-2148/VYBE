@@ -5,6 +5,7 @@ import deleteFromCloudinary from "../config/deleteFromCloudinary.js";
 import { Reel } from "../models/reel.model.js";
 import { User } from "../models/user.model.js";
 import calculateReelScore from "../utils/calculateReelScore.js";
+import { rankReelsForUser } from "../services/feedAlgorithm.service.js";
 import { getBlockedUserIds } from "../utils/blockHelper.js";
 import { createNotificationHelper } from "./notification.controller.js";
 import { Notification } from "../models/notification.model.js";
@@ -515,49 +516,7 @@ export const getAllReels = async (req, res) => {
       }
     }
 
-    const mappedReels = reels.map((reel) => {
-      let relevanceScore = 0;
-      const authorIdStr = (reel.author?._id || reel.author)?.toString();
-      const isFriend = authorIdStr && followingIds.has(authorIdStr);
-
-      if (isFriend) {
-        relevanceScore += 100;
-      }
-
-      if (reel.likes && reel.likes.length > 0) {
-        const friendLikesCount = reel.likes.filter((like) => followingIds.has((like?._id || like)?.toString())).length;
-        relevanceScore += friendLikesCount * 20;
-      }
-      if (reel.comments && reel.comments.length > 0) {
-        const friendCommentsCount = reel.comments.filter((comment) => followingIds.has((comment.author?._id || comment.author)?.toString())).length;
-        relevanceScore += friendCommentsCount * 30;
-      }
-
-      const categories = getReelCategories(reel);
-      if (categories.length > 0 && user.contentCategoryInterests) {
-        categories.forEach((cat) => {
-          let interestScore = 0;
-          if (typeof user.contentCategoryInterests.get === "function") {
-            interestScore = user.contentCategoryInterests.get(cat) || 0;
-          } else {
-            interestScore = user.contentCategoryInterests[cat] || 0;
-          }
-          relevanceScore += interestScore * 2;
-        });
-      }
-
-      relevanceScore += (reel.score || 0) * 0.5;
-
-      return { reel, relevanceScore };
-    });
-
-    mappedReels.sort((a, b) => {
-      if (b.relevanceScore !== a.relevanceScore) {
-        return b.relevanceScore - a.relevanceScore;
-      }
-      return new Date(b.reel.createdAt || 0) - new Date(a.reel.createdAt || 0);
-    });
-    const sortedReels = mappedReels.map((item) => item.reel);
+    const sortedReels = rankReelsForUser(reels, user, mode);
 
     return res.status(200).json({ success: true, error: false, mode, reels: sortedReels });
   } catch (error) {

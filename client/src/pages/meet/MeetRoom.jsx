@@ -4,8 +4,8 @@ import { useSelector } from "react-redux";
 import api from "../../lib/axios";
 import { snackbar } from "../../lib/snackbar";
 import MeetLobby from "./MeetLobby";
-import CallScreen from "../../components/CallScreen";
-import { useWebRTC } from "../../hooks/useWebRTC";
+import MeetRoomView from "../../components/meet/MeetRoomView";
+import { useMeetWebRTC } from "../../hooks/useMeetWebRTC";
 
 export const MeetRoom = () => {
   const { meetingId } = useParams();
@@ -120,27 +120,27 @@ export const MeetRoom = () => {
       meetingTitle={meeting.title}
       isHost={isHost}
       currentUserId={currentUserId}
+      lobbyOptions={lobbyOptions}
       onLeave={handleLeaveMeeting}
     />
   );
 };
 
-// Wrapper that connects the multi-peer WebRTC engine
+// Wrapper that connects the dedicated multi-peer WebRTC engine with MeetRoomView
 const ActiveMeetRoomWrapper = ({
   meetingId,
   meetingTitle,
   isHost,
   currentUserId,
+  lobbyOptions,
   onLeave,
 }) => {
-  const roomName = `meeting_${meetingId.toLowerCase()}`;
-  const rtc = useWebRTC(roomName, currentUserId, "video");
+  const rtc = useMeetWebRTC(meetingId, currentUserId, lobbyOptions);
 
   return (
-    <CallScreen
-      room={roomName}
+    <MeetRoomView
+      meetingId={meetingId}
       roomTitle={meetingTitle || "VYBE Meeting"}
-      currentUserId={currentUserId}
       isHost={isHost}
       localStream={rtc.localStream}
       screenStream={rtc.screenStream}
@@ -153,7 +153,7 @@ const ActiveMeetRoomWrapper = ({
       activeSpeaker={rtc.activeSpeaker}
       connectionQuality={rtc.connectionQuality}
       videoFilter={rtc.videoFilter}
-      changeVideoFilter={rtc.changeVideoFilter}
+      onChangeVideoFilter={rtc.changeVideoFilter}
       audioInputDevices={rtc.audioInputDevices}
       videoDevices={rtc.videoDevices}
       audioOutputDevices={rtc.audioOutputDevices}

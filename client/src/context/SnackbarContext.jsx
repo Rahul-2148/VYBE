@@ -8,8 +8,8 @@ import { CheckCircle2, AlertCircle, AlertTriangle, Info, X, RotateCcw } from "lu
 import { SnackbarContext, setGlobalSnackbarEmitters } from "./snackbarStore";
 
 // Slide transition direction
-function SlideTransition({ onExited, ...props }) {
-  return <Slide {...props} onExited={onExited} direction="up" />;
+function SlideTransition(props) {
+  return <Slide {...props} direction="up" />;
 }
 
 // Severity Icon Mapping
@@ -185,7 +185,7 @@ export const SnackbarProvider = ({ children }) => {
         autoHideDuration={currentSnack ? currentSnack.duration : null}
         onClose={handleClose}
         TransitionComponent={SlideTransition}
-        onTransitionExited={handleExited}
+        TransitionProps={{ onExited: handleExited }}
         anchorOrigin={{
           vertical: "bottom",
           horizontal: "right",

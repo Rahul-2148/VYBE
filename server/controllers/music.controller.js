@@ -1,6 +1,7 @@
 // music.controller.js
 // Universal Dynamic Music Controller fetching 100% REAL official songs & audio streams via Apple Music / iTunes Global Engine
 // Multi-Query Aggregator providing 60-100+ Chart-Topping Hits per Category dynamically updated for any year
+import { User } from "../models/user.model.js";
 
 // In-memory cache to make music search instantaneous (10 mins TTL)
 const cache = new Map();
@@ -39,8 +40,9 @@ const queryAppleMusic = async (searchTerm, limit = 50) => {
   }
 
   try {
+    const cleanSearch = searchTerm.replace(/[^a-zA-Z0-9\s]/g, " ").trim();
     const url = `https://itunes.apple.com/search?term=${encodeURIComponent(
-      searchTerm
+      cleanSearch || searchTerm
     )}&entity=song&limit=${limit}&media=music`;
 
     const res = await fetch(url, {
@@ -333,6 +335,108 @@ export const getAIRecommendedMusic = async (req, res) => {
         detectedQuery: queries[0],
       },
       tracks,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 4. Toggle Save Audio Track to User's Account (Persistent Storage)
+export const toggleSaveAudio = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { id, title, artist, coverUrl, audioUrl, duration } = req.body;
+
+    if (!id || !title) {
+      return res.status(400).json({ success: false, message: "Track ID and title are required" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const existingIndex = (user.savedAudios || []).findIndex(
+      (t) => String(t.id) === String(id) || (t.title && t.title.toLowerCase() === title.toLowerCase())
+    );
+
+    let isSaved = false;
+    if (existingIndex > -1) {
+      // Remove from saved
+      user.savedAudios.splice(existingIndex, 1);
+      isSaved = false;
+    } else {
+      // Add to saved
+      if (!user.savedAudios) user.savedAudios = [];
+      user.savedAudios.unshift({
+        id: String(id),
+        title,
+        artist: artist || "",
+        coverUrl: coverUrl || "",
+        audioUrl: audioUrl || "",
+        duration: duration || 30,
+        savedAt: new Date(),
+      });
+      isSaved = true;
+    }
+
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      isSaved,
+      savedAudios: user.savedAudios,
+      message: isSaved ? "Saved to your Audio Collection! 🔖" : "Removed from saved audio",
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 5. Get Logged-In User's Saved Audio Tracks
+export const getSavedAudios = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const user = await User.findById(userId).select("savedAudios");
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      savedAudios: user.savedAudios || [],
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 6. Remove a Single Saved Audio Track
+export const removeSavedAudio = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { audioId } = req.params;
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        $pull: {
+          savedAudios: {
+            id: String(audioId),
+          },
+        },
+      },
+      { returnDocument: 'after' }
+    ).select("savedAudios");
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      savedAudios: user.savedAudios || [],
+      message: "Audio removed from saved library",
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });

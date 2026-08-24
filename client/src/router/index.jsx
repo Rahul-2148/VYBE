@@ -148,7 +148,23 @@ const router = createBrowserRouter([
             element: lazyPage(() => import("../pages/HashtagPage")),
           },
           {
+            path: "/explore/hashtag/:hashtag",
+            element: lazyPage(() => import("../pages/HashtagPage")),
+          },
+          {
+            path: "/hashtag/:hashtag",
+            element: lazyPage(() => import("../pages/HashtagPage")),
+          },
+          {
+            path: "/tag/:hashtag",
+            element: lazyPage(() => import("../pages/HashtagPage")),
+          },
+          {
             path: "/explore/location/:locationName",
+            element: lazyPage(() => import("../pages/LocationPage")),
+          },
+          {
+            path: "/location/:locationName",
             element: lazyPage(() => import("../pages/LocationPage")),
           },
 

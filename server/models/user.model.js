@@ -59,6 +59,14 @@ const userSchema = new mongoose.Schema(
         title: { type: String, default: "" },
       },
     ],
+    profileSong: {
+      id: { type: String, default: "" },
+      title: { type: String, default: "" },
+      artist: { type: String, default: "" },
+      coverUrl: { type: String, default: "" },
+      audioUrl: { type: String, default: "" },
+      duration: { type: Number, default: 30 },
+    },
     category: {
       type: String,
       default: "Digital Creator",
@@ -158,6 +166,17 @@ const userSchema = new mongoose.Schema(
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Reel",
+      },
+    ],
+    savedAudios: [
+      {
+        id: { type: String, required: true },
+        title: { type: String, required: true },
+        artist: { type: String, default: "" },
+        coverUrl: { type: String, default: "" },
+        audioUrl: { type: String, default: "" },
+        duration: { type: Number, default: 30 },
+        savedAt: { type: Date, default: Date.now },
       },
     ],
 

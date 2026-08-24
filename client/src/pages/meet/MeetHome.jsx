@@ -16,9 +16,11 @@ import {
   Sparkles,
   ExternalLink,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 import LeftHome from "../../components/LeftHome";
 import Navbar from "../../components/Navbar";
+import ConfirmDialogModal from "../../components/ConfirmDialogModal";
 import api from "../../lib/axios";
 import { snackbar } from "../../lib/snackbar";
 import { triggerHaptic } from "../../lib/interactiveEffects";
@@ -34,6 +36,9 @@ export const MeetHome = () => {
   const [recentMeetings, setRecentMeetings] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isCopied, setIsCopied] = useState(false);
+  const [meetingToDelete, setMeetingToDelete] = useState(null);
+  const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const menuRef = useRef(null);
 
@@ -64,6 +69,41 @@ export const MeetHome = () => {
     };
     fetchHistory();
   }, []);
+
+  // Remove single meeting from history
+  const handleRemoveMeeting = async (meeting) => {
+    if (!meeting?.meetingId) return;
+    try {
+      setIsDeleting(true);
+      const res = await api.delete(`/meet/history/${meeting.meetingId}`);
+      if (res.data?.success) {
+        setRecentMeetings((prev) => prev.filter((m) => m.meetingId !== meeting.meetingId));
+        snackbar.success("Meeting removed from recent history");
+      }
+    } catch (err) {
+      snackbar.error(err.response?.data?.message || "Failed to remove meeting");
+    } finally {
+      setIsDeleting(false);
+      setMeetingToDelete(null);
+    }
+  };
+
+  // Clear all recent meetings
+  const handleClearAllMeetings = async () => {
+    try {
+      setIsDeleting(true);
+      const res = await api.delete("/meet/history/clear-all");
+      if (res.data?.success) {
+        setRecentMeetings([]);
+        snackbar.success("Recent meetings cleared");
+      }
+    } catch (err) {
+      snackbar.error(err.response?.data?.message || "Failed to clear meetings history");
+    } finally {
+      setIsDeleting(false);
+      setShowClearAllConfirm(false);
+    }
+  };
 
   // Start instant meeting
   const handleStartInstantMeeting = async () => {
@@ -275,6 +315,17 @@ export const MeetHome = () => {
                 <Clock className="w-4 h-4 text-text-muted" />
                 <span>Recent Meetings</span>
               </h3>
+
+              {recentMeetings.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowClearAllConfirm(true)}
+                  className="text-xs font-semibold text-rose-500 hover:text-rose-400 flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-rose-500/10 transition-all cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Clear All</span>
+                </button>
+              )}
             </div>
 
             {isLoadingHistory ? (
@@ -319,6 +370,13 @@ export const MeetHome = () => {
                         title="Copy Link"
                       >
                         <Copy className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setMeetingToDelete(m)}
+                        className="p-2 rounded-xl bg-surface-hover text-text-muted hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
+                        title="Remove from history"
+                      >
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
@@ -373,6 +431,30 @@ export const MeetHome = () => {
           </div>
         </div>
       )}
+
+      {/* Confirm Remove Single Meeting */}
+      <ConfirmDialogModal
+        isOpen={Boolean(meetingToDelete)}
+        title="Remove Meeting?"
+        message={`Are you sure you want to remove "${meetingToDelete?.title || meetingToDelete?.meetingId}" from your recent meetings?`}
+        confirmLabel="Remove"
+        cancelLabel="Cancel"
+        loading={isDeleting}
+        onConfirm={() => handleRemoveMeeting(meetingToDelete)}
+        onCancel={() => setMeetingToDelete(null)}
+      />
+
+      {/* Confirm Clear All Meetings */}
+      <ConfirmDialogModal
+        isOpen={showClearAllConfirm}
+        title="Clear All Recent Meetings?"
+        message="Are you sure you want to remove all meetings from your recent history? This action cannot be undone."
+        confirmLabel="Clear All"
+        cancelLabel="Cancel"
+        loading={isDeleting}
+        onConfirm={handleClearAllMeetings}
+        onCancel={() => setShowClearAllConfirm(false)}
+      />
 
       {/* Mobile Navbar */}
       <Navbar />

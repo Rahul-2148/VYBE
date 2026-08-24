@@ -348,36 +348,54 @@ export const getCallHistory = async (req, res) => {
   }
 };
 
-// Generate Short-Lived TURN credentials (coturn secret handshake)
+// Generate Short-Lived TURN/STUN credentials
 export const getTurnCredentials = async (req, res) => {
   try {
-    const turnSecret = process.env.TURN_SECRET || "vybe_coturn_secret_pass_2026";
-    const turnDomain = process.env.TURN_SERVER_DOMAIN || "turn.vybe.app";
-    
-    const duration = 24 * 60 * 60; // 24 hours validity
-    const unixTimestamp = Math.floor(Date.now() / 1000) + duration;
-    const username = `${unixTimestamp}:${req.userId}`;
-    
-    // HMAC-SHA1 signature of the username using the coturn secret
-    const hmac = crypto.createHmac("sha1", turnSecret);
-    hmac.update(username);
-    const password = hmac.digest("base64");
-
-    const iceServers = [
-      {
-        urls: `stun:${turnDomain}:3478`,
-      },
-      {
-        urls: `turn:${turnDomain}:3478?transport=udp`,
-        username,
-        credential: password,
-      },
-      {
-        urls: `turn:${turnDomain}:3478?transport=tcp`,
-        username,
-        credential: password,
-      },
+    // High-availability global STUN server pool (Google & Cloudflare)
+    const defaultStunServers = [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun2.l.google.com:19302" },
+      { urls: "stun:stun3.l.google.com:19302" },
+      { urls: "stun:stun4.l.google.com:19302" },
+      { urls: "stun:stun.cloudflare.com:3478" },
+      { urls: "stun:global.stun.twilio.com:3478" },
     ];
+
+    const iceServers = [...defaultStunServers];
+
+    // If explicit TURN server configured via environment variables (e.g., Metered, Twilio, Coturn)
+    if (process.env.TURN_SERVER_URLS && process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL) {
+      const urls = process.env.TURN_SERVER_URLS.split(",").map((u) => u.trim());
+      iceServers.push({
+        urls,
+        username: process.env.TURN_USERNAME,
+        credential: process.env.TURN_CREDENTIAL,
+      });
+    } else if (process.env.TURN_SERVER_DOMAIN && process.env.TURN_SECRET) {
+      const turnSecret = process.env.TURN_SECRET;
+      const turnDomain = process.env.TURN_SERVER_DOMAIN;
+      const duration = 24 * 60 * 60; // 24 hours validity
+      const unixTimestamp = Math.floor(Date.now() / 1000) + duration;
+      const username = `${unixTimestamp}:${req.userId || "guest"}`;
+      
+      const hmac = crypto.createHmac("sha1", turnSecret);
+      hmac.update(username);
+      const password = hmac.digest("base64");
+
+      iceServers.push(
+        {
+          urls: `turn:${turnDomain}:3478?transport=udp`,
+          username,
+          credential: password,
+        },
+        {
+          urls: `turn:${turnDomain}:3478?transport=tcp`,
+          username,
+          credential: password,
+        }
+      );
+    }
 
     return res.status(200).json({
       success: true,

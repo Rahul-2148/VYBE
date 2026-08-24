@@ -1,10 +1,11 @@
-import React from "react";
+import React, { useState, useRef } from "react";
 import { Search } from "lucide-react";
 import { GoHome, GoHomeFill } from "react-icons/go";
 import dp from "../assets/dp3.png";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { triggerHaptic } from "../lib/interactiveEffects";
+import AccountSwitcherModal from "./AccountSwitcherModal";
 
 // Exact Reels Icon
 const ReelsIcon = ({ className = "w-6 h-6", filled = false }) => (
@@ -77,9 +78,39 @@ const Navbar = () => {
   const { userData } = useSelector((state) => state.user);
   const { unreadMessagesCount } = useSelector((state) => state.notification || {});
 
+  const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
+  const pressTimer = useRef(null);
+  const lastTapRef = useRef(0);
+
   const handleNav = (path) => {
     triggerHaptic("light");
     navigate(path);
+  };
+
+  const handleProfileTouchStart = () => {
+    pressTimer.current = setTimeout(() => {
+      triggerHaptic("medium");
+      setShowAccountSwitcher(true);
+    }, 450); // 450ms long press opens Account Switcher like Instagram
+  };
+
+  const handleProfileTouchEnd = () => {
+    if (pressTimer.current) {
+      clearTimeout(pressTimer.current);
+    }
+  };
+
+  const handleProfileClick = () => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) {
+      // Double tap detected -> Open Account Switcher
+      triggerHaptic("medium");
+      setShowAccountSwitcher(true);
+    } else {
+      // Single tap -> Navigate to own profile
+      handleNav(`/profile/${userData?.user?.userName || ""}`);
+    }
+    lastTapRef.current = now;
   };
 
   const isHome = location.pathname === "/";
@@ -138,9 +169,15 @@ const Navbar = () => {
 
       {/* 5. Profile */}
       <button
-        onClick={() => handleNav(`/profile/${userData?.user?.userName || ""}`)}
+        onClick={handleProfileClick}
+        onTouchStart={handleProfileTouchStart}
+        onTouchEnd={handleProfileTouchEnd}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setShowAccountSwitcher(true);
+        }}
         className="flex-1 flex justify-center items-center py-2 transition-transform active:scale-90 interactive-tap"
-        title="Profile"
+        title="Profile (Long press or double-tap to switch account)"
       >
         <div
           className={`w-7 h-7 rounded-full overflow-hidden transition-all ${isProfile
@@ -155,6 +192,12 @@ const Navbar = () => {
           />
         </div>
       </button>
+
+      {/* Account Switcher Modal for Mobile */}
+      <AccountSwitcherModal
+        isOpen={showAccountSwitcher}
+        onClose={() => setShowAccountSwitcher(false)}
+      />
     </nav>
   );
 };

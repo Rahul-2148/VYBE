@@ -33,6 +33,7 @@ import {
   ToggleRight,
   Users,
   UserPlus,
+  Sparkles,
 } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
@@ -109,11 +110,15 @@ export const SecurityDashboard = () => {
     messageRequestPermission: "requests",
   });
 
+  // AI Algorithm Insights state
+  const [aiInsights, setAiInsights] = useState({ topInterests: [], hasSocialGraphBleed: false });
+
   // Collapsible sections
   const [expandedSections, setExpandedSections] = useState({
     accounts: true,
     checkup: true,
     passAndSec: true,
+    aiAlgorithm: true,
     sessions: true,
     privacy: true,
     logs: true,
@@ -127,12 +132,20 @@ export const SecurityDashboard = () => {
     const startTime = Date.now();
     try {
       setRefreshing(true);
-      const [userRes, sessionsRes, logsRes, privacyRes] = await Promise.all([
+      const [userRes, sessionsRes, logsRes, privacyRes, aiRes] = await Promise.all([
         api.get("/user/current-user").catch(() => null),
         api.get("/auth/sessions").catch(() => null),
         api.get("/auth/security-logs").catch(() => null),
         api.get("/user/privacy-settings").catch(() => null),
+        api.get("/user/recommendation-insights").catch(() => null),
       ]);
+
+      if (aiRes?.data?.success) {
+        setAiInsights({
+          topInterests: aiRes.data.topInterests || [],
+          hasSocialGraphBleed: Boolean(aiRes.data.hasSocialGraphBleed),
+        });
+      }
 
       if (userRes?.data?.user) {
         setUser(userRes.data.user);
@@ -797,7 +810,79 @@ export const SecurityDashboard = () => {
           </AnimatePresence>
         </div>
 
-        {/* SECTION 4: Where You're Logged In (Active Sessions) */}
+        {/* SECTION 4: AI Recommendations & Latent Interest Vectors */}
+        <div className="rounded-2xl bg-surface border border-border overflow-hidden shadow-xs">
+          <button
+            onClick={() => toggleSection("aiAlgorithm")}
+            className="w-full flex items-center justify-between p-4 cursor-pointer hover:bg-surface-hover/30 transition"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-400">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div className="text-left">
+                <h3 className="text-xs font-bold text-text">AI Recommendation Vectors</h3>
+                <p className="text-[10px] text-text-muted">Learned interests, dwell tracking & social graph bleed</p>
+              </div>
+            </div>
+            {expandedSections.aiAlgorithm ? <ChevronUp className="w-4 h-4 text-text-muted" /> : <ChevronDown className="w-4 h-4 text-text-muted" />}
+          </button>
+
+          <AnimatePresence>
+            {expandedSections.aiAlgorithm && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="px-4 pb-4 space-y-3">
+                  <div className="p-3 bg-surface-inset border border-border/80 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-bold text-text flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                        Top Latent Interest Topics
+                      </p>
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                        {aiInsights.hasSocialGraphBleed ? "Social Graph Bleed Active" : "Direct Tracking Only"}
+                      </span>
+                    </div>
+
+                    {aiInsights.topInterests && aiInsights.topInterests.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {aiInsights.topInterests.map((item, idx) => (
+                          <span
+                            key={idx}
+                            className="text-[11px] font-semibold bg-surface border border-border/90 text-text-secondary px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs"
+                          >
+                            <span className="text-purple-400 font-bold">#{item.topic}</span>
+                            <span className="text-[9px] text-text-muted font-mono">{Math.round(item.score)}%</span>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-text-muted italic py-1">
+                        No high-affinity topic clusters recorded yet. Browse reels and posts for tailored recommendations.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="p-3 bg-surface-inset border border-border/80 rounded-xl flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold text-text">Dwell-Time Latent Learning</p>
+                      <p className="text-[10px] text-text-muted">Calculates intent from 1.5s+ pauses and re-watches</p>
+                    </div>
+                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">
+                      Real-Time Active
+                    </span>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* SECTION 5: Where You're Logged In (Active Sessions) */}
         <div className="rounded-2xl bg-surface border border-border overflow-hidden shadow-xs">
           <button
             onClick={() => toggleSection("sessions")}

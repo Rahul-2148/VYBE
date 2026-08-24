@@ -11,23 +11,25 @@ const MessageReactionBadge = ({
   onClick,
   isSender = false,
 }) => {
-  if (!reactions || reactions.length === 0) return null;
-
   // Extract unique emojis (up to 3 distinct displayed)
   const uniqueEmojis = useMemo(() => {
+    if (!reactions || reactions.length === 0) return [];
     const set = new Set();
     reactions.forEach((r) => {
-      if (r.emoji) set.add(r.emoji);
+      if (r?.emoji) set.add(r.emoji);
     });
     return Array.from(set).slice(0, 3);
   }, [reactions]);
 
   // Check if current user reacted
   const myReaction = useMemo(() => {
+    if (!reactions || reactions.length === 0) return null;
     return reactions.find(
-      (r) => (r.user?._id || r.user?.id || r.user || "").toString() === currentUserId?.toString()
+      (r) => (r?.user?._id || r?.user?.id || r?.user || "").toString() === currentUserId?.toString()
     );
   }, [reactions, currentUserId]);
+
+  if (!reactions || reactions.length === 0) return null;
 
   const count = reactions.length;
 

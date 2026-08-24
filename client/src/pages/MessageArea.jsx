@@ -28,7 +28,7 @@ import {
   addMessage, addOptimisticMessage, replaceOptimisticMessage, markOptimisticFailed,
   setMessages, prependHistoricalMessages, updateConversationLastMessage, setConversations,
   clearSelectedChatUser, setChatInfoOpen, setForwardModal, minimizeToFloatingDock,
-  updateConversationThemeInRedux
+  updateConversationThemeInRedux, acceptRequestInRedux, removeConversationInRedux, setSelectedChatUser
 } from "../redux/features/messageSlice";
 import api from "../lib/axios";
 import { getSocket } from "../lib/socket";
@@ -148,45 +148,59 @@ export const MessageArea = () => {
     (c) => (c._id || c.conversationId)?.toString() === selectedChatUser?.conversationId?.toString()
   );
   const isPendingRequest = currentConv?.requestStatus === "pending";
+  const isRecipientOfRequest = isPendingRequest && (
+    !currentConv?.lastMessage?.sender ||
+    (currentConv.lastMessage?.sender?._id || currentConv.lastMessage?.sender)?.toString() !== currentUserId?.toString()
+  );
 
   const handleAcceptRequest = async () => {
+    if (!selectedChatUser?.conversationId) return;
     try {
       const res = await api.patch(`/conversation/accept-request/${selectedChatUser.conversationId}`);
       if (res.data.success) {
+        dispatch(acceptRequestInRedux({ conversationId: selectedChatUser.conversationId }));
         snackbar.success("Message request accepted! ✨");
         const convRes = await api.get("/message/conversations");
         if (convRes.data?.conversations) {
           dispatch(setConversations(convRes.data.conversations));
         }
       }
-    } catch {
-      snackbar.error("Failed to accept request.");
+    } catch (err) {
+      snackbar.error(err.response?.data?.message || "Failed to accept request.");
     }
   };
 
   const handleDeclineRequest = async () => {
+    if (!selectedChatUser?.conversationId) return;
     try {
       const res = await api.delete(`/conversation/decline-request/${selectedChatUser.conversationId}`);
       if (res.data.success) {
         snackbar.success("Message request deleted.");
+        dispatch(removeConversationInRedux(selectedChatUser.conversationId));
         dispatch(clearSelectedChatUser());
         navigate("/messages");
       }
-    } catch {
-      snackbar.error("Failed to delete request.");
+    } catch (err) {
+      snackbar.error(err.response?.data?.message || "Failed to delete request.");
     }
   };
 
   const handleBlockUser = async () => {
     try {
-      const res = await api.patch(`/conversation/block/${selectedChatUser.conversationId}`);
-      if (res.data.success) {
-        snackbar.success("User blocked.");
-        dispatch(clearSelectedChatUser());
-        navigate("/messages");
+      const targetUserId = otherUser?._id;
+      if (targetUserId) {
+        await api.post(`/user/block/${targetUserId}`);
+      } else if (selectedChatUser.conversationId) {
+        await api.patch(`/conversation/block/${selectedChatUser.conversationId}`);
       }
-    } catch {
-      snackbar.error("Failed to block user.");
+      snackbar.success("User blocked.");
+      if (selectedChatUser.conversationId) {
+        dispatch(removeConversationInRedux(selectedChatUser.conversationId));
+      }
+      dispatch(clearSelectedChatUser());
+      navigate("/messages");
+    } catch (err) {
+      snackbar.error(err.response?.data?.message || "Failed to block user.");
     }
   };
 
@@ -624,7 +638,11 @@ export const MessageArea = () => {
     try {
       const fd = new FormData();
       fd.append("text", savedInput);
-      fd.append("conversationId", selectedChatUser.conversationId);
+      if (selectedChatUser.conversationId) {
+        fd.append("conversationId", selectedChatUser.conversationId);
+      } else if (selectedChatUser.user?._id) {
+        fd.append("recipientId", selectedChatUser.user._id);
+      }
       fd.append("vanish", vanishMode);
       fd.append("clientMessageId", tempId);
       if (savedFiles.length > 0) {
@@ -636,11 +654,23 @@ export const MessageArea = () => {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
-      dispatch(replaceOptimisticMessage({ tempId, message: res.data.message }));
+      const confirmedMsg = res.data.message;
+      const realConvId = confirmedMsg.conversation?._id || confirmedMsg.conversation;
+
+      if (!selectedChatUser.conversationId && realConvId) {
+        dispatch(setSelectedChatUser({ conversationId: realConvId, user: selectedChatUser.user }));
+        api.get("/message/conversations").then((cRes) => {
+          if (cRes.data?.conversations) {
+            dispatch(setConversations(cRes.data.conversations));
+          }
+        }).catch(() => {});
+      }
+
+      dispatch(replaceOptimisticMessage({ tempId, message: confirmedMsg }));
       dispatch(
         updateConversationLastMessage({
-          conversationId: selectedChatUser.conversationId,
-          message: res.data.message,
+          conversationId: realConvId || selectedChatUser.conversationId,
+          message: confirmedMsg,
           currentUserId,
         })
       );
@@ -813,7 +843,7 @@ export const MessageArea = () => {
 
   useMessageSocketEvents(selectedChatUser?.conversationId);
 
-  if (!selectedChatUser?.conversationId) {
+  if (!selectedChatUser?.conversationId && !selectedChatUser?.user?._id) {
     return (
       <div className="w-full h-screen bg-bg flex flex-col items-center justify-center text-center p-6 select-none">
         <div className="w-24 h-24 rounded-full border-2 border-border flex items-center justify-center mb-5 bg-surface shadow-lg">
@@ -1374,39 +1404,44 @@ export const MessageArea = () => {
       )}
 
       {/* ===== MESSAGE COMPOSER / REQUEST BANNER ===== */}
-      {isPendingRequest ? (
-        <div className="p-4 border-t border-border bg-surface flex flex-col items-center gap-3 shrink-0 text-center">
-          <p className="text-xs text-text font-medium">
-            Accept message request from <span className="font-bold text-text">@{otherUser?.userName || "User"}</span>?
-          </p>
-          <p className="text-[11px] text-text-muted max-w-md leading-relaxed">
-            If you accept, they will be able to message you and call you. They won't know you've seen their message until you accept.
-          </p>
-          <div className="flex items-center gap-2.5 w-full max-w-sm pt-1">
+      {isRecipientOfRequest ? (
+        <div className="p-4 bg-surface/95 border-t border-border backdrop-blur-xl flex flex-col items-center gap-3 shrink-0 text-center select-none pb-[calc(1rem+env(safe-area-inset-bottom))] w-full animate-in fade-in slide-in-from-bottom-2 duration-200 z-30">
+          <div className="space-y-1 max-w-md">
+            <p className="text-xs font-bold text-text">
+              Message Request from @{otherUser?.userName || "User"}
+            </p>
+            <p className="text-[11px] text-text-secondary leading-relaxed">
+              Do you want to let <span className="font-semibold text-text">@{otherUser?.userName}</span> send you messages? They won't know you've seen it until you accept.
+            </p>
+          </div>
+          <div className="flex items-center gap-3 w-full max-w-sm pt-1">
             <button
-              onClick={handleAcceptRequest}
-              className="flex-1 py-2.5 bg-primary hover:bg-primary-hover text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-sm"
+              type="button"
+              onClick={handleBlockUser}
+              className="flex-1 py-2.5 rounded-xl bg-surface hover:bg-rose-500/10 text-rose-500 border border-border text-xs font-bold transition cursor-pointer"
             >
-              Accept
+              Block
             </button>
             <button
+              type="button"
               onClick={handleDeclineRequest}
-              className="flex-1 py-2.5 bg-surface-hover hover:bg-surface-active text-red-500 text-xs font-bold rounded-xl transition cursor-pointer border border-border"
+              className="flex-1 py-2.5 rounded-xl bg-surface hover:bg-surface-hover text-text-secondary hover:text-text border border-border text-xs font-bold transition cursor-pointer"
             >
               Delete
             </button>
             <button
-              onClick={handleBlockUser}
-              className="px-4 py-2.5 bg-surface hover:bg-surface-hover text-text-secondary hover:text-text text-xs font-bold rounded-xl transition cursor-pointer border border-border"
+              type="button"
+              onClick={handleAcceptRequest}
+              className="flex-1 py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold transition shadow-md cursor-pointer"
             >
-              Block
+              Accept
             </button>
           </div>
         </div>
       ) : (
-        <div className="px-3.5 md:px-6 py-2.5 border-t border-border/80 bg-bg/95 backdrop-blur-xl shrink-0 pb-[calc(0.6rem+env(safe-area-inset-bottom))] w-full">
+        <div className="px-3.5 md:px-6 py-2.5 border-t border-border/80 bg-bg/95 backdrop-blur-xl shrink-0 pb-[calc(0.6rem+env(safe-area-inset-bottom))] w-full select-none z-20">
           <div className="w-full max-w-4xl mx-auto">
-            {/* ===== EDITING PREVIEW BANNER (Right above input pill) ===== */}
+            {/* ===== EDITING PREVIEW BANNER ===== */}
             {editingMessage && (
               <div className="mb-2 bg-surface dark:bg-zinc-850 border border-primary/40 dark:border-primary/50 rounded-2xl px-3.5 py-2 flex items-center justify-between gap-3 shadow-md backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-150">
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -1437,29 +1472,7 @@ export const MessageArea = () => {
               </div>
             )}
 
-            {/* ===== LIVE TYPING INDICATOR PILL (WhatsApp / Instagram / iMessage style) ===== */}
-            {isAnyoneTyping && (
-              <div className="mb-2 w-fit max-w-[85%] bg-surface dark:bg-zinc-850 border border-border/80 rounded-2xl px-3.5 py-1.5 flex items-center gap-2.5 shadow-sm backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-150">
-                {/* 3 Bouncing Dots in Bubble */}
-                <div className="flex items-center gap-1 bg-primary/10 dark:bg-primary/20 px-2 py-1 rounded-full">
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" />
-                </div>
-                <span className="text-xs text-text font-medium truncate">
-                  <span className="font-semibold text-primary">
-                    {typingUsers.length === 1
-                      ? `@${typingUsers[0].userName}`
-                      : typingUsers.length === 2
-                      ? `@${typingUsers[0].userName} & @${typingUsers[1].userName}`
-                      : `@${typingUsers[0].userName} + ${typingUsers.length - 1} others`}
-                  </span>{" "}
-                  <span className="text-text-secondary">is typing...</span>
-                </span>
-              </div>
-            )}
-
-            {/* ===== REPLY PREVIEW BANNER (Right above input pill) ===== */}
+            {/* ===== REPLY PREVIEW BANNER ===== */}
             {replyTo && (
               <div className="mb-2 bg-surface dark:bg-zinc-850 border border-border/90 rounded-2xl px-3.5 py-2 flex items-center justify-between gap-3 shadow-md backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-150">
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -1489,10 +1502,31 @@ export const MessageArea = () => {
               </div>
             )}
 
+            {/* ===== LIVE TYPING INDICATOR PILL ===== */}
+            {isAnyoneTyping && (
+              <div className="mb-2 w-fit max-w-[85%] bg-surface dark:bg-zinc-850 border border-border/80 rounded-2xl px-3.5 py-1.5 flex items-center gap-2.5 shadow-sm backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-150">
+                <div className="flex items-center gap-1 bg-primary/10 dark:bg-primary/20 px-2 py-1 rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" />
+                </div>
+                <span className="text-xs text-text font-medium truncate">
+                  <span className="font-semibold text-primary">
+                    {typingUsers.length === 1
+                      ? `@${typingUsers[0].userName}`
+                      : typingUsers.length === 2
+                      ? `@${typingUsers[0].userName} & @${typingUsers[1].userName}`
+                      : `@${typingUsers[0].userName} + ${typingUsers.length - 1} others`}
+                  </span>{" "}
+                  <span className="text-text-secondary">is typing...</span>
+                </span>
+              </div>
+            )}
+
             {isRecordingVoice ? (
               <VoiceRecorder onSendVoiceNote={handleSendVoiceNote} onCancel={() => setIsRecordingVoice(false)} />
             ) : (
-              <form onSubmit={handleSendMessage} className="relative flex items-center w-full">
+              <form onSubmit={handleSendMessage} className="relative flex items-center w-full gap-2">
                 <input
                   hidden
                   ref={fileInput}
@@ -1507,7 +1541,7 @@ export const MessageArea = () => {
                   }}
                 />
 
-                {/* Vybe Expressions Popover (Emojis & Stickers) */}
+                {/* Vybe Expressions Popover */}
                 {showPicker.open && (
                   <VybeExpressionPicker
                     initialTab={showPicker.tab}
@@ -1520,9 +1554,8 @@ export const MessageArea = () => {
                   />
                 )}
 
-                {/* Input Pill Capsule */}
+                {/* Input Pill */}
                 <div className="flex-1 bg-surface border border-border/90 rounded-full px-3 py-1.5 flex items-center gap-2 focus-within:border-primary/80 focus-within:ring-2 focus-within:ring-primary/10 transition shadow-xs">
-                  {/* Left: Emoji Button */}
                   <button
                     type="button"
                     data-expression-trigger="true"
@@ -1533,7 +1566,6 @@ export const MessageArea = () => {
                     <Smile className="w-5 h-5" />
                   </button>
 
-                  {/* Center: Text input */}
                   <input
                     ref={inputRef}
                     value={input}
@@ -1558,7 +1590,6 @@ export const MessageArea = () => {
                     className="flex-1 bg-transparent text-sm text-text outline-none placeholder:text-text-muted min-w-0 selection:bg-primary selection:text-white"
                   />
 
-                  {/* Right Side Icons inside Input Pill */}
                   {!(input.trim() || backendFiles.length > 0) ? (
                     <div className="flex items-center gap-1.5 shrink-0">
                       <button

@@ -20,23 +20,80 @@ import { snackbar } from "../lib/snackbar";
 import dp from "../assets/dp3.png";
 import { filterStyleMap } from "../constants/callFilters";
 
+const RemoteAudioPlayer = React.memo(({ stream }) => {
+  const audioRef = useRef(null);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el || !stream) return;
+
+    if (el.srcObject !== stream) {
+      el.srcObject = stream;
+    }
+
+    el.muted = false;
+    el.volume = 1.0;
+
+    const playAudio = () => {
+      const playPromise = el.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn("[CallScreen WebRTC] Remote audio play deferred by policy:", err?.message);
+        });
+      }
+    };
+
+    playAudio();
+
+    // Auto-unlock audio on user touch or click (Mobile Safari / Chrome Autoplay Unlock)
+    const unlockOnInteraction = () => {
+      if (el && el.paused) {
+        playAudio();
+      }
+    };
+
+    window.addEventListener("touchstart", unlockOnInteraction, { passive: true, once: true });
+    window.addEventListener("click", unlockOnInteraction, { passive: true, once: true });
+
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = true;
+    });
+
+    return () => {
+      window.removeEventListener("touchstart", unlockOnInteraction);
+      window.removeEventListener("click", unlockOnInteraction);
+    };
+  }, [stream]);
+
+  return (
+    <audio
+      ref={audioRef}
+      autoPlay
+      playsInline
+      className="sr-only"
+    />
+  );
+});
+
 /**
  * High-Performance Memoized Video Stream Component
  * Prevents continuous re-rendering, memory leaks, frame drops, and infinite mirror locks.
+ * Defaults to muted={true} so dedicated RemoteAudioPlayer handles audio with zero echo.
  */
-const VideoStream = React.memo(({ stream, muted = false, className = "", style = {}, mirror = false }) => {
+const VideoStream = React.memo(({ stream, muted = true, className = "", style = {}, mirror = false }) => {
   const videoRef = useRef(null);
 
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
+    el.muted = Boolean(muted);
     if (el.srcObject !== (stream || null)) {
       el.srcObject = stream || null;
       if (stream) {
         el.play().catch(() => {});
       }
     }
-  }, [stream]);
+  }, [stream, muted]);
 
   return (
     <video
@@ -49,6 +106,7 @@ const VideoStream = React.memo(({ stream, muted = false, className = "", style =
     />
   );
 });
+
 
 /**
  * Helper to auto-link URLs inside chat messages
@@ -1035,24 +1093,16 @@ export const CallScreen = ({
           : "p-3 md:p-4 cursor-default"
       }`}
     >
-      {/* Background Remote Audio Players (Guaranteed Uninterrupted Audio) */}
-      <div className="hidden pointer-events-none" aria-hidden="true">
-        {peerList.map(([socketId, peerData]) =>
-          peerData?.stream ? (
-            <audio
-              key={`remote-audio-${socketId}`}
-              autoPlay
-              playsInline
-              ref={(el) => {
-                if (el && el.srcObject !== peerData.stream) {
-                  el.srcObject = peerData.stream;
-                  el.play().catch(() => {});
-                }
-              }}
-            />
-          ) : null
-        )}
-      </div>
+      {/* Background Remote Audio Players (Guaranteed Uninterrupted Audio across All Modes) */}
+      {peerList.map(([socketId, peerData]) =>
+        peerData?.stream ? (
+          <RemoteAudioPlayer
+            key={`remote-audio-${socketId}`}
+            stream={peerData.stream}
+          />
+        ) : null
+      )}
+
 
       {/* Floating Live Reaction Emojis Stream (Single Source of Truth) */}
       <CallReactionStream reactions={reactionEvents} />

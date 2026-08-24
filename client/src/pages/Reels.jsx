@@ -1,12 +1,11 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { MdOutlineKeyboardBackspace } from "react-icons/md";
-import { ChevronUp, ChevronDown, Sparkles, Users, Star, Compass, UserPlus } from "lucide-react";
+import { ChevronUp, ChevronDown, Sparkles } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { useNavigate, useLocation, useSearchParams, useParams } from "react-router-dom";
 import ReelCard from "../components/ReelCard";
 import ReelPreloader from "../components/ReelPreloader";
 import LeftHome from "../components/LeftHome";
-import CloseFriendsModal from "../components/CloseFriendsModal";
 import api from "../lib/axios";
 import { useGetAllReelsQuery } from "../redux/api/apiSlice";
 import { setReelData } from "../redux/features/reelSlice";
@@ -19,13 +18,13 @@ export const Reels = () => {
   const dispatch = useDispatch();
 
   const targetReelId = reelId || searchParams.get("reelId") || location.state?.initialReelId;
-  const [reelMode, setReelMode] = useState("for-you");
-  const [showCloseFriendsModal, setShowCloseFriendsModal] = useState(false);
+  const reelMode = "for-you";
   
   // RTK Query with instant cache & stale-while-revalidate
   const { data: reelsResponse, isLoading: loadingReels, isFetching: isReelsFetching } = useGetAllReelsQuery(reelMode, {
     refetchOnMountOrArgChange: true,
   });
+
   const reelState = useSelector((state) => state.reel);
   const reelData = useMemo(
     () => (reelsResponse?.reels !== undefined ? reelsResponse.reels : reelState?.reelData || []),
@@ -166,55 +165,6 @@ export const Reels = () => {
 
         {/* Main Reels Feed Area (Centered in the remaining screen space) */}
         <div className="flex-1 h-full flex flex-col justify-center items-center relative overflow-y-hidden md:overflow-visible bg-black md:bg-bg">
-          {/* Top Filter Mode Switcher (For You | Following | Favorites) */}
-          <div className="absolute top-4 z-[90] flex items-center bg-black/50 backdrop-blur-lg border border-white/10 rounded-full p-1 shadow-2xl pointer-events-auto">
-            <button
-              onClick={() => {
-                setReelMode("for-you");
-                setCurrentIndex(0);
-                containerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition active:scale-95 cursor-pointer ${
-                reelMode === "for-you"
-                  ? "bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow"
-                  : "text-white/70 hover:text-white hover:bg-white/10"
-              }`}
-            >
-              <Sparkles className="w-3 h-3" />
-              <span>For You</span>
-            </button>
-            <button
-              onClick={() => {
-                setReelMode("following");
-                setCurrentIndex(0);
-                containerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition active:scale-95 cursor-pointer ${
-                reelMode === "following"
-                  ? "bg-indigo-600 text-white shadow"
-                  : "text-white/70 hover:text-white hover:bg-white/10"
-              }`}
-            >
-              <Users className="w-3 h-3" />
-              <span>Following</span>
-            </button>
-            <button
-              onClick={() => {
-                setReelMode("favorites");
-                setCurrentIndex(0);
-                containerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition active:scale-95 cursor-pointer ${
-                reelMode === "favorites"
-                  ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow"
-                  : "text-white/70 hover:text-white hover:bg-white/10"
-              }`}
-            >
-              <Star className="w-3 h-3" />
-              <span>Favorites</span>
-            </button>
-          </div>
-
           {/* Background Preloader for adjacent 2 videos */}
           {reelData && reelData.length > 0 && (
             <ReelPreloader
@@ -223,6 +173,7 @@ export const Reels = () => {
               preloadCount={2}
             />
           )}
+
 
           {/* Back button for Mobile */}
           <div className="flex md:hidden absolute top-4 left-4 z-[100] pointer-events-auto">
@@ -272,94 +223,36 @@ export const Reels = () => {
           {loading && (!reelData || reelData.length === 0) && (
             <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-text z-10">
               <div className="w-10 h-10 border-3 border-rose-500 border-t-transparent rounded-full animate-spin shadow-lg" />
-              <p className="text-xs font-bold text-text-muted tracking-wide animate-pulse">Loading {reelMode === "following" ? "Following" : reelMode === "favorites" ? "Favorites" : "For You"} Reels...</p>
+              <p className="text-xs font-bold text-text-muted tracking-wide animate-pulse">Loading Reels...</p>
             </div>
           )}
 
-          {/* Mode-Specific Empty State */}
+          {/* Empty State */}
           {!loading && (!reelData || reelData.length === 0) && (
             <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-4 text-text z-10">
-              {reelMode === "following" ? (
-                <>
-                  <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shadow-xl">
-                    <Users className="w-8 h-8" />
-                  </div>
-                  <div className="space-y-1 max-w-xs">
-                    <h2 className="text-base font-bold">No Reels from Following</h2>
-                    <p className="text-xs text-text-muted">
-                      Creators you follow haven't posted any reels yet. Follow more creators to populate this tab!
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3 pt-2">
-                    <button
-                      onClick={() => navigate("/explore")}
-                      className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 font-bold text-xs rounded-full text-white shadow-xl transition cursor-pointer flex items-center gap-1.5"
-                    >
-                      <Compass className="w-4 h-4" />
-                      <span>Explore Creators</span>
-                    </button>
-                    <button
-                      onClick={() => setReelMode("for-you")}
-                      className="px-5 py-2.5 bg-surface-hover hover:bg-surface-active border border-border font-bold text-xs rounded-full text-text transition cursor-pointer"
-                    >
-                      For You
-                    </button>
-                  </div>
-                </>
-              ) : reelMode === "favorites" ? (
-                <>
-                  <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shadow-xl">
-                    <Star className="w-8 h-8 fill-amber-400/20" />
-                  </div>
-                  <div className="space-y-1 max-w-xs">
-                    <h2 className="text-base font-bold">No Reels from Favorites</h2>
-                    <p className="text-xs text-text-muted">
-                      Add friends and creators to your Close Friends & Favorites list to watch their reels here.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3 pt-2">
-                    <button
-                      onClick={() => setShowCloseFriendsModal(true)}
-                      className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 font-bold text-xs rounded-full text-white shadow-xl transition cursor-pointer flex items-center gap-1.5"
-                    >
-                      <UserPlus className="w-4 h-4" />
-                      <span>Manage Favorites</span>
-                    </button>
-                    <button
-                      onClick={() => setReelMode("for-you")}
-                      className="px-5 py-2.5 bg-surface-hover hover:bg-surface-active border border-border font-bold text-xs rounded-full text-text transition cursor-pointer"
-                    >
-                      For You
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-500 shadow-xl">
-                    <Sparkles className="w-8 h-8" />
-                  </div>
-                  <div className="space-y-1 max-w-xs">
-                    <h2 className="text-base font-bold">No Reels Yet</h2>
-                    <p className="text-xs text-text-muted">
-                      Be the first to share an inspiring video or discover content from creators.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3 pt-2">
-                    <button
-                      onClick={() => navigate("/upload")}
-                      className="px-5 py-2.5 bg-gradient-to-r from-rose-500 to-purple-600 font-bold text-xs rounded-full text-white shadow-xl hover:opacity-95 transition cursor-pointer"
-                    >
-                      Upload Reel
-                    </button>
-                    <button
-                      onClick={() => navigate("/explore")}
-                      className="px-5 py-2.5 bg-surface-hover hover:bg-surface-active border border-border font-bold text-xs rounded-full text-text transition cursor-pointer"
-                    >
-                      Explore Feed
-                    </button>
-                  </div>
-                </>
-              )}
+              <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-500 shadow-xl">
+                <Sparkles className="w-8 h-8" />
+              </div>
+              <div className="space-y-1 max-w-xs">
+                <h2 className="text-base font-bold">No Reels Yet</h2>
+                <p className="text-xs text-text-muted">
+                  Be the first to share an inspiring video or discover content from creators.
+                </p>
+              </div>
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  onClick={() => navigate("/upload")}
+                  className="px-5 py-2.5 bg-gradient-to-r from-rose-500 to-purple-600 font-bold text-xs rounded-full text-white shadow-xl hover:opacity-95 transition cursor-pointer"
+                >
+                  Upload Reel
+                </button>
+                <button
+                  onClick={() => navigate("/explore")}
+                  className="px-5 py-2.5 bg-surface-hover hover:bg-surface-active border border-border font-bold text-xs rounded-full text-text transition cursor-pointer"
+                >
+                  Explore Feed
+                </button>
+              </div>
             </div>
           )}
 
@@ -386,16 +279,9 @@ export const Reels = () => {
           )}
         </div>
       </div>
-
-      {/* Close Friends / Favorites Management Modal */}
-      {showCloseFriendsModal && (
-        <CloseFriendsModal
-          isOpen={showCloseFriendsModal}
-          onClose={() => setShowCloseFriendsModal(false)}
-        />
-      )}
     </div>
   );
 };
 
 export default Reels;
+

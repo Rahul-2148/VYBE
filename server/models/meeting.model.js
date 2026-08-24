@@ -86,6 +86,12 @@ const meetingSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    hiddenFor: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
   },
   { timestamps: true }
 );

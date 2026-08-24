@@ -248,3 +248,125 @@ export const analyzeToxicity = (text = "") => {
     reason: isFlagged ? "Content contains aggressive or prohibited language" : "Safe",
   };
 };
+
+// ==============================================================================
+// 🧠 BEHAVIORAL INTENT & MIND-READING RECOMMENDATION AI
+// ==============================================================================
+
+export const CATEGORY_SYNONYMS = {
+  travel: ["goa", "beach", "trip", "vacation", "flight", "resort", "hotel", "mountains", "manali", "paris", "dubai", "bali", "explore", "travelgram", "wanderlust", "nature", "sunset", "sea", "ocean"],
+  fitness: ["gym", "workout", "fitness", "muscle", "abs", "running", "training", "diet", "protein", "bodybuilding", "yoga", "crossfit", "exercise", "cardio", "health"],
+  tech: ["coding", "programming", "developer", "javascript", "python", "react", "ai", "machinelearning", "webdev", "software", "startup", "gadgets", "tech", "crypto", "bitcoin", "nextjs", "rust"],
+  food: ["food", "foodie", "delicious", "yummy", "recipe", "chef", "cooking", "pizza", "burger", "biryani", "dessert", "cafe", "coffee", "restaurant", "baking"],
+  entertainment: ["comedy", "funny", "meme", "jokes", "prank", "lol", "humor", "viral", "dance", "trending", "movie", "cinema", "music", "hiphop", "beats", "song"],
+  fashion: ["outfit", "ootd", "style", "fashion", "shopping", "shoes", "sneakers", "dress", "makeup", "beauty", "aesthetic", "model", "glam", "luxury"],
+  gaming: ["gaming", "gamer", "esports", "bgmi", "pubg", "valorant", "gta", "playstation", "xbox", "streamer", "twitch", "gameplay"],
+};
+
+/**
+ * Extract semantic interest tags from raw text, hashtags, sound title, or location
+ */
+export const extractSemanticKeywords = (rawText = "") => {
+  if (!rawText || typeof rawText !== "string") return [];
+  const normalized = rawText.toLowerCase().replace(/[^a-z0-9#\s]/g, " ");
+  const tokens = normalized.split(/\s+/).filter((t) => t.length >= 3);
+  const matchedCategories = new Set();
+
+  for (const token of tokens) {
+    const clean = token.startsWith("#") ? token.slice(1) : token;
+    for (const [category, synonyms] of Object.entries(CATEGORY_SYNONYMS)) {
+      if (category === clean || synonyms.includes(clean)) {
+        matchedCategories.add(category);
+        matchedCategories.add(clean);
+      }
+    }
+  }
+
+  return Array.from(matchedCategories);
+};
+
+/**
+ * Record Dwell-Time Intent Signal & Update User Vector with Exponential Rolling Average
+ */
+export const recordUserDwellSignal = async (User, userId, { text = "", hashtags = [], location = "", category = "", dwellMs = 0 }) => {
+  if (!userId || dwellMs < 1200) return null; // Ignore glances < 1.2s
+
+  try {
+    const combinedText = `${text} ${Array.isArray(hashtags) ? hashtags.join(" ") : ""} ${location} ${category}`;
+    const keywords = extractSemanticKeywords(combinedText);
+    if (keywords.length === 0 && !category) return null;
+
+    // Intent Weight Scaling based on dwell duration
+    let intentBoost = 3.0; // 1.2s - 2.5s
+    if (dwellMs >= 2500 && dwellMs < 6000) intentBoost = 6.0;
+    else if (dwellMs >= 6000 && dwellMs < 15000) intentBoost = 10.0;
+    else if (dwellMs >= 15000) intentBoost = 15.0; // High dwell / Re-watch
+
+    const user = await User.findById(userId);
+    if (!user) return null;
+
+    let interestMap = user.contentCategoryInterests || new Map();
+    const updatedMap = new Map(interestMap instanceof Map ? interestMap : Object.entries(interestMap || {}));
+
+    // Update detected keywords in interest vector
+    for (const kw of keywords) {
+      const currentVal = updatedMap.get(kw) || 0;
+      // Rolling average cap at 100 with gradual reinforcement
+      const newVal = Math.min(100, currentVal + intentBoost);
+      updatedMap.set(kw, Number(newVal.toFixed(2)));
+    }
+
+    if (category) {
+      const currentCatVal = updatedMap.get(category.toLowerCase()) || 0;
+      updatedMap.set(category.toLowerCase(), Math.min(100, currentCatVal + intentBoost));
+    }
+
+    user.contentCategoryInterests = updatedMap;
+    await user.save();
+    return { success: true, updatedKeys: keywords };
+  } catch (err) {
+    console.warn("recordUserDwellSignal failed:", err.message);
+    return null;
+  }
+};
+
+/**
+ * Synthesize User Interest Vector with Social Graph Affinity Bleed (Collaborative Filtering)
+ * Fuses: Direct User Interests + (40% Weight of Close Friends / Frequent Chat Partners)
+ */
+export const getSynthesizedUserInterestVector = async (User, user) => {
+  if (!user) return new Map();
+
+  try {
+    const rawDirect = user.contentCategoryInterests || new Map();
+    const fusedVector = new Map(rawDirect instanceof Map ? rawDirect : Object.entries(rawDirect || {}));
+
+    // Fetch Close Friends or top following to blend collaborative graph
+    const closeFriendsIds = (user.closeFriends || []).slice(0, 5);
+    if (closeFriendsIds.length > 0) {
+      const friendProfiles = await User.find({ _id: { $in: closeFriendsIds } })
+        .select("contentCategoryInterests")
+        .lean();
+
+      for (const friend of friendProfiles) {
+        const friendMap = friend.contentCategoryInterests || {};
+        const entries = friendMap instanceof Map ? friendMap.entries() : Object.entries(friendMap);
+
+        for (const [tag, score] of entries) {
+          if (typeof score === "number" && score > 5) {
+            const currentDirectScore = fusedVector.get(tag) || 0;
+            // Bleed 35% of friend's intense interests into user vector
+            const blendedScore = currentDirectScore + (score * 0.35);
+            fusedVector.set(tag, Number(blendedScore.toFixed(2)));
+          }
+        }
+      }
+    }
+
+    return fusedVector;
+  } catch (err) {
+    console.warn("getSynthesizedUserInterestVector failed:", err.message);
+    return user.contentCategoryInterests || new Map();
+  }
+};
+

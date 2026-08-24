@@ -1,5 +1,5 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import react from "@vitejs/plugin-react-swc";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath } from "url";
 import path from "path";
@@ -24,6 +24,10 @@ export default defineConfig({
     dedupe: ["react", "react-dom", "react-router-dom", "react-redux", "@reduxjs/toolkit"],
   },
   build: {
+    target: "esnext",
+    minify: "esbuild",
+    cssMinify: "esbuild",
+    reportCompressedSize: false, // Skips synchronous gzip calculation on 70+ chunks for lightning speed
     chunkSizeWarningLimit: 1200,
     rollupOptions: {
       output: {

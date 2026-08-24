@@ -26,6 +26,8 @@ import {
   applyForVerification,
   getVerificationStatus,
   getActiveAnnouncements,
+  recordDwellAndInterest,
+  getRecommendationInsights,
 } from "../controllers/user.controller.js";
 import { updateNotificationSettings } from "../controllers/notification.controller.js";
 import { searchAll } from "../controllers/search.controller.js";
@@ -54,6 +56,8 @@ userRouter.get("/theme", isAuthenticated, getUserTheme);
 userRouter.put("/theme", isAuthenticated, updateUserTheme);
 userRouter.get("/follow-requests", isAuthenticated, getFollowRequests);
 userRouter.post("/follow-request/:action", isAuthenticated, handleFollowRequest);
+userRouter.post("/follow-request/:targetUserId", isAuthenticated, handleFollowRequest);
+userRouter.post("/follow-request/:targetUserId/:action", isAuthenticated, handleFollowRequest);
 userRouter.post("/track-tap", isAuthenticated, trackProfileTap);
 userRouter.post("/block/:targetUserId", isAuthenticated, blockUserDirect);
 userRouter.post("/unblock/:targetUserId", isAuthenticated, unblockUserDirect);
@@ -70,5 +74,9 @@ userRouter.post("/report", isAuthenticated, submitReport);
 userRouter.post("/apply-verification", isAuthenticated, upload.single("document"), applyForVerification);
 userRouter.get("/verification-status", isAuthenticated, getVerificationStatus);
 userRouter.get("/announcements", isAuthenticated, getActiveAnnouncements);
+
+// Behavioral AI & Recommendation Engine
+userRouter.post("/dwell-track", isAuthenticated, recordDwellAndInterest);
+userRouter.get("/recommendation-insights", isAuthenticated, getRecommendationInsights);
 
 export default userRouter;

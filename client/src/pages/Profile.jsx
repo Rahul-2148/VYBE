@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { snackbar } from "../lib/snackbar";
 import { MdOutlineKeyboardBackspace } from "react-icons/md";
 import { useDispatch, useSelector } from "react-redux";
@@ -17,6 +17,7 @@ import {
   Link2,
   MessageCircle,
   Play,
+  Pause,
   Plus,
   QrCode,
   ShieldAlert,
@@ -29,6 +30,7 @@ import {
   Mail,
   Phone,
   Tag,
+  Music,
 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import ProfileQRModal from "../components/ProfileQRModal";
@@ -41,6 +43,7 @@ import FollowListModal from "../components/FollowListModal";
 import AboutAccountModal from "../components/AboutAccountModal";
 import DraftsModal from "../components/DraftsModal";
 import VerifiedBadge from "../components/VerifiedBadge";
+import StoryMusicPickerModal from "../components/StoryMusicPickerModal";
 import dp from "../assets/dp3.png";
 import { setProfileData, setUserData } from "../redux/features/userSlice";
 import { setSelectedChatUser } from "../redux/features/messageSlice";
@@ -69,6 +72,7 @@ const resolveMediaUrl = (item) => {
 };
 
 const getPreviewKind = (item, kind) => {
+  if (kind === "audio" || item?.mediaType === "audio" || item?.__kind === "audio") return "audio";
   if (kind === "reel") return "reel";
   if (item?.mediaType === "video") return "video";
   if ((item?.carouselMedia?.length || item?.carousel?.length || 0) > 1) return "carousel";
@@ -110,16 +114,31 @@ const ProfileTile = ({ item, kind, onClick }) => {
         <div className="min-w-0">
           <p className="truncate text-[11px] font-semibold text-white">{item?.caption || item?.title || item?.name || "Untitled"}</p>
           <p className="mt-0.5 text-[10px] text-zinc-300">
-            {kind === "reel" ? `${viewCount} views` : `${likeCount} likes · ${commentCount} comments`}
+            {kind === "audio" || previewKind === "audio"
+              ? item?.artist || "Audio Track"
+              : kind === "reel"
+              ? `${viewCount} views`
+              : `${likeCount} likes · ${commentCount} comments`}
           </p>
         </div>
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/45 backdrop-blur border border-white/10 text-white">
-          {previewKind === "reel" ? <Play className="h-4 w-4 fill-white" /> : <ChevronRight className="h-4 w-4" />}
+          {previewKind === "audio" ? (
+            <Music className="h-4 w-4 text-rose-400" />
+          ) : previewKind === "reel" ? (
+            <Play className="h-4 w-4 fill-white" />
+          ) : (
+            <ChevronRight className="h-4 w-4" />
+          )}
         </div>
       </div>
 
       <div className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-[10px] font-bold text-white backdrop-blur border border-white/10">
-        {previewKind === "reel" ? (
+        {previewKind === "audio" ? (
+          <>
+            <Music className="h-3 w-3 text-rose-400" />
+            <span>Audio</span>
+          </>
+        ) : previewKind === "reel" ? (
           <>
             <Play className="h-3 w-3 fill-white" />
             <span>Reel</span>
@@ -241,8 +260,91 @@ const Profile = () => {
   const [loading, setLoading] = useState(true);
   const [showDpView, setShowDpView] = useState(false);
   const [showDPOptions, setShowDPOptions] = useState(false);
-  const [savedItems, setSavedItems] = useState({ posts: [], reels: [] });
+  const [savedItems, setSavedItems] = useState({ posts: [], reels: [], audios: [] });
   const [loadingSaved, setLoadingSaved] = useState(false);
+
+  // Profile Song Player State & Direct Picker Modal
+  const [isPlayingProfileSong, setIsPlayingProfileSong] = useState(false);
+  const [showMusicPicker, setShowMusicPicker] = useState(false);
+  const profileAudioRef = useRef(null);
+
+  const handleSaveProfileSong = async (track) => {
+    try {
+      const formData = new FormData();
+      formData.append("profileSong", JSON.stringify(track));
+      const res = await api.put("/user/edit-profile", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      if (res.data?.success) {
+        dispatch(setUserData(res.data));
+        dispatch(setProfileData(res.data));
+        snackbar.success("Profile music updated! 🎵");
+      }
+    } catch (e) {
+      console.warn("Could not save profile music:", e);
+      snackbar.error("Failed to update profile music");
+    } finally {
+      setShowMusicPicker(false);
+    }
+  };
+
+  const handleRemoveProfileSong = async (e) => {
+    e?.stopPropagation();
+    try {
+      if (profileAudioRef.current) {
+        profileAudioRef.current.pause();
+        setIsPlayingProfileSong(false);
+      }
+      const formData = new FormData();
+      formData.append("profileSong", "remove");
+      const res = await api.put("/user/edit-profile", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      if (res.data?.success) {
+        dispatch(setUserData(res.data));
+        dispatch(setProfileData(res.data));
+        snackbar("Profile music removed");
+      }
+    } catch {
+      snackbar.error("Failed to remove profile music");
+    }
+  };
+
+  const handleToggleProfileMusic = (audioUrl) => {
+    if (!audioUrl) {
+      snackbar.error("Audio preview not available for this song");
+      return;
+    }
+
+    if (!profileAudioRef.current || profileAudioRef.current.src !== audioUrl) {
+      if (profileAudioRef.current) {
+        profileAudioRef.current.pause();
+      }
+      const audio = new Audio(audioUrl);
+      audio.onended = () => setIsPlayingProfileSong(false);
+      audio.onerror = () => {
+        setIsPlayingProfileSong(false);
+        snackbar.error("Could not stream audio preview");
+      };
+      profileAudioRef.current = audio;
+    }
+
+    if (isPlayingProfileSong) {
+      profileAudioRef.current.pause();
+      setIsPlayingProfileSong(false);
+    } else {
+      profileAudioRef.current.play().catch(() => null);
+      setIsPlayingProfileSong(true);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (profileAudioRef.current) {
+        profileAudioRef.current.pause();
+      }
+    };
+  }, [userName]);
 
   // RTK Query with instant cache & stale-while-revalidate
   const { data: fetchedProfile, refetch: refetchProfile } = useGetUserFullProfileQuery(userName, {
@@ -300,11 +402,16 @@ const Profile = () => {
   useEffect(() => {
     let isMounted = true;
     if (isOwnProfile && postType === "saved") {
+      setLoadingSaved(true);
       api
-        .get("/post/saved")
+        .get("/user/saved-items")
         .then((res) => {
           if (isMounted && res.data?.success) {
-            setSavedItems(res.data.saved || []);
+            setSavedItems({
+              posts: res.data.savedPosts || [],
+              reels: res.data.savedReels || [],
+              audios: res.data.savedAudios || [],
+            });
           }
         })
         .catch((err) => {
@@ -357,7 +464,8 @@ const Profile = () => {
   const tabCounts = useMemo(() => {
     const savedCount =
       (savedItems.posts?.length || profileData?.user?.savedPosts?.length || userData?.user?.savedPosts?.length || 0) +
-      (savedItems.reels?.length || profileData?.user?.savedReels?.length || userData?.user?.savedReels?.length || 0);
+      (savedItems.reels?.length || profileData?.user?.savedReels?.length || userData?.user?.savedReels?.length || 0) +
+      (savedItems.audios?.length || profileData?.user?.savedAudios?.length || userData?.user?.savedAudios?.length || 0);
 
     const reelsCount = profileData?.user?.reels?.length || 0;
 
@@ -376,16 +484,20 @@ const Profile = () => {
     const reelsList = (savedItems.reels?.length > 0 ? savedItems.reels : (profileData?.user?.savedReels || []))
       .filter((l) => l && typeof l === "object" && (l._id || l.id));
 
+    const audiosList = (savedItems.audios?.length > 0 ? savedItems.audios : (profileData?.user?.savedAudios || []))
+      .filter((a) => a && typeof a === "object" && (a.id || a._id));
+
     return [
       ...postsList.map((item) => ({ ...item, __kind: "post" })),
       ...reelsList.map((item) => ({ ...item, __kind: "reel" })),
+      ...audiosList.map((item) => ({ ...item, __kind: "audio", mediaType: "audio" })),
     ];
-  }, [savedItems, profileData?.user?.savedPosts, profileData?.user?.savedReels]);
+  }, [savedItems, profileData?.user?.savedPosts, profileData?.user?.savedReels, profileData?.user?.savedAudios]);
 
   const followerList = useMemo(() => profileData?.user?.followers || [], [profileData]);
   const followingList = useMemo(() => profileData?.user?.following || [], [profileData]);
-  const followerPreview = followerList.slice(0, 6);
-  const followingPreview = followingList.slice(0, 6);
+  const followerPreview = followerList.slice(0, 3);
+  const followingPreview = followingList.slice(0, 3);
 
   const activeFeed = useMemo(() => {
     if (postType === "reels") {
@@ -408,7 +520,7 @@ const Profile = () => {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <div className="relative overflow-hidden border-b border-zinc-900/80 bg-gradient-to-b from-zinc-950 via-black to-black">
+      <div className="sticky top-0 z-40 overflow-hidden border-b border-zinc-900/90 bg-zinc-950/90 backdrop-blur-2xl shadow-xl shadow-black/40">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(225,48,108,0.16),_transparent_40%),radial-gradient(circle_at_80%_10%,_rgba(64,93,230,0.12),_transparent_25%)]" />
         <div className="relative mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <button
@@ -427,19 +539,30 @@ const Profile = () => {
 
           <div className="text-center">
             <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Profile</p>
-            <button
-              onClick={() => setShowAccountSwitcher(true)}
-              className="mt-1 flex items-center justify-center gap-1.5 text-sm font-bold text-white hover:text-rose-400 transition cursor-pointer px-3 py-1 rounded-full hover:bg-zinc-900/70 border border-transparent hover:border-zinc-800/80 active:scale-95"
-              title="Switch Account"
-            >
-              <span className="text-rose-400">@</span>
-              <span className="truncate max-w-[180px] sm:max-w-xs">{profileData?.user?.userName || userName}</span>
-              {isVerified && <VerifiedBadge size="xs" />}
-              {profileData?.user?.accountType === "private" && (
-                <Lock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-              )}
-              <ChevronDown className="w-3.5 h-3.5 text-zinc-400 shrink-0 group-hover:text-rose-400 transition-transform" />
-            </button>
+            {isOwnProfile ? (
+              <button
+                onClick={() => setShowAccountSwitcher(true)}
+                className="mt-1 flex items-center justify-center gap-1.5 text-sm font-bold text-white hover:text-rose-400 transition cursor-pointer px-3 py-1 rounded-full hover:bg-zinc-900/70 border border-transparent hover:border-zinc-800/80 active:scale-95 group"
+                title="Switch Account"
+              >
+                <span className="text-rose-400">@</span>
+                <span className="truncate max-w-[180px] sm:max-w-xs">{profileData?.user?.userName || userName}</span>
+                {isVerified && <VerifiedBadge size="xs" />}
+                {profileData?.user?.accountType === "private" && (
+                  <Lock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                )}
+                <ChevronDown className="w-3.5 h-3.5 text-zinc-400 shrink-0 group-hover:text-rose-400 transition-transform" />
+              </button>
+            ) : (
+              <div className="mt-1 flex items-center justify-center gap-1.5 text-sm font-bold text-white px-3 py-1">
+                <span className="text-rose-400">@</span>
+                <span className="truncate max-w-[180px] sm:max-w-xs">{profileData?.user?.userName || userName}</span>
+                {isVerified && <VerifiedBadge size="xs" />}
+                {profileData?.user?.accountType === "private" && (
+                  <Lock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                )}
+              </div>
+            )}
           </div>
 
           {isOwnProfile ? (
@@ -531,12 +654,108 @@ const Profile = () => {
                       ))}
                     </div>
                   )}
+
+                  {/* Instagram-style Permanent Profile Music Anthem */}
+                  {profileData?.user?.profileSong?.title ? (
+                    <div className="pt-1 flex items-center gap-2 flex-wrap">
+                      <div className="inline-flex items-center gap-2.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-3.5 py-1.5 backdrop-blur-md shadow-lg shadow-rose-500/5 group hover:border-rose-500/50 transition-all">
+                        {/* Play/Pause Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleProfileMusic(profileData.user.profileSong.audioUrl);
+                          }}
+                          className={`h-7 w-7 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                            isPlayingProfileSong
+                              ? "bg-rose-500 text-white shadow-md shadow-rose-500/30 animate-pulse"
+                              : "bg-white/10 hover:bg-rose-500 hover:text-white text-rose-300"
+                          }`}
+                          title={isPlayingProfileSong ? "Pause Music" : "Play Profile Music"}
+                        >
+                          {isPlayingProfileSong ? (
+                            <Pause className="h-3.5 w-3.5 fill-current" />
+                          ) : (
+                            <Play className="h-3.5 w-3.5 fill-current ml-0.5" />
+                          )}
+                        </button>
+
+                        {/* Song Art / Disc */}
+                        <div
+                          className="flex items-center gap-2 cursor-pointer"
+                          onClick={() => {
+                            const song = profileData.user.profileSong;
+                            navigate(`/audio/${encodeURIComponent(song.id || song.title)}`, { state: { music: song } });
+                          }}
+                        >
+                          {profileData.user.profileSong.coverUrl ? (
+                            <img
+                              src={profileData.user.profileSong.coverUrl}
+                              alt=""
+                              className={`h-6 w-6 rounded-full object-cover border border-white/20 shadow-xs ${
+                                isPlayingProfileSong ? "animate-spin" : ""
+                              }`}
+                              style={{ animationDuration: "3s" }}
+                            />
+                          ) : (
+                            <Music className="h-4 w-4 text-rose-400" />
+                          )}
+
+                          <div className="flex flex-col text-left">
+                            <span className="text-xs font-black text-white leading-tight hover:underline flex items-center gap-1.5">
+                              <span>{profileData.user.profileSong.title}</span>
+                              <span className="text-[10px] text-rose-400 font-normal">·</span>
+                              <span className="text-[11px] font-medium text-zinc-400">
+                                {profileData.user.profileSong.artist || "Original Soundtrack"}
+                              </span>
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Own Profile Quick Change/Remove Actions */}
+                        {isOwnProfile && (
+                          <div className="flex items-center gap-1 pl-1 border-l border-white/10 ml-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowMusicPicker(true);
+                              }}
+                              className="p-1 text-zinc-400 hover:text-white transition cursor-pointer"
+                              title="Change profile music"
+                            >
+                              <Music className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleRemoveProfileSong}
+                              className="p-1 text-zinc-400 hover:text-rose-400 transition cursor-pointer"
+                              title="Remove profile music"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : isOwnProfile ? (
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowMusicPicker(true)}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-zinc-700 bg-zinc-900/40 hover:bg-zinc-900 hover:border-rose-500/50 px-3.5 py-1.5 text-xs font-semibold text-zinc-300 hover:text-white transition cursor-pointer shadow-xs"
+                      >
+                        <Music className="h-3.5 w-3.5 text-rose-400" />
+                        <span>+ Add music to your profile</span>
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
               <div className="rounded-3xl border border-zinc-900 bg-black/40 p-3 sm:p-4 lg:min-w-[310px]">
                 <div className="grid grid-cols-3 gap-3">
-                  <div className="rounded-2xl bg-zinc-950/80 p-3 text-center">
+                  <div className="rounded-2xl border border-zinc-900/80 bg-zinc-950/80 p-3 text-center">
                     <div className="text-2xl font-black text-white">{tabCounts.posts}</div>
                     <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Posts</div>
                   </div>
@@ -546,7 +765,7 @@ const Profile = () => {
                       setFollowModalTab("followers");
                       setFollowModalOpen(true);
                     }}
-                    className="rounded-2xl bg-zinc-950/80 p-3 text-left transition hover:border hover:border-zinc-700 cursor-pointer group"
+                    className="rounded-2xl border border-zinc-900/80 bg-zinc-950/80 p-3 text-left transition-colors duration-150 hover:border-zinc-700 cursor-pointer group"
                     title="View Followers"
                   >
                     <div className="flex -space-x-2">
@@ -565,7 +784,7 @@ const Profile = () => {
                         </div>
                       )}
                     </div>
-                    <div className="mt-3 text-2xl font-black text-white group-hover:text-rose-400 transition">{followerList.length}</div>
+                    <div className="mt-3 text-2xl font-black text-white group-hover:text-rose-400 transition-colors">{followerList.length}</div>
                     <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Followers</div>
                   </button>
                   <button
@@ -574,7 +793,7 @@ const Profile = () => {
                       setFollowModalTab("following");
                       setFollowModalOpen(true);
                     }}
-                    className="rounded-2xl bg-zinc-950/80 p-3 text-left transition hover:border hover:border-zinc-700 cursor-pointer group"
+                    className="rounded-2xl border border-zinc-900/80 bg-zinc-950/80 p-3 text-left transition-colors duration-150 hover:border-zinc-700 cursor-pointer group"
                     title="View Following"
                   >
                     <div className="flex -space-x-2">
@@ -593,7 +812,7 @@ const Profile = () => {
                         </div>
                       )}
                     </div>
-                    <div className="mt-3 text-2xl font-black text-white group-hover:text-rose-400 transition">{followingList.length}</div>
+                    <div className="mt-3 text-2xl font-black text-white group-hover:text-rose-400 transition-colors">{followingList.length}</div>
                     <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Following</div>
                   </button>
                 </div>
@@ -780,7 +999,7 @@ const Profile = () => {
           </section>
         ) : (
           <>
-            <section className="sticky top-0 z-20 rounded-3xl border border-zinc-900 bg-black/80 px-2 py-2 backdrop-blur-xl">
+            <section className="sticky top-[68px] z-30 rounded-3xl border border-zinc-900 bg-black/90 px-2 py-2 backdrop-blur-xl shadow-lg">
               <div className="grid grid-cols-4 gap-2">
                 {PROFILE_TABS.map((tab) => {
                   const Icon = tab.icon;
@@ -836,11 +1055,13 @@ const Profile = () => {
 
                     return (
                       <ProfileTile
-                        key={item._id}
+                        key={item._id || item.id}
                         item={item}
                         kind={itemKind}
                         onClick={() => {
-                          if (itemKind === "reel") {
+                          if (itemKind === "audio") {
+                            navigate(`/audio/${encodeURIComponent(item.id || item.title)}`, { state: { music: item } });
+                          } else if (itemKind === "reel") {
                             navigate(`/reels?reelId=${item._id}`);
                           } else {
                             navigate(`/?postId=${item._id}`);
@@ -899,6 +1120,16 @@ const Profile = () => {
         isOpen={showDraftsModal}
         onClose={() => setShowDraftsModal(false)}
       />
+
+      {/* Direct Profile Music Picker Modal */}
+      {showMusicPicker && (
+        <StoryMusicPickerModal
+          open={showMusicPicker}
+          onClose={() => setShowMusicPicker(false)}
+          selectedMusic={profileData?.user?.profileSong}
+          onSelectMusic={handleSaveProfileSong}
+        />
+      )}
 
       {/* Own Profile DP Options Bottom Sheet / Drawer */}
       {showDPOptions && (

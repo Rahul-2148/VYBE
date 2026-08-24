@@ -53,6 +53,33 @@ export const AudioTrackPage = () => {
 
   const [showShare, setShowShare] = useState(false);
 
+  // Sync Saved Status with Backend
+  useEffect(() => {
+    let mounted = true;
+    api
+      .get("/music/saved")
+      .then((res) => {
+        if (mounted && res.data?.success && Array.isArray(res.data.savedAudios)) {
+          const isTrackSaved = res.data.savedAudios.some(
+            (t) => String(t.id) === String(audioId) || (t.title && t.title.toLowerCase() === audioName?.toLowerCase())
+          );
+          setIsSaved(isTrackSaved);
+          try {
+            localStorage.setItem("vybe_saved_real_music", JSON.stringify(res.data.savedAudios));
+          } catch {
+            /* ignore storage error */
+          }
+        }
+      })
+      .catch(() => {
+        /* ignore error */
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [audioId, audioName]);
+
   // 1. Fetch Real Music Info if missing cover/audioUrl
   useEffect(() => {
     const fetchMusicDetails = async () => {
@@ -145,32 +172,45 @@ export const AudioTrackPage = () => {
   }, []);
 
   // Toggle Save Track
-  const handleToggleSave = () => {
+  const handleToggleSave = async () => {
     const nextSaved = !isSaved;
     setIsSaved(nextSaved);
+
+    const trackObj = {
+      id: audioId,
+      title: audioName,
+      artist: artistName,
+      coverUrl,
+      audioUrl,
+      duration: 30,
+    };
 
     try {
       const savedList = JSON.parse(localStorage.getItem("vybe_saved_real_music") || "[]");
       let updated;
       if (nextSaved) {
-        updated = [
-          {
-            id: audioId,
-            title: audioName,
-            artist: artistName,
-            coverUrl,
-            audioUrl,
-          },
-          ...savedList.filter((t) => t.id !== audioId),
-        ];
+        updated = [trackObj, ...savedList.filter((t) => t.id !== audioId)];
         snackbar.success("Saved to your Audio Collection! 🔖");
       } else {
         updated = savedList.filter((t) => t.id !== audioId && t.title !== audioName);
         snackbar("Removed from saved audio");
       }
       localStorage.setItem("vybe_saved_real_music", JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent("vybe:saved_music_updated", { detail: { track: trackObj, isSaved: nextSaved } }));
     } catch {
       /* ignore storage serialization error */
+    }
+
+    try {
+      const res = await api.post("/music/save", trackObj);
+      if (res.data?.success && typeof res.data.isSaved === "boolean") {
+        setIsSaved(res.data.isSaved);
+        if (Array.isArray(res.data.savedAudios)) {
+          localStorage.setItem("vybe_saved_real_music", JSON.stringify(res.data.savedAudios));
+        }
+      }
+    } catch (e) {
+      console.warn("Save audio API error:", e);
     }
   };
 

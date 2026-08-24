@@ -1,4 +1,4 @@
-// server.js - nodemon reload #2
+// server.js - Vybe Enterprise Backend Server (Clean Reboot)
 import { configDotenv } from "dotenv";
 import http from "http";
 import connectDB from "./config/db.js";
@@ -26,6 +26,7 @@ const io = initializeSocket(httpServer);
 
 // Make io instance available globally
 app.locals.io = io;
+global.io = io;
 
 import { archiveExpiredStories, purgeExpiredArchivedStories } from "./services/storyArchive.service.js";
 

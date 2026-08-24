@@ -16,6 +16,7 @@ import { Message } from "../models/message.model.js";
 import mongoose from "mongoose";
 import { Notification } from "../models/notification.model.js";
 import { getSocket } from "../socket.js";
+import { recordUserDwellSignal, getSynthesizedUserInterestVector } from "../utils/aiEngine.js";
 
 // Transaction Execution helper with standalone fallback
 export const runTransactionSafe = async (operationsFn) => {
@@ -157,6 +158,7 @@ export const editProfile = async (req, res) => {
       contactPhone,
       businessAddress,
       showContactInfo,
+      profileSong, // string (JSON) or object or null
     } = req.body || {};
 
     const user = await User.findById(userId).select("-password");
@@ -279,6 +281,21 @@ export const editProfile = async (req, res) => {
       user.snoozeExpiresAt = isSnoozed ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null;
     }
 
+    if (profileSong !== undefined) {
+      if (!profileSong || profileSong === "null" || profileSong === "remove") {
+        user.profileSong = { id: "", title: "", artist: "", coverUrl: "", audioUrl: "", duration: 30 };
+      } else if (typeof profileSong === "string") {
+        try {
+          const parsedSong = JSON.parse(profileSong);
+          user.profileSong = parsedSong;
+        } catch {
+          user.profileSong = { id: "", title: "", artist: "", coverUrl: "", audioUrl: "", duration: 30 };
+        }
+      } else if (typeof profileSong === "object") {
+        user.profileSong = profileSong;
+      }
+    }
+
     const updatedUser = await user.save();
 
     return res.status(200).json({
@@ -388,12 +405,14 @@ export const getSavedItems = async (req, res) => {
 
     const validSavedPosts = (user.savedPosts || []).filter(Boolean);
     const validSavedReels = (user.savedReels || []).filter(Boolean);
+    const validSavedAudios = (user.savedAudios || []).filter(Boolean);
 
     return res.status(200).json({
       success: true,
       error: false,
       savedPosts: validSavedPosts,
       savedReels: validSavedReels,
+      savedAudios: validSavedAudios,
     });
   } catch (error) {
     return res.status(500).json({
@@ -482,7 +501,7 @@ export const follow = async (req, res) => {
               recipient: targetUserId,
               sender: currentUserId,
               type: "follow_request",
-            }).catch(() => null);
+            }).catch((e) => console.warn("follow_request notification warning:", e.message));
           }
         } else {
           // Direct follow for public accounts
@@ -500,7 +519,7 @@ export const follow = async (req, res) => {
             recipient: targetUserId,
             sender: currentUserId,
             type: "follow",
-          }).catch(() => null);
+          }).catch((e) => console.warn("follow notification warning:", e.message));
         }
       }
     });
@@ -817,8 +836,20 @@ export const getFollowRequests = async (req, res) => {
 // Accept or decline a follow request
 export const handleFollowRequest = async (req, res) => {
   try {
-    const { senderId } = req.body;
-    const { action } = req.params; // 'accept' or 'decline'
+    const rawAction = req.params.action || req.body.action || "accept";
+    const rawSenderId = req.body.senderId || req.body.targetUserId || req.params.targetUserId;
+
+    const isActionKeyword = ["accept", "decline", "reject", "cancel"].includes(rawAction);
+    const action = isActionKeyword
+      ? rawAction
+      : ["accept", "decline", "reject", "cancel"].includes(req.body.action)
+      ? req.body.action
+      : "accept";
+
+    // If rawAction is actually a Mongo ObjectId and not an action keyword, treat it as the target/sender ID
+    const senderId = (rawSenderId && !["accept", "decline", "reject", "cancel"].includes(rawSenderId.toString()))
+      ? rawSenderId
+      : (!isActionKeyword && rawAction ? rawAction : req.params.targetUserId || req.body.senderId);
 
     if (!senderId) {
       return res.status(400).json({ message: "Sender ID is required!" });
@@ -851,7 +882,7 @@ export const handleFollowRequest = async (req, res) => {
           recipient: senderId,
           sender: req.userId,
           type: "follow_accept",
-        }).catch(() => null);
+        }).catch((e) => console.warn("follow_accept notification warning:", e.message));
 
         await Notification.deleteMany({
           recipient: req.userId,
@@ -883,14 +914,15 @@ export const handleFollowRequest = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: action === "accept" ? "Follow request accepted" : "Follow request declined",
-      requests: populatedUser.followRequests || [],
-      followersCount: populatedUser.followers.length,
-      followingCount: populatedUser.following.length,
+      requests: populatedUser?.followRequests || [],
+      followersCount: populatedUser?.followers?.length || 0,
+      followingCount: populatedUser?.following?.length || 0,
     });
   } catch (error) {
     return res.status(500).json({ message: `handleFollowRequest error: ${error.message}` });
   }
 };
+
 
 // Direct User-level Block
 export const blockUserDirect = async (req, res) => {
@@ -1372,3 +1404,51 @@ export const getActiveAnnouncements = async (req, res) => {
     return res.status(500).json({ success: false, message: `getActiveAnnouncements error: ${error.message}` });
   }
 };
+
+// 35. Real-Time Dwell Time & Micro-Behavioral Intent Tracker
+export const recordDwellAndInterest = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { entityType, entityId, text, hashtags, location, category, dwellMs } = req.body;
+
+    if (!userId || !dwellMs) {
+      return res.status(200).json({ success: true, recorded: false });
+    }
+
+    // Record behavioral intent in background without delaying HTTP response
+    recordUserDwellSignal(User, userId, {
+      text: text || "",
+      hashtags: hashtags || [],
+      location: location || "",
+      category: category || "",
+      dwellMs: Number(dwellMs) || 0,
+    }).catch(() => null);
+
+    return res.status(200).json({ success: true, recorded: true });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: `recordDwellAndInterest error: ${error.message}` });
+  }
+};
+
+// 36. Get Synthesized Recommendation Insights & Interest Vectors
+export const getRecommendationInsights = async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    const synthesizedMap = await getSynthesizedUserInterestVector(User, user);
+    const interestsArray = Array.from(synthesizedMap.entries())
+      .map(([topic, score]) => ({ topic, score }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 15);
+
+    return res.status(200).json({
+      success: true,
+      topInterests: interestsArray,
+      hasSocialGraphBleed: (user.closeFriends || []).length > 0,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: `getRecommendationInsights error: ${error.message}` });
+  }
+};
+

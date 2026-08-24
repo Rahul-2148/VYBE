@@ -19,25 +19,56 @@ import { formatCallDuration } from "../../lib/webrtcCore";
 import { filterStyleMap } from "../../constants/callFilters";
 import { triggerHaptic } from "../../lib/interactiveEffects";
 
-const VideoPlayer = React.memo(({ stream, muted = false, className = "", style = {}, mirror = false }) => {
+const VideoPlayer = React.memo(({ stream, muted = true, className = "", style = {}, mirror = false }) => {
   const videoRef = useRef(null);
 
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
+    el.muted = Boolean(muted);
+    el.defaultMuted = Boolean(muted);
+    el.setAttribute("playsinline", "true");
+    el.setAttribute("webkit-playsinline", "true");
+
     if (el.srcObject !== (stream || null)) {
       el.srcObject = stream || null;
-      if (stream) {
-        el.play().catch(() => {});
-      }
     }
-  }, [stream]);
+
+    if (stream) {
+      const playVideo = () => {
+        const p = el.play();
+        if (p !== undefined) {
+          p.catch((err) => {
+            console.warn("[VideoPlayer WebRTC] Autoplay deferred by browser policy:", err?.message);
+          });
+        }
+      };
+
+      playVideo();
+      el.onloadedmetadata = playVideo;
+      el.oncanplay = playVideo;
+
+      const unlock = () => {
+        if (el && el.paused) {
+          playVideo();
+        }
+      };
+      window.addEventListener("touchstart", unlock, { passive: true, once: true });
+      window.addEventListener("click", unlock, { passive: true, once: true });
+
+      return () => {
+        window.removeEventListener("touchstart", unlock);
+        window.removeEventListener("click", unlock);
+      };
+    }
+  }, [stream, muted]);
 
   return (
     <video
       ref={videoRef}
       autoPlay
       playsInline
+      webkit-playsinline="true"
       muted={muted}
       style={style}
       className={`${className} ${mirror ? "-scale-x-100" : ""}`}
@@ -209,7 +240,7 @@ export const VybeVideoCallView = ({
             <div className="absolute bottom-24 right-4 flex items-center gap-2 z-30 pointer-events-auto">
               {!isVideoOff && localStream && (
                 <div className="w-20 h-28 sm:w-24 sm:h-32 rounded-xl overflow-hidden border-2 border-white/30 bg-zinc-900 shadow-xl relative">
-                  <VideoPlayer stream={localStream} mirror={true} className="w-full h-full object-cover" />
+                  <VideoPlayer stream={localStream} muted={true} mirror={true} className="w-full h-full object-cover" />
                   <span className="absolute bottom-1 left-1 bg-black/60 px-1 py-0.2 rounded text-[9px] font-bold text-white">
                     You
                   </span>
@@ -217,7 +248,7 @@ export const VybeVideoCallView = ({
               )}
               {screenSharingPeer && primaryPeer?.stream && !primaryPeer?.videoOff && (
                 <div className="w-20 h-28 sm:w-24 sm:h-32 rounded-xl overflow-hidden border-2 border-white/30 bg-zinc-900 shadow-xl relative">
-                  <VideoPlayer stream={primaryPeer.stream} className="w-full h-full object-cover" />
+                  <VideoPlayer stream={primaryPeer.stream} muted={false} className="w-full h-full object-cover" />
                   <span className="absolute bottom-1 left-1 bg-black/60 px-1 py-0.2 rounded text-[9px] font-bold text-white">
                     @{primaryPeer.userName || "User"}
                   </span>
@@ -229,19 +260,32 @@ export const VybeVideoCallView = ({
           /* B. 1-TO-1 VIDEO CALL (Fullscreen Remote + Draggable Local PiP) */
           <div className="relative w-full h-full bg-black">
             {/* Fullscreen Remote Video */}
-            {primaryPeer?.stream && !primaryPeer?.videoOff ? (
-              <VideoPlayer
-                stream={isLocalSwapped ? localStream : primaryPeer.stream}
-                mirror={isLocalSwapped}
-                style={{ filter: isLocalSwapped ? filterStyleMap[videoFilter || "none"] || "none" : undefined }}
-                className="w-full h-full object-cover"
-              />
+            {primaryPeer?.stream ? (
+              <div className="relative w-full h-full">
+                <VideoPlayer
+                  stream={isLocalSwapped ? localStream : primaryPeer.stream}
+                  muted={true}
+                  mirror={isLocalSwapped}
+                  style={{ filter: isLocalSwapped ? filterStyleMap[videoFilter || "none"] || "none" : undefined }}
+                  className="w-full h-full object-cover"
+                />
+                {primaryPeer.videoOff && !isLocalSwapped && (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-black/85 backdrop-blur-sm">
+                    <div className="w-28 h-28 rounded-full overflow-hidden border-4 border-white/20 shadow-2xl">
+                      <img src={userAvatar} alt="" className="w-full h-full object-cover" />
+                    </div>
+                    <p className="text-sm font-bold text-white">@{userName}'s camera is off</p>
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="w-full h-full flex flex-col items-center justify-center gap-4 bg-gradient-to-b from-zinc-900 to-black">
                 <div className="w-28 h-28 rounded-full overflow-hidden border-4 border-white/20 shadow-2xl">
                   <img src={userAvatar} alt="" className="w-full h-full object-cover" />
                 </div>
-                <p className="text-sm font-bold text-white">@{userName}'s camera is off</p>
+                <p className="text-sm font-bold text-white">
+                  {isConnected ? `@${userName}'s camera is off` : "Connecting..."}
+                </p>
               </div>
             )}
 
@@ -263,6 +307,7 @@ export const VybeVideoCallView = ({
               >
                 <VideoPlayer
                   stream={isLocalSwapped ? primaryPeer?.stream : localStream}
+                  muted={!isLocalSwapped}
                   mirror={!isLocalSwapped}
                   style={{ filter: !isLocalSwapped ? filterStyleMap[videoFilter || "none"] || "none" : undefined }}
                   className="w-full h-full object-cover"
@@ -305,6 +350,7 @@ export const VybeVideoCallView = ({
               {!isVideoOff && localStream ? (
                 <VideoPlayer
                   stream={localStream}
+                  muted={true}
                   mirror={true}
                   style={{ filter: filterStyleMap[videoFilter || "none"] || "none" }}
                   className="w-full h-full object-cover"
@@ -334,7 +380,7 @@ export const VybeVideoCallView = ({
                   }`}
                 >
                   {!peer.videoOff && peer.stream ? (
-                    <VideoPlayer stream={peer.stream} className="w-full h-full object-cover" />
+                    <VideoPlayer stream={peer.stream} muted={false} className="w-full h-full object-cover" />
                   ) : (
                     <div className="flex flex-col items-center gap-2">
                       <img
@@ -359,10 +405,12 @@ export const VybeVideoCallView = ({
             {!isVideoOff && localStream ? (
               <VideoPlayer
                 stream={localStream}
+                muted={true}
                 mirror={true}
                 className="w-full h-full object-cover brightness-50 blur-sm"
               />
             ) : null}
+
 
             <div className="absolute z-20 flex flex-col items-center gap-4 text-center p-6">
               <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-white/30 shadow-2xl">

@@ -4,6 +4,7 @@ import { getSocket } from "../lib/socket";
 import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 import { playJoinSound, playLeaveSound, playHandRaiseSound } from "../lib/sounds";
+import { ULTRA_AUDIO_CONSTRAINTS, tuneOpusSdp, unlockAudioContext } from "../lib/webrtcCore";
 
 /**
  * useWebRTC - Industry-Grade Multi-Track WebRTC Hook for VYBE
@@ -11,21 +12,13 @@ import { playJoinSound, playLeaveSound, playHandRaiseSound } from "../lib/sounds
  * Core Capabilities:
  * 1. Independent Simultaneous Camera + Screen Sharing (Multi-track)
  * 2. High-Definition Screen Capture (contentHint: "detail", 1080p/1440p 30-60fps)
- * 3. Studio Audio with Echo Cancellation & Noise Suppression
- * 4. Separate Screen Audio & Microphone Audio Channels
+ * 3. Studio Voice with Hardware Acoustic Echo Cancellation & Noise Suppression
+ * 4. Opus SDP Tuning (Inband FEC + DTX for zero packet loss & ultra-low latency)
  * 5. Native Browser "Stop Sharing" Listener (screenTrack.onended)
  * 6. Glare-Proof Perfect Negotiation (Offer/Answer/Rollback State Machine)
  * 7. ICE Candidate Queueing & Resilient ICE Restart Recovery
  * 8. Clean Resource Teardown (Zero Memory Leaks)
  */
-// Studio Audio Constraints (Noise Suppression + Echo Cancellation)
-const NOISE_CANCELLATION_AUDIO_CONFIG = {
-  echoCancellation: { ideal: true },
-  noiseSuppression: { ideal: true },
-  autoGainControl: { ideal: true },
-  channelCount: { ideal: 2 },
-  sampleRate: { ideal: 48000 },
-};
 
 // High-Definition Screen Share Video Constraints
 const SCREEN_SHARE_VIDEO_CONSTRAINTS = {
@@ -36,7 +29,7 @@ const SCREEN_SHARE_VIDEO_CONSTRAINTS = {
   displaySurface: "monitor",
 };
 
-export const useWebRTC = (room, currentUserId, type = "video") => {
+export const useWebRTC = (room, currentUserId, type = "video", initialOptions = {}) => {
   const { userData } = useSelector((s) => s.user || {});
   const rawUserName = userData?.user?.userName || userData?.userName || "";
   const rawName = userData?.user?.name || userData?.name || "";
@@ -59,16 +52,16 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
   const [audioInputDevices, setAudioInputDevices] = useState([]);
   const [videoDevices, setVideoDevices] = useState([]);
   const [audioOutputDevices, setAudioOutputDevices] = useState([]);
-  const [selectedAudioInput, setSelectedAudioInput] = useState("");
-  const [selectedVideo, setSelectedVideo] = useState("");
+  const [selectedAudioInput, setSelectedAudioInput] = useState(initialOptions.selectedAudioInput || "");
+  const [selectedVideo, setSelectedVideo] = useState(initialOptions.selectedVideo || "");
   const [selectedAudioOutput, setSelectedAudioOutput] = useState("");
 
-  const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOff, setIsVideoOff] = useState(isAudioOnly);
+  const [isMuted, setIsMuted] = useState(Boolean(initialOptions.isMuted));
+  const [isVideoOff, setIsVideoOff] = useState(Boolean(initialOptions.isVideoOff || isAudioOnly));
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isHandRaised, setIsHandRaised] = useState(false);
   const [handRaisedAt, setHandRaisedAt] = useState(null);
-  const [videoFilter, setVideoFilter] = useState("none");
+  const [videoFilter, setVideoFilter] = useState(initialOptions.videoFilter || "none");
   const [activeSpeaker, setActiveSpeaker] = useState(null);
   const [isMediaReady, setIsMediaReady] = useState(false);
   const [connectionQuality, setConnectionQuality] = useState("good"); // "good", "reconnecting", "poor"
@@ -90,6 +83,10 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
   const iceServersRef = useRef([
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+    { urls: "stun:stun4.l.google.com:19302" },
+    { urls: "stun:stun.cloudflare.com:3478" },
   ]);
 
   const makingOfferRef = useRef({});
@@ -104,7 +101,7 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
     const fetchTurn = async () => {
       try {
         const res = await api.get("/call/turn-credentials");
-        if (!cancelled && res.data?.success && res.data.iceServers) {
+        if (!cancelled && res.data?.success && Array.isArray(res.data.iceServers) && res.data.iceServers.length > 0) {
           iceServersRef.current = res.data.iceServers;
         }
       } catch (err) {
@@ -147,11 +144,13 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
       if (!AudioContextClass) return;
 
       const ctx = new AudioContextClass();
+      unlockAudioContext(ctx);
       audioContextRef.current = ctx;
 
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.4;
       source.connect(analyser);
       analyserRef.current = analyser;
 
@@ -179,12 +178,16 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
 
     const acquireMedia = async () => {
       let stream;
+      const audioConstraint = selectedAudioInput || initialOptions.selectedAudioInput
+        ? { deviceId: { exact: selectedAudioInput || initialOptions.selectedAudioInput }, ...ULTRA_AUDIO_CONSTRAINTS }
+        : ULTRA_AUDIO_CONSTRAINTS;
+      const videoDeviceId = selectedVideo || initialOptions.selectedVideo;
 
       try {
         if (isAudioOnly) {
           try {
             stream = await navigator.mediaDevices.getUserMedia({
-              audio: NOISE_CANCELLATION_AUDIO_CONFIG,
+              audio: audioConstraint,
               video: false,
             });
           } catch {
@@ -194,22 +197,24 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
           // Tier 1: HD Video + Studio Noise-Cancelled Audio
           try {
             stream = await navigator.mediaDevices.getUserMedia({
-              audio: NOISE_CANCELLATION_AUDIO_CONFIG,
-              video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+              audio: audioConstraint,
+              video: videoDeviceId
+                ? { deviceId: { exact: videoDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }
+                : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
             });
           } catch (e1) {
             console.warn("[WebRTC] HD tier failed, falling back to basic video...", e1.message);
             // Tier 2: Basic Video
             try {
               stream = await navigator.mediaDevices.getUserMedia({
-                audio: NOISE_CANCELLATION_AUDIO_CONFIG,
-                video: true,
+                audio: audioConstraint,
+                video: videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true,
               });
             } catch (e2) {
               console.warn("[WebRTC] Video capture failed, audio-only fallback...", e2.message);
               // Tier 3: Audio Only Fallback
               stream = await navigator.mediaDevices.getUserMedia({
-                audio: NOISE_CANCELLATION_AUDIO_CONFIG,
+                audio: audioConstraint,
                 video: false,
               });
               setIsVideoOff(true);
@@ -223,6 +228,12 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
         }
 
         if (stream) {
+          if (initialOptions.isMuted) {
+            stream.getAudioTracks().forEach((t) => (t.enabled = false));
+          }
+          if (initialOptions.isVideoOff) {
+            stream.getVideoTracks().forEach((t) => (t.enabled = false));
+          }
           localStreamRef.current = stream;
           setLocalStream(stream);
           setupAudioAnalysis(stream);
@@ -242,7 +253,7 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
     return () => {
       cancelled = true;
     };
-  }, [setupAudioAnalysis, enumerateDevices, isAudioOnly]);
+  }, [setupAudioAnalysis, enumerateDevices, isAudioOnly, initialOptions.isMuted, initialOptions.isVideoOff, initialOptions.selectedAudioInput, initialOptions.selectedVideo]);
 
   // ========== Create Multi-Track Peer Connection ==========
   const createPeerConnection = useCallback((remoteSocketId, remoteUserId, metadata = {}) => {
@@ -266,7 +277,12 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
     }
 
     console.log(`[WebRTC] Initializing PeerConnection -> ${remoteSocketId} (${remoteUserId || "peer"})`, metadata);
-    const pc = new RTCPeerConnection({ iceServers: iceServersRef.current });
+    const pc = new RTCPeerConnection({
+      iceServers: iceServersRef.current,
+      iceCandidatePoolSize: 10,
+      bundlePolicy: "max-bundle",
+      rtcpMuxPolicy: "require",
+    });
     peerConnections.current[remoteSocketId] = pc;
 
     // 1. Add Microphone Audio track
@@ -342,9 +358,15 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
 
     // Remote Track Receiver (Handles both Camera Stream AND Screen Stream)
     pc.ontrack = (event) => {
-      const stream = event.streams[0];
       const track = event.track;
-      if (!stream) return;
+      if (!track) return;
+      track.enabled = true;
+      track.onunmute = () => {
+        track.enabled = true;
+      };
+
+      // Ensure stream is never null/dropped even if event.streams is empty
+      const stream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([track]);
 
       console.log(`[WebRTC] Received remote track (${track.kind}) in stream ${stream.id} from ${remoteSocketId}`);
 
@@ -353,9 +375,6 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
         const mainStream = existing.stream;
 
         // Determine if stream is screen share or camera:
-        // A stream is screen share if:
-        // 1. Peer is marked as screenSharing and this matches screenStreamId (or screenStream isn't set yet)
-        // 2. Or main camera stream already exists and this is a distinct video stream
         const isScreenStream =
           (existing.screenSharing && (existing.screenStreamId === stream.id || !existing.screenStream)) ||
           (mainStream && stream.id !== mainStream.id && track.kind === "video");
@@ -384,6 +403,22 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
             },
           };
         } else {
+          // Merge track into existing main stream if available
+          let targetStream = mainStream;
+          if (targetStream && targetStream.id === stream.id) {
+            if (!targetStream.getTracks().some((t) => t.id === track.id)) {
+              targetStream.addTrack(track);
+            }
+          } else if (!targetStream) {
+            targetStream = stream;
+          } else {
+            // New stream arrived from peer
+            targetStream = stream;
+          }
+
+          // Ensure all tracks in stream are active
+          targetStream.getTracks().forEach((t) => (t.enabled = true));
+
           return {
             ...prev,
             [remoteSocketId]: {
@@ -392,9 +427,8 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
               userName: resolvedUserName,
               name: resolvedName,
               profilePicture: resolvedProfilePicture,
-              stream: stream,
-              // If screen sharing was already active and no screen stream was assigned, propagate
-              screenStream: existing.screenSharing && !existing.screenStream ? stream : existing.screenStream,
+              stream: targetStream,
+              screenStream: existing.screenSharing && !existing.screenStream ? targetStream : existing.screenStream,
             },
           };
         }
@@ -418,11 +452,13 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
       }
     };
 
-    // Perfect Negotiation Glare Resolution (onnegotiationneeded)
+    // Perfect Negotiation Glare Resolution with Opus SDP Tuning
     pc.onnegotiationneeded = async () => {
       try {
         makingOfferRef.current[remoteSocketId] = true;
-        await pc.setLocalDescription();
+        const offer = await pc.createOffer();
+        const tunedSdp = tuneOpusSdp(offer.sdp);
+        await pc.setLocalDescription({ type: offer.type, sdp: tunedSdp });
         socketRef.current?.emit("call:signal", {
           toSocketId: remoteSocketId,
           fromUserId: currentUserId,
@@ -470,11 +506,14 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
     socketRef.current = socket;
     cleanedUpRef.current = false;
 
+    const myResolvedId = (currentUserId || userData?.user?._id || userData?._id)?.toString();
+
     // Room members discovery
     const handleRoomMembers = ({ members }) => {
       console.log(`[WebRTC] Discovered ${members.length} member(s) in room ${room}`, members);
       members.forEach(({ socketId, userId, userName, name, profilePicture }) => {
-        if (socketId && socketId !== socket.id && userId?.toString() !== currentUserId?.toString()) {
+        const isSelf = (socketId && socketId === socket.id) || (userId && myResolvedId && userId.toString() === myResolvedId);
+        if (!isSelf && socketId) {
           createPeerConnection(socketId, userId, { userName, name, profilePicture });
           setPeers((prev) => ({
             ...prev,
@@ -492,7 +531,8 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
 
     // New peer joined
     const handlePeerJoined = ({ socketId, userId, userName, name, profilePicture }) => {
-      if (!socketId || socketId === socket.id || userId?.toString() === currentUserId?.toString()) return;
+      const isSelf = (socketId && socketId === socket.id) || (userId && myResolvedId && userId.toString() === myResolvedId);
+      if (isSelf || !socketId) return;
       console.log(`[WebRTC] New peer joined: ${socketId} (user: ${userId}, @${userName})`);
       createPeerConnection(socketId, userId, { userName, name, profilePicture });
       setPeers((prev) => ({
@@ -508,9 +548,10 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
       playJoinSound();
     };
 
-    // Signal received (Offer / Answer / ICE Candidate)
+    // Signal received (Offer / Answer / ICE Candidate) with Opus SDP Tuning
     const handleSignalReceived = async ({ fromSocketId, fromUserId, fromMetadata, signal }) => {
-      if (!fromSocketId || fromSocketId === socket.id || fromUserId?.toString() === currentUserId?.toString()) return;
+      const isSelf = (fromSocketId && fromSocketId === socket.id) || (fromUserId && myResolvedId && fromUserId.toString() === myResolvedId);
+      if (isSelf || !fromSocketId || !signal) return;
       let pc = peerConnections.current[fromSocketId];
       if (!pc) {
         pc = createPeerConnection(fromSocketId, fromUserId, fromMetadata || {});
@@ -546,7 +587,9 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
             return;
           }
 
-          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          const rawSdpStr = typeof sdp === "string" ? sdp : sdp.sdp;
+          const tunedRemoteOffer = tuneOpusSdp(rawSdpStr);
+          await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: tunedRemoteOffer }));
 
           // Process queued ICE candidates
           if (queuedCandidatesRef.current[fromSocketId]) {
@@ -561,7 +604,9 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
           }
 
           const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
+          const tunedAnswerSdp = tuneOpusSdp(answer.sdp);
+          await pc.setLocalDescription({ type: answer.type, sdp: tunedAnswerSdp });
+
           socket.emit("call:signal", {
             toSocketId: fromSocketId,
             fromUserId: currentUserId,
@@ -576,7 +621,10 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
         } else if (signal.type === "answer") {
           const sdp = signal.sdp || signal;
           if (pc.signalingState === "have-local-offer") {
-            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+            const rawSdpStr = typeof sdp === "string" ? sdp : sdp.sdp;
+            const tunedRemoteAnswer = tuneOpusSdp(rawSdpStr);
+            await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: tunedRemoteAnswer }));
+
             // Process queued ICE candidates
             if (queuedCandidatesRef.current[fromSocketId]) {
               for (const cand of queuedCandidatesRef.current[fromSocketId]) {
@@ -760,7 +808,18 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
       userName: rawUserName,
       name: rawName,
       profilePicture: myProfileAvatar,
+      isMuted: Boolean(initialOptions.isMuted),
+      videoOff: Boolean(initialOptions.isVideoOff || isAudioOnly),
+      videoFilter: initialOptions.videoFilter || "none",
     });
+
+    if (initialOptions.isMuted) {
+      socket.emit("call:action", { room, action: "mute", value: true });
+    }
+    if (initialOptions.isVideoOff || isAudioOnly) {
+      socket.emit("call:action", { room, action: "video", value: true });
+    }
+
     hasJoinedRoomRef.current = true;
 
     return () => {
@@ -808,7 +867,7 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
       setIsScreenSharing(false);
       setIsMediaReady(false);
     };
-  }, [isMediaReady, room, createPeerConnection, currentUserId, myProfileAvatar, rawName, rawUserName]);
+  }, [isMediaReady, room, createPeerConnection, currentUserId, myProfileAvatar, rawName, rawUserName, initialOptions.isMuted, initialOptions.isVideoOff, initialOptions.videoFilter, isAudioOnly]);
 
   // ========== Device switching ==========
   const _switchDevice = useCallback(async (audioId, videoId) => {
@@ -818,7 +877,7 @@ export const useWebRTC = (room, currentUserId, type = "video") => {
       }
 
       const constraints = {
-        audio: audioId ? { deviceId: { exact: audioId }, ...NOISE_CANCELLATION_AUDIO_CONFIG } : NOISE_CANCELLATION_AUDIO_CONFIG,
+        audio: audioId ? { deviceId: { exact: audioId }, ...ULTRA_AUDIO_CONSTRAINTS } : ULTRA_AUDIO_CONSTRAINTS,
         video: isAudioOnly ? false : videoId ? { deviceId: { exact: videoId }, width: 1280, height: 720 } : true,
       };
 

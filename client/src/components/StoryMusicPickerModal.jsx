@@ -75,7 +75,7 @@ export const StoryMusicPickerModal = ({
 
   const audioRef = useRef(null);
 
-  // Saved Tracks (Local Storage persistence)
+  // Saved Tracks (Local Storage & Database persistence)
   const [savedTracks, setSavedTracks] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("vybe_saved_real_music") || "[]");
@@ -83,6 +83,25 @@ export const StoryMusicPickerModal = ({
       return [];
     }
   });
+
+  // Sync Saved Tracks from Backend when modal opens
+  useEffect(() => {
+    if (open) {
+      api
+        .get("/music/saved")
+        .then((res) => {
+          if (res.data?.success && Array.isArray(res.data.savedAudios)) {
+            setSavedTracks(res.data.savedAudios);
+            try {
+              localStorage.setItem("vybe_saved_real_music", JSON.stringify(res.data.savedAudios));
+            } catch {
+              /* ignore */
+            }
+          }
+        })
+        .catch(() => {});
+    }
+  }, [open]);
 
   // Local Device Audio State
   const [deviceTracks, setDeviceTracks] = useState([]);
@@ -101,12 +120,12 @@ export const StoryMusicPickerModal = ({
   }, [contentContext]);
 
   // Toggle Save Track
-  const toggleSaveTrack = (track, e) => {
+  const toggleSaveTrack = async (track, e) => {
     e?.stopPropagation();
-    const exists = savedTracks.some((t) => t.id === track.id);
+    const exists = savedTracks.some((t) => String(t.id) === String(track.id) || t.title === track.title);
     let updated;
     if (exists) {
-      updated = savedTracks.filter((t) => t.id !== track.id);
+      updated = savedTracks.filter((t) => String(t.id) !== String(track.id) && t.title !== track.title);
       snackbar("Removed from Saved");
     } else {
       updated = [track, ...savedTracks];
@@ -115,8 +134,19 @@ export const StoryMusicPickerModal = ({
     setSavedTracks(updated);
     try {
       localStorage.setItem("vybe_saved_real_music", JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent("vybe:saved_music_updated", { detail: { track, isSaved: !exists } }));
     } catch {
       // LocalStorage write error fallback
+    }
+
+    try {
+      const res = await api.post("/music/save", track);
+      if (res.data?.success && Array.isArray(res.data.savedAudios)) {
+        setSavedTracks(res.data.savedAudios);
+        localStorage.setItem("vybe_saved_real_music", JSON.stringify(res.data.savedAudios));
+      }
+    } catch (err) {
+      console.warn("Save track API error:", err);
     }
   };
 
@@ -146,10 +176,18 @@ export const StoryMusicPickerModal = ({
       // 2. Saved Tab
       if (tabName === "Saved") {
         try {
+          const res = await api.get("/music/saved");
+          if (res.data?.success && Array.isArray(res.data.savedAudios)) {
+            setTracks(res.data.savedAudios);
+            setSavedTracks(res.data.savedAudios);
+            localStorage.setItem("vybe_saved_real_music", JSON.stringify(res.data.savedAudios));
+          } else {
+            const saved = JSON.parse(localStorage.getItem("vybe_saved_real_music") || "[]");
+            setTracks(saved);
+          }
+        } catch {
           const saved = JSON.parse(localStorage.getItem("vybe_saved_real_music") || "[]");
           setTracks(saved);
-        } catch {
-          setTracks([]);
         }
         setLoading(false);
         return;

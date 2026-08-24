@@ -10,7 +10,7 @@ const ensureCloudinaryAutoFormat = (url) => {
   return url.replace("/upload/", "/upload/f_auto,q_auto/");
 };
 
-export const PostCarousel = ({ mediaList = [] }) => {
+export const PostCarousel = ({ mediaList = [], postId }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
 
   if (!mediaList || mediaList.length === 0) return null;
@@ -33,7 +33,7 @@ export const PostCarousel = ({ mediaList = [] }) => {
     <div className="relative w-full aspect-square bg-bg overflow-hidden group">
       {/* Media Rendering */}
       {mediaList[currentIndex]?.type === "video" ? (
-        <VideoPlayer media={mediaList[currentIndex].url} />
+        <VideoPlayer media={mediaList[currentIndex].url} postId={postId} />
       ) : (
         <img src={ensureCloudinaryAutoFormat(mediaList[currentIndex]?.url)} alt="" loading="lazy" className="w-full h-full object-cover" />
       )}

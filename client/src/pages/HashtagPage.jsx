@@ -9,6 +9,8 @@ export const HashtagPage = () => {
   const { hashtag } = useParams();
   const navigate = useNavigate();
 
+  const cleanTag = (hashtag || "").replace(/^#/, "").trim();
+
   const [posts, setPosts] = useState([]);
   const [postCount, setPostCount] = useState(0);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -19,7 +21,7 @@ export const HashtagPage = () => {
     (async () => {
       try {
         setLoading(true);
-        const res = await api.get(`/search/tag/${hashtag}`);
+        const res = await api.get(`/search/tag/${encodeURIComponent(cleanTag)}`);
         if (!mounted) return;
         if (res.data.success) {
           setPosts(res.data.posts || []);
@@ -36,11 +38,11 @@ export const HashtagPage = () => {
     return () => {
       mounted = false;
     };
-  }, [hashtag]);
+  }, [cleanTag]);
 
   const handleToggleFollow = async () => {
     try {
-      const res = await api.post(`/search/follow-tag/${hashtag}`);
+      const res = await api.post(`/search/follow-tag/${encodeURIComponent(cleanTag)}`);
       if (res.data.success) {
         setIsFollowing(res.data.isFollowing);
         snackbar.success(res.data.message);

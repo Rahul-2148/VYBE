@@ -6,20 +6,8 @@ import { AlertOctagon, RotateCcw, Home, LogIn } from "lucide-react";
  * RouteErrorBoundary — High-end error UI for admin console route-level errors.
  */
 export const RouteErrorBoundary = () => {
-  let error = null;
-  let navigate = null;
-
-  try {
-    error = useRouteError();
-  } catch (err) {
-    console.warn("RouteErrorBoundary: useRouteError unavailable", err);
-  }
-
-  try {
-    navigate = useNavigate();
-  } catch (err) {
-    console.warn("RouteErrorBoundary: useNavigate unavailable", err);
-  }
+  const error = useRouteError();
+  const navigate = useNavigate();
 
   let status = 500;
   let title = "Command Center Error";

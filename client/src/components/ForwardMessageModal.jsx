@@ -23,9 +23,36 @@ const ForwardMessageModal = () => {
   const [suggestedUsers, setSuggestedUsers] = useState([]);
   const [selectedTargets, setSelectedTargets] = useState([]); // array of { conversationId, recipientId, name }
   const [sentTargets, setSentTargets] = useState(new Set());
+  const [globalSearchResults, setGlobalSearchResults] = useState([]);
+  const [isSearchingGlobal, setIsSearchingGlobal] = useState(false);
   const [sendingSingle, setSendingSingle] = useState(null);
   const [sendingBatch, setSendingBatch] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Debounced Universal Search in Forward Modal
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setGlobalSearchResults([]);
+      setIsSearchingGlobal(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setIsSearchingGlobal(true);
+        const res = await api.get(`/user/search?q=${encodeURIComponent(searchQuery.trim())}`);
+        if (res.data?.users) {
+          setGlobalSearchResults(res.data.users);
+        }
+      } catch (err) {
+        console.warn("Forward modal user search error:", err);
+      } finally {
+        setIsSearchingGlobal(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   useEffect(() => {
     if (!forwardModalOpen) return;
@@ -124,13 +151,36 @@ const ForwardMessageModal = () => {
   const filteredTargets = useMemo(() => {
     if (!searchQuery.trim()) return allTargets;
     const q = searchQuery.toLowerCase().trim();
-    return allTargets.filter(
+    const localMatches = allTargets.filter(
       (t) =>
         t.name?.toLowerCase().includes(q) ||
         t.userName?.toLowerCase().includes(q) ||
         t.subtext?.toLowerCase().includes(q)
     );
-  }, [allTargets, searchQuery]);
+
+    // Merge in global search users who don't already exist in local matches
+    const seenIds = new Set(localMatches.map((t) => (t.recipientId || t.id)?.toString()));
+    const extraGlobal = [];
+    globalSearchResults.forEach((u) => {
+      const uidStr = u._id?.toString();
+      if (uidStr && !seenIds.has(uidStr) && uidStr !== currentUserId?.toString()) {
+        seenIds.add(uidStr);
+        extraGlobal.push({
+          id: `global_${u._id}`,
+          conversationId: null,
+          recipientId: u._id,
+          isGroup: false,
+          name: u.name || u.userName || "User",
+          userName: u.userName || "",
+          subtext: `@${u.userName || "user"}`,
+          avatar: u.profileImage || null,
+          isVerified: u.isVerified || false,
+        });
+      }
+    });
+
+    return [...localMatches, ...extraGlobal];
+  }, [allTargets, searchQuery, globalSearchResults, currentUserId]);
 
   // Payload preparation for forwarded message
   const buildForwardPayload = (target) => {

@@ -7,6 +7,7 @@ import { useNavigate } from "react-router-dom";
 import dp from "../assets/dp3.png";
 import api from "../lib/axios";
 import { getSocket } from "../lib/socket";
+import VerifiedBadge from "./VerifiedBadge";
 
 export const ShareSheet = ({ open, onClose, entity, entityType = "post", following = [] }) => {
   const navigate = useNavigate();
@@ -15,9 +16,36 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
   const [selectedConversations, setSelectedConversations] = useState([]);
   const [userList, setUserList] = useState([]);
   const [conversations, setConversations] = useState([]);
+  const [globalSearchResults, setGlobalSearchResults] = useState([]);
+  const [isSearchingGlobal, setIsSearchingGlobal] = useState(false);
   const [customMessage, setCustomMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [sentSuccess, setSentSuccess] = useState(false);
+
+  // Debounced Global User Search
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setGlobalSearchResults([]);
+      setIsSearchingGlobal(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setIsSearchingGlobal(true);
+        const res = await api.get(`/user/search?q=${encodeURIComponent(searchQuery.trim())}`);
+        if (res.data?.users) {
+          setGlobalSearchResults(res.data.users);
+        }
+      } catch (err) {
+        console.warn("Global search in ShareSheet error:", err);
+      } finally {
+        setIsSearchingGlobal(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   useEffect(() => {
     if (!open) return;
@@ -345,9 +373,16 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
               );
             })}
 
-            {/* 1-to-1 Users */}
+            {/* 1-to-1 Users from Recent/Following */}
             {filteredUsers.map((user) => {
               const isSelected = selectedUsers.some((u) => u._id === user._id);
+              const avatar =
+                user.profileImage?.url ||
+                (typeof user.profileImage === "string" ? user.profileImage : null) ||
+                user.profilePicture?.url ||
+                (typeof user.profilePicture === "string" ? user.profilePicture : null) ||
+                dp;
+
               return (
                 <div
                   key={user._id}
@@ -356,20 +391,23 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
                     isSelected ? "bg-rose-500/15 border-rose-500/40" : "bg-surface/60 border-border/80 hover:bg-surface"
                   }`}
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <img
-                      src={user.profileImage?.url || dp}
+                      src={avatar}
                       alt=""
-                      className="w-9 h-9 rounded-full object-cover border border-border"
+                      className="w-9 h-9 rounded-full object-cover border border-border shrink-0"
                     />
-                    <div>
-                      <p className="text-xs font-bold text-text">@{user.userName}</p>
-                      <p className="text-[10px] text-text-secondary">{user.name}</p>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1">
+                        <p className="text-xs font-bold text-text truncate">@{user.userName}</p>
+                        {user.isVerified && <VerifiedBadge size="xs" />}
+                      </div>
+                      <p className="text-[10px] text-text-secondary truncate">{user.name || `@${user.userName}`}</p>
                     </div>
                   </div>
 
                   <div
-                    className={`w-5 h-5 rounded-full border flex items-center justify-center transition ${
+                    className={`w-5 h-5 rounded-full border flex items-center justify-center transition shrink-0 ${
                       isSelected ? "bg-rose-600 border-rose-500 text-text" : "border-border-strong bg-surface-hover"
                     }`}
                   >
@@ -378,6 +416,62 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
                 </div>
               );
             })}
+
+            {/* Global Search Users on VYBE */}
+            {searchQuery.trim().length > 0 && (
+              <>
+                {globalSearchResults
+                  .filter((gu) => !filteredUsers.some((fu) => fu._id === gu._id))
+                  .map((user) => {
+                    const isSelected = selectedUsers.some((u) => u._id === user._id);
+                    const avatar =
+                      user.profileImage?.url ||
+                      (typeof user.profileImage === "string" ? user.profileImage : null) ||
+                      user.profilePicture?.url ||
+                      (typeof user.profilePicture === "string" ? user.profilePicture : null) ||
+                      dp;
+
+                    return (
+                      <div
+                        key={user._id}
+                        onClick={() => toggleSelectUser(user)}
+                        className={`flex items-center justify-between p-2.5 rounded-2xl cursor-pointer transition border ${
+                          isSelected ? "bg-rose-500/15 border-rose-500/40" : "bg-surface/60 border-border/80 hover:bg-surface"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <img
+                            src={avatar}
+                            alt=""
+                            className="w-9 h-9 rounded-full object-cover border border-border shrink-0"
+                          />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1">
+                              <p className="text-xs font-bold text-text truncate">@{user.userName}</p>
+                              {user.isVerified && <VerifiedBadge size="xs" />}
+                            </div>
+                            <p className="text-[10px] text-text-secondary truncate">{user.name || `@${user.userName}`}</p>
+                          </div>
+                        </div>
+
+                        <div
+                          className={`w-5 h-5 rounded-full border flex items-center justify-center transition shrink-0 ${
+                            isSelected ? "bg-rose-600 border-rose-500 text-text" : "border-border-strong bg-surface-hover"
+                          }`}
+                        >
+                          {isSelected && <Check className="w-3 h-3" />}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </>
+            )}
+
+            {filteredGroups.length === 0 && filteredUsers.length === 0 && globalSearchResults.length === 0 && (
+              <div className="text-center py-8 text-xs text-text-muted">
+                {isSearchingGlobal ? "Searching users on VYBE..." : `No users found matching "${searchQuery}"`}
+              </div>
+            )}
           </div>
 
           {/* Optional Message Input Box */}

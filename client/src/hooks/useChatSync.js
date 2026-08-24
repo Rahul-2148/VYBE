@@ -58,7 +58,10 @@ export const useChatSync = () => {
           currentUserId,
         })
       );
-      playMessageSound();
+      const isFromMe = (message.sender?._id || message.sender)?.toString() === currentUserId?.toString();
+      if (!isFromMe) {
+        playMessageSound();
+      }
     };
 
     // 3. Mark messages seen

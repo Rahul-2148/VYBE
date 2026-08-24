@@ -5,6 +5,8 @@ import {
   markNotificationsRead,
   updateNotificationSettings,
   getUnreadNotificationCount,
+  deleteNotification,
+  clearAllNotifications,
 } from "../controllers/notification.controller.js";
 
 const notificationRouter = express.Router();
@@ -13,5 +15,7 @@ notificationRouter.get("/unread-count", isAuthenticated, getUnreadNotificationCo
 notificationRouter.get("/feed", isAuthenticated, getUserNotifications);
 notificationRouter.post("/read", isAuthenticated, markNotificationsRead);
 notificationRouter.put("/settings", isAuthenticated, updateNotificationSettings);
+notificationRouter.delete("/clear-all", isAuthenticated, clearAllNotifications);
+notificationRouter.delete("/:notificationId", isAuthenticated, deleteNotification);
 
 export default notificationRouter;

@@ -5,7 +5,7 @@ import {
   Compass, 
   Film, 
   MessageCircle, 
-  Heart, 
+  Bell, 
   PlusSquare, 
   Plus,
   User, 
@@ -33,6 +33,8 @@ import {
   setUnreadNotificationsCount,
   setUnreadMessagesCount,
 } from "../redux/features/notificationSlice";
+import { playNotificationSound, playMessageSound } from "../lib/sounds";
+import notificationService from "../lib/notificationService";
 import SearchModal from "./SearchModal";
 import VybeLiveModal from "./VybeLiveModal";
 import api from "../lib/axios";
@@ -86,12 +88,30 @@ const LeftHome = () => {
       const notif = data?.notification || data;
       if (location.pathname !== "/notifications") {
         dispatch(incrementUnreadNotifications(notif));
+        playNotificationSound();
+        const sender = notif?.sender?.userName || notif?.sender?.name || "Someone";
+        const text = notif?.message || notif?.text || "sent you a notification";
+        notificationService.showGeneralNotification({
+          title: `🔔 @${sender}`,
+          body: text,
+          icon: notif?.sender?.profileImage?.url || notif?.sender?.profilePicture,
+          link: "/notifications",
+        });
       }
     };
 
-    const handleNewMessage = () => {
+    const handleNewMessage = (data) => {
       if (!location.pathname.startsWith("/messages")) {
         dispatch(incrementUnreadMessages());
+        playMessageSound();
+        const msg = data?.message || data;
+        const sender = msg?.sender?.userName || msg?.sender?.name || "New Message";
+        notificationService.showMessageNotification({
+          senderName: sender,
+          senderAvatar: msg?.sender?.profileImage?.url || msg?.sender?.profilePicture,
+          text: msg?.content?.text || "Sent a message",
+          conversationId: msg?.conversationId,
+        });
       }
     };
 
@@ -199,7 +219,7 @@ const LeftHome = () => {
     { label: "Vybe Meet", icon: Video, path: "/meet" },
     { 
       label: "Notifications", 
-      icon: Heart, 
+      icon: Bell, 
       path: "/notifications", 
       hasDot: unreadNotificationsCount > 0 && !isNotificationsActive 
     },
@@ -252,7 +272,7 @@ const LeftHome = () => {
               title="Notifications"
               aria-label="Notifications"
             >
-              <Heart className={`w-5 h-5 transition-transform duration-200 hover:scale-110 ${
+              <Bell className={`w-5 h-5 transition-transform duration-200 hover:scale-110 ${
                 location.pathname === "/notifications" ? "fill-rose-500 text-rose-500" : ""
               }`} />
               {unreadNotificationsCount > 0 && location.pathname !== "/notifications" && (

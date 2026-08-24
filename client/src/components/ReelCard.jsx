@@ -18,7 +18,6 @@ import {
   Trash2,
   MoreVertical,
   MoreHorizontal,
-  Subtitles,
   Smartphone,
   Loader2,
   MapPin,
@@ -137,10 +136,13 @@ export const ReelCard = ({
   const [showComments, setShowComments] = useState(false);
   const [showCollectionsModal, setShowCollectionsModal] = useState(false);
   const [showShare, setShowShare] = useState(false);
+  const [showReshareModal, setShowReshareModal] = useState(false);
+  const [showRemixModal, setShowRemixModal] = useState(false);
   const [showViewers, setShowViewers] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
-  const [showRemixModal, setShowRemixModal] = useState(false);
-  const [showReshareModal, setShowReshareModal] = useState(false);
+  const [showAIModal, setShowAIModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const dwellStartRef = useRef(null);
   const [showAIInfoModal, setShowAIInfoModal] = useState(false);
   const [showLikersModal, setShowLikersModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -152,6 +154,22 @@ export const ReelCard = ({
   const [isHovered, setIsHovered] = useState(false);
   const [showCenterPlayIcon, setShowCenterPlayIcon] = useState(false);
   const [isCaptionExpanded, setIsCaptionExpanded] = useState(false);
+
+  const toggleCaptions = async () => {
+    const next = !showCaptions;
+    setShowCaptions(next);
+    triggerHaptic("light");
+    if (next && reelCaptions.length === 0 && currentItem?._id) {
+      try {
+        const res = await api.get(`/reel/transcript/${currentItem._id}`);
+        if (res.data?.success && res.data.captions) {
+          setReelCaptions(res.data.captions);
+        }
+      } catch {
+        // fallback
+      }
+    }
+  };
   const playFadeTimeoutRef = useRef(null);
   const seekBarRef = useRef(null);
   const viewersRef = useRef(null);
@@ -329,6 +347,11 @@ export const ReelCard = ({
   }, [currentItem]);
 
   const handlePlay = () => {
+    if (!isActive) {
+      if (videoRef.current) videoRef.current.pause();
+      if (audioRef.current) audioRef.current.pause();
+      return;
+    }
     setIsPlaying(true);
     if (audioRef.current && attachedAudioUrl) {
       audioRef.current.currentTime = videoRef.current?.currentTime || 0;
@@ -496,43 +519,90 @@ export const ReelCard = ({
     setTimeout(() => setShowVolumeAnim(false), 650);
   }, []);
 
-  // Video Playing / Muting / Audio attachment Effects
+  // Video Playing / Muting / Audio attachment Effects & Behavioral Dwell Tracking
   useEffect(() => {
+    let isCancelled = false;
+
     if (isActive) {
+      dwellStartRef.current = Date.now();
       endedTriggeredRef.current = false;
-      const playPromise = videoRef.current?.play();
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            setIsPlaying(true);
-            incrementView();
-          })
-          .catch(() => {
-            setIsPlaying(false);
-          });
+      if (videoRef.current) {
+        videoRef.current.muted = isMuted;
+        const playPromise = videoRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              if (!isCancelled) {
+                setIsPlaying(true);
+                incrementView();
+              }
+            })
+            .catch(() => {
+              if (!isCancelled) {
+                setIsPlaying(false);
+              }
+            });
+        }
       }
 
       if (attachedAudioUrl && audioRef.current) {
+        audioRef.current.muted = isMuted;
         audioRef.current.currentTime = videoRef.current?.currentTime || 0;
         audioRef.current.play().catch(() => null);
       }
     } else {
       if (videoRef.current) {
         videoRef.current.pause();
-        videoRef.current.currentTime = 0;
       }
       if (audioRef.current) {
         audioRef.current.pause();
-        audioRef.current.currentTime = 0;
       }
-      const timer = setTimeout(() => {
-        setIsPlaying(false);
-        setIsFastForwarding(false);
-        setIs2XLocked(false);
-      }, 0);
-      return () => clearTimeout(timer);
+      setIsPlaying(false);
+      setIsFastForwarding(false);
+      setIs2XLocked(false);
+
+      if (dwellStartRef.current && currentItem?._id) {
+        const dwellMs = Date.now() - dwellStartRef.current;
+        dwellStartRef.current = null;
+        if (dwellMs >= 1500) {
+          api.post("/user/dwell-track", {
+            entityType: "reel",
+            entityId: currentItem._id,
+            text: currentItem.caption || "",
+            hashtags: currentItem.hashtags || [],
+            location: currentItem.location || "",
+            category: currentItem.category || "",
+            dwellMs,
+          }).catch(() => null);
+        }
+      }
     }
-  }, [isActive, attachedAudioUrl, currentItem?._id, incrementView]);
+
+    return () => {
+      isCancelled = true;
+      if (videoRef.current) {
+        videoRef.current.pause();
+      }
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      if (dwellStartRef.current && currentItem?._id) {
+        const dwellMs = Date.now() - dwellStartRef.current;
+        dwellStartRef.current = null;
+        if (dwellMs >= 1500) {
+          api.post("/user/dwell-track", {
+            entityType: "reel",
+            entityId: currentItem._id,
+            text: currentItem.caption || "",
+            hashtags: currentItem.hashtags || [],
+            location: currentItem.location || "",
+            category: currentItem.category || "",
+            dwellMs,
+          }).catch(() => null);
+        }
+      }
+    };
+  }, [isActive, isMuted, attachedAudioUrl, currentItem?._id, currentItem?.caption, currentItem?.hashtags, currentItem?.location, currentItem?.category, incrementView]);
 
   useEffect(() => {
     if (currentItem && userData?.user) {
@@ -767,7 +837,31 @@ export const ReelCard = ({
             setSyncedSubtitle({ text: "", words: [], activeIndex: -1, hasContent: false });
           }
         }
-        // 4. No speech / transcript available
+        // 4. Fallback to Reel Caption text if available
+        else if (currentItem?.caption && currentItem.caption.trim()) {
+          const rawCaption = currentItem.caption.replace(/#\w+/g, "").trim();
+          const words = rawCaption.split(/\s+/).filter(Boolean);
+          if (words.length > 0) {
+            const totalDuration = video.duration || 15;
+            const progressFrac = Math.min(1, Math.max(0, video.currentTime / totalDuration));
+            const chunkSize = 4;
+            const totalChunks = Math.ceil(words.length / chunkSize);
+            const currentChunkIdx = Math.min(totalChunks - 1, Math.floor(progressFrac * totalChunks));
+            const chunkWords = words.slice(currentChunkIdx * chunkSize, (currentChunkIdx + 1) * chunkSize);
+            const chunkFrac = (progressFrac * totalChunks) - currentChunkIdx;
+            const activeWordIdx = Math.min(chunkWords.length - 1, Math.floor(chunkFrac * chunkWords.length));
+
+            setSyncedSubtitle({
+              text: chunkWords.join(" "),
+              words: chunkWords,
+              activeIndex: activeWordIdx,
+              hasContent: true,
+            });
+          } else {
+            setSyncedSubtitle({ text: "", words: [], activeIndex: -1, hasContent: false });
+          }
+        }
+        // 5. No speech / transcript available
         else {
           setSyncedSubtitle({ text: "", words: [], activeIndex: -1, hasContent: false });
         }
@@ -1305,7 +1399,7 @@ export const ReelCard = ({
           onPlay={handlePlay}
           onPause={handlePause}
           ref={videoRef}
-          autoPlay
+          preload={isActive ? "auto" : "metadata"}
           muted={isMuted}
           onEnded={(e) => {
             if (autoScroll && onNext) {
@@ -1315,7 +1409,9 @@ export const ReelCard = ({
               }
             } else {
               e.target.currentTime = 0;
-              e.target.play().catch(() => null);
+              if (isActive) {
+                e.target.play().catch(() => null);
+              }
             }
           }}
           playsInline
@@ -1341,33 +1437,46 @@ export const ReelCard = ({
         <audio
           ref={audioRef}
           src={attachedAudioUrl}
+          preload={isActive ? "auto" : "none"}
           muted={isMuted}
           loop
           playsInline
         />
       )}
 
-      {/* YOUTUBE SHORTS STYLE REAL-TIME SUBTITLES */}
-      {showCaptions && !isAnyModalOpen && syncedSubtitle.hasContent && syncedSubtitle.words && syncedSubtitle.words.length > 0 && (
-        <div className="absolute bottom-28 md:bottom-20 inset-x-3 sm:inset-x-6 z-30 pointer-events-none flex items-center justify-center animate-fade-in select-none">
-          <div className="max-w-[92%] px-3.5 py-1.5 rounded-lg bg-black/80 backdrop-blur-sm border border-white/10 text-white font-bold text-xs sm:text-sm md:text-[15px] leading-snug tracking-normal shadow-2xl flex flex-wrap items-center justify-center gap-1.5">
-            {syncedSubtitle.words.map((word, idx) => (
-              <span
-                key={idx}
-                className={`transition-colors duration-100 ${
-                  idx === syncedSubtitle.activeIndex
-                    ? "text-yellow-400 font-black drop-shadow-[0_0_6px_rgba(250,204,21,0.6)]"
-                    : idx < syncedSubtitle.activeIndex
-                    ? "text-white"
-                    : "text-white/70"
-                }`}
-              >
-                {word}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* INSTAGRAM COMPACT KINETIC REELS SUBTITLES */}
+      <AnimatePresence>
+        {showCaptions && !isAnyModalOpen && syncedSubtitle.hasContent && syncedSubtitle.words && syncedSubtitle.words.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 6 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 6 }}
+            transition={{ duration: 0.12, ease: "easeOut" }}
+            className="absolute bottom-24 md:bottom-20 inset-x-3 sm:inset-x-6 z-35 pointer-events-none flex items-center justify-center select-none"
+          >
+            <div className="max-w-[88%] px-3 py-1 rounded-xl bg-black/60 backdrop-blur-md border border-white/10 shadow-lg flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5">
+              {syncedSubtitle.words.map((word, idx) => {
+                const isActive = idx === syncedSubtitle.activeIndex;
+                const isPast = idx < syncedSubtitle.activeIndex;
+                return (
+                  <span
+                    key={idx}
+                    className={`text-xs sm:text-sm md:text-[13px] tracking-normal transition-all duration-100 transform ${
+                      isActive
+                        ? "text-yellow-300 font-extrabold scale-105 inline-block drop-shadow-[0_0_8px_rgba(253,224,71,0.8)]"
+                        : isPast
+                        ? "text-white font-semibold"
+                        : "text-white/60 font-medium"
+                    }`}
+                  >
+                    {word}
+                  </span>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* CONTROLS (CC SUBTITLES & VOLUME) */}
       {!isFastForwarding && (

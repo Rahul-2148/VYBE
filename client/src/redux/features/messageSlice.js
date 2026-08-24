@@ -438,6 +438,14 @@ const messageSlice = createSlice({
         conv.disappearingMessages = disappearingMessages;
       }
     },
+
+    acceptRequestInRedux(state, action) {
+      const { conversationId } = action.payload;
+      const conv = state.conversations.find((c) => (c._id || c.conversationId)?.toString() === conversationId?.toString());
+      if (conv) {
+        conv.requestStatus = "accepted";
+      }
+    },
   },
 });
 
@@ -476,6 +484,7 @@ export const {
   clearMessagesInRedux,
   updateConversationThemeInRedux,
   updateConversationDisappearingInRedux,
+  acceptRequestInRedux,
 } = messageSlice.actions;
 
 export default messageSlice.reducer;

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   Mic,
@@ -54,6 +54,7 @@ export const VybeVoiceCallView = ({
 
   return (
     <div className="relative w-full h-full flex flex-col justify-between overflow-hidden bg-gradient-to-b from-zinc-950 via-zinc-900 to-zinc-950 text-white select-none">
+
       {/* ================= TOP HEADER ================= */}
       <div className="relative z-30 flex items-center justify-between p-5 sm:p-6 bg-gradient-to-b from-black/80 to-transparent">
         {/* Minimize Action */}

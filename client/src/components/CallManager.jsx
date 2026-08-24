@@ -7,6 +7,7 @@ import api from "../lib/axios";
 import VybeCallOverlay from "./calls/VybeCallOverlay";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { snackbar } from "../lib/snackbar";
+import notificationService from "../lib/notificationService";
 import {
   startOutgoingSound,
   stopOutgoingSound,
@@ -16,6 +17,7 @@ import {
   playCallDeclinedSound,
   playBusyTone,
   playCallEndedSound,
+  unlockAudioContext,
 } from "../lib/sounds";
 
 const RING_TIMEOUT_MS = 30000; // 30 seconds ring timeout
@@ -102,6 +104,11 @@ export const CallManager = () => {
     userDataRef.current = userData;
   }, [userData]);
 
+  // Request notification permissions proactively
+  useEffect(() => {
+    notificationService.requestPermission();
+  }, []);
+
   // Background active call recovery & verification with server
   useEffect(() => {
     if (!currentUserId) return;
@@ -174,29 +181,16 @@ export const CallManager = () => {
       incomingTimeoutRef.current = setTimeout(() => {
         setIncomingCall(null);
         stopIncomingRingtone();
+        notificationService.dismissCallNotification(data.room);
       }, RING_TIMEOUT_MS);
 
-      // Mobile vibration
-      if (typeof navigator !== "undefined" && navigator.vibrate) {
-        try {
-          navigator.vibrate([300, 200, 300, 200, 500]);
-        } catch {
-          // Ignore vibration failure
-        }
-      }
-
-      // Web Push / OS Notification if granted
-      if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
-        try {
-          new Notification(`Incoming ${data.type === "video" ? "Video" : "Voice"} Call`, {
-            body: `@${data.callerName} is calling you on VYBE`,
-            icon: data.callerAvatar || "/favicon.ico",
-            tag: data.room,
-          });
-        } catch {
-          // Ignore notification error
-        }
-      }
+      // System notification
+      notificationService.showCallNotification({
+        callerName: data.callerName,
+        callerAvatar: data.callerAvatar,
+        callType: data.type,
+        room: data.room,
+      });
     };
 
     const handleResponse = (data) => {
@@ -423,14 +417,22 @@ export const CallManager = () => {
     const socket = getSocket();
     const { room, type, from, callerName, callerAvatar, conversationId } = incomingCall;
 
-    // Immediately show active call screen so UI never blocks
-    setActiveCall({
+    notificationService.dismissCallNotification(room);
+
+    // Join active call state immediately
+    const nextCall = {
       room,
-      type: type === "audio" ? "voice" : type || "video",
-      targetUser: { _id: from, userName: callerName, profileImage: { url: callerAvatar } },
+      type: incomingCall.type || "video",
+      targetUser: {
+        _id: from,
+        name: incomingCall.callerName,
+        userName: incomingCall.callerName,
+        profileImage: incomingCall.callerAvatar,
+      },
       isIncoming: true,
-      conversationId,
-    });
+      conversationId: incomingCall.conversationId,
+    };
+    setActiveCall(nextCall);
     setIncomingCall(null);
 
     // Signal back to caller immediately
@@ -455,6 +457,7 @@ export const CallManager = () => {
     const { room, from } = incomingCall;
 
     setIncomingCall(null);
+    notificationService.dismissCallNotification(room);
     socket?.emit("call:respond", { room, response: "declined", to: from });
 
     api.post("/call/respond", { room, response: "declined" }).catch((e) => {
@@ -469,6 +472,7 @@ export const CallManager = () => {
     const targetCallRoom = activeCall.room;
     const targetUserId = activeCall.targetUser?._id || activeCall.targetUser;
 
+    notificationService.dismissCallNotification(targetCallRoom);
     setActiveCall(null);
     snackbar.dismiss("call-ringing");
     clearRingTimeout();

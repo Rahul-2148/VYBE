@@ -253,6 +253,7 @@ export const getRecentMeetings = async (req, res) => {
   try {
     const meetings = await Meeting.find({
       $or: [{ host: req.userId }, { "participants.user": req.userId }],
+      hiddenFor: { $ne: req.userId },
     })
       .populate("host", "name userName profileImage isVerified")
       .sort({ createdAt: -1 })
@@ -264,6 +265,58 @@ export const getRecentMeetings = async (req, res) => {
     });
   } catch (error) {
     console.error("[getRecentMeetings] error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Remove a single meeting from recent meetings history
+ * DELETE /api/v1/meet/history/:meetingId
+ */
+export const removeRecentMeeting = async (req, res) => {
+  try {
+    const { meetingId } = req.params;
+    const meeting = await Meeting.findOneAndUpdate(
+      { meetingId },
+      { $addToSet: { hiddenFor: req.userId } },
+      { new: true }
+    );
+
+    if (!meeting) {
+      return res.status(404).json({ success: false, message: "Meeting not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Meeting removed from recent history",
+    });
+  } catch (error) {
+    console.error("[removeRecentMeeting] error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Clear all meetings from recent meetings history
+ * DELETE /api/v1/meet/history/clear-all
+ */
+export const clearAllRecentMeetings = async (req, res) => {
+  try {
+    await Meeting.updateMany(
+      {
+        $or: [{ host: req.userId }, { "participants.user": req.userId }],
+      },
+      {
+        $addToSet: { hiddenFor: req.userId },
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Recent meetings history cleared",
+    });
+  } catch (error) {
+    console.error("[clearAllRecentMeetings] error:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };

@@ -15,7 +15,18 @@ const notificationSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["like", "comment", "follow", "mention", "story_reaction", "dm", "call", "contact_request"],
+      enum: [
+        "like",
+        "comment",
+        "follow",
+        "follow_request",
+        "follow_accept",
+        "mention",
+        "story_reaction",
+        "dm",
+        "call",
+        "contact_request",
+      ],
       required: true,
     },
     post: {
@@ -36,6 +47,10 @@ const notificationSchema = new mongoose.Schema(
       default: "",
     },
     read: {
+      type: Boolean,
+      default: false,
+    },
+    isRead: {
       type: Boolean,
       default: false,
     },

@@ -369,6 +369,38 @@ export const initializeSocket = (httpServer) => {
       socket.emit("online-users-list", { onlineUsers: onlineContacts });
     });
 
+    // Update user presence/status
+    socket.on("update-presence", async (data) => {
+      if (!socket.userId) return;
+      const { status, lastSeen } = data || {};
+      const isOnline = status === "online";
+      persistPresence(socket.userId, isOnline).catch(() => null);
+      broadcastPresenceToContacts(io, socket.userId, isOnline);
+      socket.emit("user-presence-updated", { userId: socket.userId, status, lastSeen: lastSeen || new Date() });
+    });
+
+    // Direct notification relay
+    socket.on("send-notification", async (data) => {
+      const { recipientId, type, payload } = data || {};
+      if (!recipientId) return;
+      const notifData = payload || { type, senderId: socket.userId, createdAt: new Date() };
+      io.to(getUserRoom(recipientId)).emit("notification-received", { notification: notifData });
+      io.to(getUserRoom(recipientId)).emit("new-notification", notifData);
+      io.to(getUserRoom(recipientId)).emit("notification:received", notifData);
+    });
+
+    // Send conversation reaction
+    socket.on("send-reaction", async (data) => {
+      const { conversationId, type, targetId } = data || {};
+      if (!conversationId) return;
+      socket.to(`conversation_${conversationId}`).emit("reaction-received", {
+        conversationId,
+        type,
+        targetId,
+        userId: socket.userId,
+      });
+    });
+
     // =====================================================
     // MESSAGING EVENTS
     // =====================================================
@@ -1120,11 +1152,11 @@ export const initializeSocket = (httpServer) => {
         } catch (e) {}
       }
 
-      // Get all existing sockets in this room (excluding the joiner)
+      // Get all existing sockets in this room (excluding the joiner and any sockets of the same user)
       const roomSockets = await io.in(room).fetchSockets();
       const existingMembers = await Promise.all(
         roomSockets
-          .filter((s) => s.id !== socket.id)
+          .filter((s) => s.id !== socket.id && (!socket.userId || !s.userId || s.userId.toString() !== socket.userId.toString()))
           .map(async (s) => {
             let uData = {
               socketId: s.id,
@@ -1165,8 +1197,10 @@ export const initializeSocket = (httpServer) => {
     });
 
     socket.on("call:signal", (data) => {
-      const { toSocketId, signal, fromMetadata } = data;
-      io.to(toSocketId).emit("call:signal-received", {
+      const { toSocketId, toUserId, room, signal, fromMetadata } = data;
+      if (!signal) return;
+
+      const payload = {
         fromSocketId: socket.id,
         fromUserId: socket.userId,
         fromMetadata: fromMetadata || {
@@ -1176,7 +1210,24 @@ export const initializeSocket = (httpServer) => {
           profilePicture: socket.profilePicture,
         },
         signal,
-      });
+      };
+
+      if (toSocketId) {
+        io.to(toSocketId).emit("call:signal-received", payload);
+      }
+
+      const targetUid = toUserId || toSocketId;
+      if (targetUid && activeUsers.has(targetUid.toString())) {
+        for (const sId of activeUsers.get(targetUid.toString())) {
+          if (sId !== socket.id && sId !== toSocketId) {
+            io.to(sId).emit("call:signal-received", payload);
+          }
+        }
+      }
+
+      if (!toSocketId && !toUserId && room) {
+        socket.to(room).emit("call:signal-received", payload);
+      }
     });
 
     socket.on("call:heartbeat", (data) => {
@@ -1462,11 +1513,11 @@ export const initializeSocket = (httpServer) => {
           } catch (e) {}
         }
 
-        // Fetch existing members in meeting room
+        // Fetch existing members in meeting room (excluding self sockets)
         const roomSockets = await io.in(roomName).fetchSockets();
         const existingMembers = await Promise.all(
           roomSockets
-            .filter((s) => s.id !== socket.id)
+            .filter((s) => s.id !== socket.id && (!socket.userId || !s.userId || s.userId.toString() !== socket.userId.toString()))
             .map(async (s) => {
               let mData = {
                 socketId: s.id,
@@ -1517,9 +1568,10 @@ export const initializeSocket = (httpServer) => {
     });
 
     socket.on("meeting:signal", (data) => {
-      const { toSocketId, signal, fromMetadata } = data;
-      if (!toSocketId || !signal) return;
-      io.to(toSocketId).emit("meeting:signal-received", {
+      const { toSocketId, toUserId, meetingId, signal, fromMetadata } = data;
+      if (!signal) return;
+
+      const payload = {
         fromSocketId: socket.id,
         fromUserId: socket.userId,
         fromMetadata: fromMetadata || {
@@ -1529,7 +1581,24 @@ export const initializeSocket = (httpServer) => {
           profilePicture: socket.profilePicture,
         },
         signal,
-      });
+      };
+
+      if (toSocketId) {
+        io.to(toSocketId).emit("meeting:signal-received", payload);
+      }
+
+      const targetUid = toUserId || toSocketId;
+      if (targetUid && activeUsers.has(targetUid.toString())) {
+        for (const sId of activeUsers.get(targetUid.toString())) {
+          if (sId !== socket.id && sId !== toSocketId) {
+            io.to(sId).emit("meeting:signal-received", payload);
+          }
+        }
+      }
+
+      if (!toSocketId && !toUserId && meetingId) {
+        socket.to(`meeting_${meetingId.toLowerCase()}`).emit("meeting:signal-received", payload);
+      }
     });
 
     socket.on("meeting:action", (data) => {
@@ -1915,5 +1984,6 @@ export const getReceiverSocketId = (userId) => {
 
 export const isUserOnline = (userId) => getUserSocketCount(userId) > 0;
 export const getActiveUsersCount = () => activeUsers.size;
-export const getSocket = () => ioInstance;
+export const getSocket = () => ioInstance || global.io;
+export const getIO = () => ioInstance || global.io;
 export { ioInstance as io };

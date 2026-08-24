@@ -49,28 +49,114 @@ import dp from "../../assets/dp3.png";
 import { filterStyleMap } from "../../constants/callFilters";
 import { triggerHaptic } from "../../lib/interactiveEffects";
 
+const RemoteAudioPlayer = React.memo(({ stream }) => {
+  const audioRef = useRef(null);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el || !stream) return;
+
+    if (el.srcObject !== stream) {
+      el.srcObject = stream;
+    }
+
+    el.muted = false;
+    el.volume = 1.0;
+
+    const playAudio = () => {
+      const playPromise = el.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn("[MeetRoomView WebRTC] Remote audio play deferred:", err?.message);
+        });
+      }
+    };
+
+    playAudio();
+
+    // Auto-unlock audio on user interaction
+    const unlockOnInteraction = () => {
+      if (el && el.paused) {
+        playAudio();
+      }
+    };
+
+    window.addEventListener("touchstart", unlockOnInteraction, { passive: true, once: true });
+    window.addEventListener("click", unlockOnInteraction, { passive: true, once: true });
+
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = true;
+    });
+
+    return () => {
+      window.removeEventListener("touchstart", unlockOnInteraction);
+      window.removeEventListener("click", unlockOnInteraction);
+    };
+  }, [stream]);
+
+  return (
+    <audio
+      ref={audioRef}
+      autoPlay
+      playsInline
+      className="sr-only"
+    />
+  );
+});
+
 /**
  * High-Performance Memoized Video Stream
  */
-const VideoStream = React.memo(({ stream, muted = false, className = "", style = {}, mirror = false }) => {
+const VideoStream = React.memo(({ stream, muted = true, className = "", style = {}, mirror = false }) => {
   const videoRef = useRef(null);
 
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
+    el.muted = Boolean(muted);
+    el.defaultMuted = Boolean(muted);
+    el.setAttribute("playsinline", "true");
+    el.setAttribute("webkit-playsinline", "true");
+
     if (el.srcObject !== (stream || null)) {
       el.srcObject = stream || null;
-      if (stream) {
-        el.play().catch(() => {});
-      }
     }
-  }, [stream]);
+
+    if (stream) {
+      const playVideo = () => {
+        const p = el.play();
+        if (p !== undefined) {
+          p.catch((err) => {
+            console.warn("[VideoStream WebRTC] Autoplay deferred:", err?.message);
+          });
+        }
+      };
+
+      playVideo();
+      el.onloadedmetadata = playVideo;
+      el.oncanplay = playVideo;
+
+      const unlock = () => {
+        if (el && el.paused) {
+          playVideo();
+        }
+      };
+      window.addEventListener("touchstart", unlock, { passive: true, once: true });
+      window.addEventListener("click", unlock, { passive: true, once: true });
+
+      return () => {
+        window.removeEventListener("touchstart", unlock);
+        window.removeEventListener("click", unlock);
+      };
+    }
+  }, [stream, muted]);
 
   return (
     <video
       ref={videoRef}
       autoPlay
       playsInline
+      webkit-playsinline="true"
       muted={muted}
       className={`${className} ${mirror ? "-scale-x-100" : ""}`}
       style={style}
@@ -249,8 +335,13 @@ export const MeetRoomView = ({
     }
   }, [messages, activeSidebar]);
 
-  // Peer entries
-  const peerList = useMemo(() => Object.values(peers), [peers]);
+  // Peer entries (strictly excluding local user to prevent audio loopback/echo)
+  const peerList = useMemo(() => {
+    const myIdStr = currentUserId?.toString();
+    return Object.values(peers || {}).filter(
+      (p) => p && (!p.userId || !myIdStr || p.userId.toString() !== myIdStr)
+    );
+  }, [peers, currentUserId]);
   const totalParticipants = peerList.length + 1; // peers + self
 
   // Compute Grid Layout Class based on participant count
@@ -265,6 +356,16 @@ export const MeetRoomView = ({
 
   return (
     <div className="relative w-screen h-screen bg-[#202124] text-white flex flex-col justify-between overflow-hidden select-none font-sans">
+      {/* Background Remote Audio Players (Ensures crystal-clear continuous voice output) */}
+      {peerList.map((p) =>
+        p.stream ? (
+          <RemoteAudioPlayer
+            key={`meet-audio-${p.socketId || p.userId}`}
+            stream={p.stream}
+          />
+        ) : null
+      )}
+
       {/* Animated Reaction Float Layer */}
       <CallReactionStream reactions={reactionsList} />
 

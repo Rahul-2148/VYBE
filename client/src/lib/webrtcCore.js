@@ -1,10 +1,14 @@
 import api from "./axios";
 
-// Default public STUN servers fallback
+// High-availability global STUN server pool (Google & Cloudflare)
 export const DEFAULT_ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
   { urls: "stun:stun2.l.google.com:19302" },
+  { urls: "stun:stun3.l.google.com:19302" },
+  { urls: "stun:stun4.l.google.com:19302" },
+  { urls: "stun:stun.cloudflare.com:3478" },
+  { urls: "stun:global.stun.twilio.com:3478" },
 ];
 
 let cachedIceServers = null;
@@ -26,19 +30,33 @@ export const getIceServers = async () => {
       return cachedIceServers;
     }
   } catch (err) {
-    console.warn("[WebRTC Core] Failed to load TURN credentials, using STUN fallbacks:", err?.message);
+    console.warn("[WebRTC Core] Failed to load dynamic TURN credentials, using STUN pool:", err?.message);
   }
   return DEFAULT_ICE_SERVERS;
 };
 
-// Studio Audio Constraints (Echo cancellation + Noise suppression)
-export const STUDIO_AUDIO_CONSTRAINTS = {
-  echoCancellation: { ideal: true },
-  noiseSuppression: { ideal: true },
-  autoGainControl: { ideal: true },
-  channelCount: { ideal: 2 },
-  sampleRate: { ideal: 48000 },
+/**
+ * WhatsApp / Instagram / Discord Standard Voice Constraints
+ * CRITICAL: Mono channel (channelCount: 1) ensures Mobile OS (Android & iOS) Hardware Acoustic
+ * Echo Canceler (AEC) is fully engaged, preventing speakerphone echo and voice feedback loops.
+ */
+export const ULTRA_AUDIO_CONSTRAINTS = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  channelCount: 1, // Single channel activates hardware DSP AEC on all smartphones & PCs!
+  sampleRate: 48000,
+  // Chromium / Android DSP optimizations
+  googEchoCancellation: true,
+  googAutoGainControl: true,
+  googNoiseSuppression: true,
+  googHighpassFilter: true,
+  googTypingNoiseDetection: true,
+  googAudioMirroring: false,
 };
+
+// Aliased for full backwards compatibility
+export const STUDIO_AUDIO_CONSTRAINTS = ULTRA_AUDIO_CONSTRAINTS;
 
 // High-definition Screen Sharing Constraints (1080p-1440p 30-60fps)
 export const SCREEN_SHARE_CONSTRAINTS = {
@@ -62,6 +80,79 @@ export const SOCIAL_CALL_VIDEO_CONSTRAINTS = {
   height: { ideal: 720, max: 1080 },
   frameRate: { ideal: 30, max: 60 },
   facingMode: "user",
+};
+
+/**
+ * Tune WebRTC SDP with Opus Inband FEC (Forward Error Correction) & DTX
+ * This is what enables crystal-clear real-time voice calls across cities (e.g. Delhi to Mumbai)
+ * and over unstable mobile 4G/5G networks by reconstructing lost packets on-the-fly.
+ */
+export const tuneOpusSdp = (sdp) => {
+  if (!sdp || typeof sdp !== "string") return sdp;
+
+  // Locate Opus payload type in SDP (usually 111)
+  const opusMatch = sdp.match(/a=rtpmap:(\d+)\s+opus\/48000\/2/i);
+  if (!opusMatch) return sdp;
+
+  const opusPt = opusMatch[1];
+  const fmtpRegex = new RegExp(`a=fmtp:${opusPt}\\s+(.*)`, "i");
+  const fmtpMatch = sdp.match(fmtpRegex);
+
+  const desiredParams = [
+    "minptime=10",
+    "useinbandfec=1", // Inband Forward Error Correction (recovers lost audio packets)
+    "usedtx=1",       // Discontinuous Transmission (saves bandwidth & silences static noise)
+    "maxaveragebitrate=64000", // 64kbps HD wideband voice
+    "stereo=0",       // Mono voice ensures phase cancellation doesn't cause muffled speech
+    "sprop-stereo=0",
+    "cng=1",          // Comfort Noise Generator
+  ];
+
+  if (fmtpMatch) {
+    const existingParams = fmtpMatch[1].split(";").map((p) => p.trim()).filter(Boolean);
+    const paramMap = new Map();
+
+    existingParams.forEach((param) => {
+      const [k, v] = param.split("=");
+      if (k) paramMap.set(k.trim().toLowerCase(), v ? v.trim() : "");
+    });
+
+    desiredParams.forEach((param) => {
+      const [k, v] = param.split("=");
+      if (k) paramMap.set(k.trim().toLowerCase(), v ? v.trim() : "");
+    });
+
+    const newFmtpLine = `a=fmtp:${opusPt} ${Array.from(paramMap.entries())
+      .map(([k, v]) => (v ? `${k}=${v}` : k))
+      .join(";")}`;
+
+    return sdp.replace(fmtpRegex, newFmtpLine);
+  } else {
+    const rtpmapLine = `a=rtpmap:${opusPt} opus/48000/2`;
+    const newFmtpLine = `${rtpmapLine}\r\na=fmtp:${opusPt} ${desiredParams.join(";")}`;
+    return sdp.replace(rtpmapLine, newFmtpLine);
+  }
+};
+
+/**
+ * Resume global AudioContext on first user interaction (Mobile Safari & Chrome autoplay unlock)
+ */
+export const unlockAudioContext = (audioCtx) => {
+  if (!audioCtx) return;
+  if (audioCtx.state === "suspended") {
+    const resume = () => {
+      audioCtx.resume().catch(() => {});
+      if (typeof window !== "undefined") {
+        window.removeEventListener("touchstart", resume);
+        window.removeEventListener("click", resume);
+      }
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("touchstart", resume, { once: true, passive: true });
+      window.addEventListener("click", resume, { once: true, passive: true });
+    }
+    audioCtx.resume().catch(() => {});
+  }
 };
 
 /**
@@ -114,6 +205,8 @@ export const createVoiceActivityDetector = (stream, onVolumeChange) => {
     if (!AudioContextClass) return () => {};
 
     const audioCtx = new AudioContextClass();
+    unlockAudioContext(audioCtx);
+
     const analyser = audioCtx.createAnalyser();
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.4;

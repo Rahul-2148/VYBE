@@ -70,7 +70,6 @@ const ExploreMediaCard = ({ post, index, activeTab, navigate, formatCount, getVi
   const handlePause = () => {
     if (videoRef.current) {
       videoRef.current.pause();
-      videoRef.current.currentTime = 0;
       setIsPlaying(false);
     }
   };

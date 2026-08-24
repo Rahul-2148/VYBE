@@ -6,10 +6,11 @@ import dp from "../assets/dp3.png";
 import { setProfileData, setUserData } from "../redux/features/userSlice";
 import { ClipLoader } from "react-spinners";
 import { snackbar } from "../lib/snackbar";
-import { Link2, Trash2, Plus, User, Lock, Sliders, Palette, ChevronRight, ChevronDown, ChevronUp, ShieldCheck } from "lucide-react";
+import { Link2, Trash2, Plus, User, Lock, Sliders, Palette, ChevronRight, ChevronDown, ChevronUp, ShieldCheck, Music } from "lucide-react";
 import api from "../lib/axios";
 import { useTheme } from "../lib/themeContext";
 import VybeInput from "../components/VybeInput";
+import StoryMusicPickerModal from "../components/StoryMusicPickerModal";
 
 const CATEGORIES = [
   "Digital Creator",
@@ -81,6 +82,8 @@ const EditProfile = () => {
   });
 
   const [links, setLinks] = useState(userData?.user?.links || []);
+  const [profileSong, setProfileSong] = useState(userData?.user?.profileSong || null);
+  const [showMusicPicker, setShowMusicPicker] = useState(false);
   const [showAddLink, setShowAddLink] = useState(false);
   const [newLink, setNewLink] = useState({
     title: "",
@@ -137,6 +140,7 @@ const EditProfile = () => {
       formData.append("sensitiveContentFilter", formFields.sensitiveContentFilter);
       formData.append("snoozeSuggestedPosts", formFields.snoozeSuggestedPosts);
       formData.append("links", JSON.stringify(links));
+      formData.append("profileSong", profileSong ? JSON.stringify(profileSong) : "null");
 
       if (backendImage) formData.append("profileImage", backendImage);
 
@@ -406,6 +410,65 @@ const EditProfile = () => {
           </div>
         </div>
 
+        {/* Instagram Style Profile Song / Music */}
+        <div className="p-4 bg-surface/60 border border-border rounded-2xl space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/20">
+                <Music className="w-4 h-4" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-text">Profile Music Anthem</label>
+                <span className="text-[10px] text-text-muted">Display a permanent song on your profile header</span>
+              </div>
+            </div>
+            {profileSong?.title ? (
+              <button
+                type="button"
+                onClick={() => setProfileSong(null)}
+                className="text-xs text-rose-500 hover:text-rose-400 font-semibold cursor-pointer"
+              >
+                Remove
+              </button>
+            ) : null}
+          </div>
+
+          {profileSong?.title ? (
+            <div className="p-3 bg-surface border border-border rounded-xl flex items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-center gap-3 min-w-0">
+                {profileSong.coverUrl ? (
+                  <img src={profileSong.coverUrl} alt="" className="w-11 h-11 rounded-lg object-cover border border-border shrink-0" />
+                ) : (
+                  <div className="w-11 h-11 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-500 shrink-0">
+                    <Music className="w-5 h-5" />
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <h4 className="text-xs font-bold text-text truncate">{profileSong.title}</h4>
+                  <p className="text-[11px] text-text-muted truncate">{profileSong.artist || "Official Soundtrack"}</p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowMusicPicker(true)}
+                className="px-3 py-1.5 rounded-lg bg-surface-hover text-text text-xs font-semibold hover:bg-surface-active transition shrink-0 cursor-pointer"
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowMusicPicker(true)}
+              className="w-full p-3 rounded-xl border border-dashed border-border hover:border-primary/50 bg-surface/30 hover:bg-surface/60 text-text-secondary hover:text-text transition-all flex items-center justify-center gap-2 cursor-pointer group text-xs font-bold"
+            >
+              <Plus className="w-4 h-4 text-primary group-hover:scale-110 transition-transform" />
+              <span>Add music to your profile</span>
+            </button>
+          )}
+        </div>
+
         {/* Multiple Bio Links */}
         <div className="space-y-2 pt-2">
           <div className="flex items-center justify-between">
@@ -640,18 +703,27 @@ const EditProfile = () => {
   };
 
   return (
-    <div className="w-full min-h-screen bg-bg text-text p-4 md:p-8 max-w-5xl mx-auto space-y-6 select-none animate-in fade-in duration-300">
-      {/* Top Header */}
-      <div className="flex items-center justify-between border-b border-border pb-4">
-        <button onClick={() => navigate(-1)} className="p-2 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer">
-          <MdOutlineKeyboardBackspace className="w-6 h-6" />
-        </button>
-        <h1 className="text-lg font-black tracking-wider uppercase bg-gradient-to-r from-pink-500 via-rose-500 to-purple-600 bg-clip-text text-transparent">Settings & Preferences</h1>
-        <div className="w-10 h-10" />
+    <div className="w-full min-h-screen bg-bg text-text select-none animate-in fade-in duration-300">
+      {/* Sticky Top Header */}
+      <div className="sticky top-0 z-40 border-b border-border/80 bg-bg/90 backdrop-blur-2xl px-4 py-3.5 md:px-8 shadow-md shadow-black/20">
+        <div className="max-w-5xl mx-auto flex items-center justify-between">
+          <button
+            onClick={() => navigate(-1)}
+            className="p-2 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer"
+            title="Go Back"
+          >
+            <MdOutlineKeyboardBackspace className="w-6 h-6" />
+          </button>
+          <h1 className="text-sm md:text-base font-black tracking-wider uppercase bg-gradient-to-r from-pink-500 via-rose-500 to-purple-600 bg-clip-text text-transparent">
+            Settings & Preferences
+          </h1>
+          <div className="w-10 h-10" />
+        </div>
       </div>
 
-      {/* Settings Grid Panel */}
-      <div className="flex flex-col md:flex-row min-h-[500px] border border-border bg-surface rounded-3xl overflow-hidden shadow-2xl">
+      <div className="max-w-5xl mx-auto p-4 md:p-8 space-y-6">
+        {/* Settings Grid Panel */}
+        <div className="flex flex-col md:flex-row min-h-[500px] border border-border bg-surface rounded-3xl overflow-hidden shadow-2xl">
         
         {/* Desktop Sidebar & Mobile Menu List */}
         <div className={`w-full md:w-64 border-r-0 md:border-r border-b md:border-b-0 border-border p-4 space-y-1 bg-surface-hover/10 shrink-0 ${
@@ -705,6 +777,20 @@ const EditProfile = () => {
         </div>
 
       </div>
+
+      </div>
+
+      {showMusicPicker && (
+        <StoryMusicPickerModal
+          open={showMusicPicker}
+          onClose={() => setShowMusicPicker(false)}
+          selectedMusic={profileSong}
+          onSelectMusic={(track) => {
+            setProfileSong(track);
+            setShowMusicPicker(false);
+          }}
+        />
+      )}
     </div>
   );
 };

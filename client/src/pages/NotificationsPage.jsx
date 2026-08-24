@@ -1,13 +1,14 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Heart, MessageSquare, ArrowLeft, Bell, Phone, Sparkles } from "lucide-react";
+import { Heart, MessageSquare, ArrowLeft, Bell, Phone, Sparkles, X, CheckCheck, Trash2, UserPlus, AtSign } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useDispatch } from "react-redux";
 import moment from "moment";
 import { snackbar } from "../lib/snackbar";
 import dp from "../assets/dp3.png";
 import FollowButton from "../components/FollowButton";
 import Navbar from "../components/Navbar";
+import ConfirmDialogModal from "../components/ConfirmDialogModal";
 import api from "../lib/axios";
 import { getSocket } from "../lib/socket";
 import { triggerHaptic } from "../lib/interactiveEffects";
@@ -22,6 +23,9 @@ export const NotificationsPage = () => {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState("all");
+  const [clearing, setClearing] = useState(false);
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
   const [activeTab, setActiveTab] = useState("activity"); // 'activity' or 'settings'
   const [settings, setSettings] = useState({
     pauseAll: false,
@@ -31,10 +35,11 @@ export const NotificationsPage = () => {
     directMessages: true,
   });
 
-  const fetchNotifications = useCallback(async (pageNo = 1, append = false) => {
+  const fetchNotifications = useCallback(async (pageNo = 1, append = false, filterType = selectedFilter) => {
     try {
       if (pageNo === 1 && !append) setLoading(true);
-      const url = `/notification/feed?limit=30&page=${pageNo}`;
+      const filterQuery = filterType && filterType !== "all" ? `&type=${filterType}` : "";
+      const url = `/notification/feed?limit=30&page=${pageNo}${filterQuery}`;
       const res = await api.get(url);
       if (res.data?.success) {
         const fetched = res.data.notifications || [];
@@ -46,7 +51,7 @@ export const NotificationsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedFilter]);
 
   const fetchFollowRequests = useCallback(async () => {
     try {
@@ -87,31 +92,88 @@ export const NotificationsPage = () => {
     const socket = getSocket();
     if (!socket) return;
 
-    const handleNotification = ({ notification }) => {
-      setNotifications((prev) => [notification, ...prev]);
+    const handleNotification = (data) => {
+      const notif = data?.notification || data;
+      if (notif && notif._id) {
+        setNotifications((prev) => {
+          if (prev.some((n) => n._id === notif._id)) return prev;
+          return [notif, ...prev];
+        });
+        if (notif.type === "follow_request" && notif.sender) {
+          setRequests((prev) => {
+            const senderObj = typeof notif.sender === "object" ? notif.sender : { _id: notif.sender };
+            if (prev.some((u) => (u._id || u).toString() === senderObj._id.toString())) return prev;
+            return [senderObj, ...prev];
+          });
+        }
+      }
     };
 
     socket.on("notification-received", handleNotification);
-    return () => socket.off("notification-received", handleNotification);
+    socket.on("new-notification", handleNotification);
+    socket.on("notification:received", handleNotification);
+
+    return () => {
+      socket.off("notification-received", handleNotification);
+      socket.off("new-notification", handleNotification);
+      socket.off("notification:received", handleNotification);
+    };
   }, []);
 
   const handleLoadMore = () => {
     triggerHaptic("light");
     const next = page + 1;
     setPage(next);
-    fetchNotifications(next, true);
+    fetchNotifications(next, true, selectedFilter);
   };
 
   const handleAction = async (targetUserId, action) => {
     triggerHaptic("medium");
     try {
-      const res = await api.post(`/user/follow-request/${targetUserId}`, { action });
-      if (res.data.success) {
+      const res = await api.post(`/user/follow-request/${targetUserId}`, {
+        action,
+        senderId: targetUserId,
+      });
+      if (res.data?.success) {
         snackbar.success(action === "accept" ? "Follow request accepted" : "Follow request declined");
-        setRequests((prev) => prev.filter((u) => u._id !== targetUserId));
+        setRequests((prev) => prev.filter((u) => (u._id || u).toString() !== targetUserId.toString()));
       }
     } catch {
       snackbar.error("Action failed.");
+    }
+  };
+
+  const handleClearAll = async () => {
+    triggerHaptic("medium");
+    if (notifications.length === 0) {
+      setShowClearConfirmModal(false);
+      return;
+    }
+    try {
+      setClearing(true);
+      const filterQuery = selectedFilter !== "all" ? `?type=${selectedFilter}` : "";
+      const res = await api.delete(`/notification/clear-all${filterQuery}`);
+      if (res.data?.success) {
+        snackbar.success(selectedFilter === "all" ? "All notifications cleared" : `${selectedFilter} notifications cleared`);
+        setNotifications([]);
+      }
+    } catch {
+      snackbar.error("Failed to clear notifications");
+    } finally {
+      setClearing(false);
+      setShowClearConfirmModal(false);
+    }
+  };
+
+
+  const handleDeleteNotification = async (notificationId, e) => {
+    if (e) e.stopPropagation();
+    triggerHaptic("light");
+    setNotifications((prev) => prev.filter((n) => n._id !== notificationId));
+    try {
+      await api.delete(`/notification/${notificationId}`);
+    } catch (err) {
+      console.warn("Delete notification failed:", err);
     }
   };
 
@@ -175,7 +237,78 @@ export const NotificationsPage = () => {
       </div>
 
       {activeTab === "activity" ? (
-        <div className="space-y-6">
+        <div className="space-y-4">
+          {/* Category Filter Chips & Batch Actions */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1">
+            {/* Filter Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar py-1">
+              {[
+                { id: "all", label: "All" },
+                { id: "likes", label: "Likes", icon: Heart },
+                { id: "comments", label: "Comments", icon: MessageSquare },
+                { id: "follows", label: "Follows", icon: UserPlus },
+                { id: "mentions", label: "Mentions", icon: AtSign },
+                { id: "calls", label: "Calls", icon: Phone },
+              ].map((tab) => {
+                const Icon = tab.icon;
+                const isActive = selectedFilter === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic("light");
+                      setSelectedFilter(tab.id);
+                      setPage(1);
+                      fetchNotifications(1, false, tab.id);
+                    }}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all duration-150 shrink-0 cursor-pointer ${
+                      isActive
+                        ? "bg-rose-600 text-white shadow-md shadow-rose-600/20 font-bold scale-105"
+                        : "bg-surface hover:bg-surface-hover text-text-secondary hover:text-text border border-border"
+                    }`}
+                  >
+                    {Icon && <Icon className="w-3.5 h-3.5" />}
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Quick Actions: Mark Read & Clear All (Animated Hide/Show) */}
+            <AnimatePresence mode="wait">
+              {notifications.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.92, x: 8 }}
+                  animate={{ opacity: 1, scale: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.92, x: 8 }}
+                  transition={{ duration: 0.18, ease: "easeOut" }}
+                  className="flex items-center gap-2 shrink-0"
+                >
+                  <button
+                    type="button"
+                    onClick={markAsRead}
+                    className="px-2.5 py-1.5 rounded-xl bg-surface hover:bg-surface-hover text-text-secondary hover:text-text border border-border text-[11px] font-medium transition cursor-pointer flex items-center gap-1 active:scale-95"
+                    title="Mark all as read"
+                  >
+                    <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Mark Read</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={clearing}
+                    onClick={() => setShowClearConfirmModal(true)}
+                    className="px-2.5 py-1.5 rounded-xl bg-surface hover:bg-rose-500/10 text-rose-400 border border-border text-[11px] font-medium transition cursor-pointer flex items-center gap-1 active:scale-95"
+                    title="Clear all notifications"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{clearing ? "Clearing..." : "Clear All"}</span>
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           {requests.length > 0 && (
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
@@ -261,7 +394,14 @@ export const NotificationsPage = () => {
                   </h3>
                   <div className="space-y-2">
                     {todayNotifs.map((item, i) => (
-                      <NotificationItem key={item._id || i} notif={item} navigate={navigate} isFresh={!item.read} />
+                      <NotificationItem
+                        key={item._id || i}
+                        notif={item}
+                        navigate={navigate}
+                        isFresh={!item.read && !item.isRead}
+                        onFollowChange={() => fetchNotifications(1, false)}
+                        onDelete={(e) => handleDeleteNotification(item._id, e)}
+                      />
                     ))}
                   </div>
                 </div>
@@ -272,7 +412,14 @@ export const NotificationsPage = () => {
                   <h3 className="text-xs font-bold text-text-muted uppercase tracking-wider">Earlier</h3>
                   <div className="space-y-2">
                     {earlierNotifs.map((item, i) => (
-                      <NotificationItem key={item._id || i} notif={item} navigate={navigate} isFresh={false} />
+                      <NotificationItem
+                        key={item._id || i}
+                        notif={item}
+                        navigate={navigate}
+                        isFresh={false}
+                        onFollowChange={() => fetchNotifications(1, false)}
+                        onDelete={(e) => handleDeleteNotification(item._id, e)}
+                      />
                     ))}
                   </div>
                 </div>
@@ -335,11 +482,24 @@ export const NotificationsPage = () => {
 
       {/* Mobile Bottom Navigation */}
       <Navbar />
+
+      {/* Confirmation Dialog Modal */}
+      <ConfirmDialogModal
+        isOpen={showClearConfirmModal}
+        title={selectedFilter === "all" ? "Clear All Notifications?" : `Clear ${selectedFilter.charAt(0).toUpperCase() + selectedFilter.slice(1)} Notifications?`}
+        message={`Are you sure you want to permanently clear ${selectedFilter === "all" ? "all your notifications" : `all ${selectedFilter} notifications`}? This action cannot be undone.`}
+        confirmLabel="Clear All"
+        cancelLabel="Cancel"
+        loading={clearing}
+        onConfirm={handleClearAll}
+        onCancel={() => setShowClearConfirmModal(false)}
+      />
     </div>
   );
 };
 
-const NotificationItem = ({ notif, navigate, isFresh }) => {
+const NotificationItem = ({ notif, navigate, isFresh, onFollowChange, onDelete }) => {
+
   if (!notif) return null;
   const sender = typeof notif.sender === "object" && notif.sender !== null ? notif.sender : null;
   if (!sender) return null;
@@ -414,35 +574,49 @@ const NotificationItem = ({ notif, navigate, isFresh }) => {
         </div>
       </div>
 
-      {notif.type === "follow" ? (
-        <FollowButton
-          targetUserId={sender._id}
-          tailwind="px-4 py-1.5 bg-rose-600 text-white font-bold text-xs rounded-full shadow shrink-0 ml-3 interactive-tap"
-        />
-      ) : notif.type === "contact_request" ? (
-        <button
-          onClick={() => {
-            triggerHaptic("light");
-            navigate("/messages", { state: { targetUser: sender } });
-          }}
-          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-rose-500 hover:opacity-90 text-white font-bold text-xs rounded-full shadow shrink-0 ml-3 interactive-tap cursor-pointer"
-          title="Open Chat to reply or share contact"
-        >
-          <MessageSquare className="w-3.5 h-3.5" />
-          <span>Chat</span>
-        </button>
-      ) : notif.type === "call" ? (
-        <div className="p-2 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-full shrink-0 ml-3">
-          <Phone className="w-4 h-4" />
-        </div>
-      ) : mediaThumb ? (
-        <img 
-          src={mediaThumb} 
-          alt="" 
-          className="w-10 h-10 rounded-xl object-cover border border-border shrink-0 ml-3 cursor-pointer hover:scale-105 transition" 
-          onClick={handleMediaClick}
-        />
-      ) : null}
+      <div className="flex items-center gap-2">
+        {notif.type === "follow" || notif.type === "follow_accept" ? (
+          <FollowButton
+            targetUserId={sender._id}
+            isFollowerProp={notif.type === "follow"}
+            onFollowChange={onFollowChange}
+          />
+        ) : notif.type === "contact_request" ? (
+          <button
+            onClick={() => {
+              triggerHaptic("light");
+              navigate("/messages", { state: { targetUser: sender } });
+            }}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-rose-500 hover:opacity-90 text-white font-bold text-xs rounded-full shadow shrink-0 ml-3 interactive-tap cursor-pointer"
+            title="Open Chat to reply or share contact"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span>Chat</span>
+          </button>
+        ) : notif.type === "call" ? (
+          <div className="p-2 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-full shrink-0 ml-3">
+            <Phone className="w-4 h-4" />
+          </div>
+        ) : mediaThumb ? (
+          <img 
+            src={mediaThumb} 
+            alt="" 
+            className="w-10 h-10 rounded-xl object-cover border border-border shrink-0 ml-3 cursor-pointer hover:scale-105 transition" 
+            onClick={handleMediaClick}
+          />
+        ) : null}
+
+        {onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="p-1.5 text-text-muted hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition cursor-pointer"
+            title="Dismiss notification"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
     </motion.div>
   );
 };
