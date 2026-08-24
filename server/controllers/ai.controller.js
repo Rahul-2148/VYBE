@@ -14,8 +14,8 @@ export const generateCaptionAndHashtags = async (req, res) => {
   try {
     const { prompt, tone, category } = req.body;
 
-    const caption = generateAICaption(prompt || "daily vibes", tone || "aesthetic");
-    const hashtags = generateHashtags(prompt || "vybe");
+    const caption = await generateAICaption(prompt || "daily vibes", tone || "aesthetic");
+    const hashtags = await generateHashtags(prompt || "vybe");
     const altText = generateAltText(category || "photo");
 
     return res.status(200).json({
@@ -33,7 +33,7 @@ export const generateCaptionAndHashtags = async (req, res) => {
 export const generateBio = async (req, res) => {
   try {
     const { profession, vibe } = req.body;
-    const bio = generateAIBio(profession || "Creator", vibe || "aesthetic");
+    const bio = await generateAIBio(profession || "Creator", vibe || "aesthetic");
 
     return res.status(200).json({
       success: true,
@@ -90,7 +90,7 @@ export const getSmartReplies = async (req, res) => {
   try {
     const { messageText } = req.query;
 
-    const suggestions = generateSmartReplies(messageText || "");
+    const suggestions = await generateSmartReplies(messageText || "");
 
     return res.status(200).json({
       success: true,
