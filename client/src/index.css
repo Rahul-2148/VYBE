@@ -409,6 +409,8 @@ html {
   color: var(--text);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   letter-spacing: -0.011em;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior-y: none;
 }
 
 body {
@@ -418,6 +420,9 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   letter-spacing: -0.011em;
+  overscroll-behavior-y: none;
+  -webkit-overflow-scrolling: touch;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Selection - High contrast, pristine visibility in both Light & Dark themes */
@@ -1187,4 +1192,78 @@ a:focus-visible,
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* 8. Instagram Story Floating Emoji Particles */
+@keyframes floatUpParticle {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(0.6);
+  }
+  20% {
+    opacity: 1;
+    transform: translateY(-40px) scale(1.2);
+  }
+  80% {
+    opacity: 0.9;
+    transform: translateY(-160px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-240px) scale(0.8);
+  }
+}
+
+.animate-float-up {
+  animation: floatUpParticle 1.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+/* 9. Big Heart Double Tap Scale */
+@keyframes doubleTapHeart {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  35% {
+    opacity: 1;
+    transform: scale(1.3);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+
+.animate-double-tap-heart {
+  animation: doubleTapHeart 0.85s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+/* 10. Instagram Ring Gradient Glow */
+@keyframes instagramGlow {
+  0%, 100% {
+    filter: drop-shadow(0 0 6px rgba(225, 48, 108, 0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 12px rgba(240, 148, 51, 0.6));
+  }
+}
+
+.animate-instagram-glow {
+  animation: instagramGlow 3s ease-in-out infinite;
+}
+
+/* 11. Story Music Equalizer Bars */
+@keyframes eqBounce {
+  0%, 100% { height: 4px; }
+  50% { height: 16px; }
+}
+
+.animate-eq-1 { animation: eqBounce 0.8s ease-in-out infinite; }
+.animate-eq-2 { animation: eqBounce 0.8s ease-in-out infinite 0.2s; }
+.animate-eq-3 { animation: eqBounce 0.8s ease-in-out infinite 0.4s; }
+.animate-eq-4 { animation: eqBounce 0.8s ease-in-out infinite 0.15s; }
+
 

@@ -18,6 +18,7 @@ import { getChatTypography, getActiveFontClasses } from "../lib/chatTypography";
 import VybeCallLogBubble from "./calls/VybeCallLogBubble";
 import MessageReactionsModal from "./MessageReactionsModal";
 import MessageReactionBadge from "./MessageReactionBadge";
+import { renderFormattedMessageText } from "../lib/renderFormattedText";
 
 const EMOJIS = ["❤️", "👍", "😂", "😮", "😢", "🙏"];
 
@@ -733,7 +734,11 @@ const SenderMessage = ({
                     letterSpacing: activeFont.letterSpacing || "normal",
                   }}
                 >
-                  {searchQuery ? renderHighlightedText(message.content?.text, searchQuery) : message.content?.text}
+                  {renderFormattedMessageText(message.content?.text, {
+                    isSender: true,
+                    isGradientTheme,
+                    searchQuery,
+                  })}
                   {message.edited && (
                     <span className="text-[10px] ml-1.5 italic opacity-70">(edited)</span>
                   )}

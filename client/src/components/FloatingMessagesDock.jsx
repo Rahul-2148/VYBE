@@ -32,6 +32,7 @@ import { playMessageSentSound } from "../lib/sounds";
 import VoiceNotePlayer from "./VoiceNotePlayer";
 import VoiceRecorder from "./VoiceRecorder";
 import VybeExpressionPicker from "./VybeExpressionPicker";
+import { renderFormattedMessageText } from "../lib/renderFormattedText";
 
 const FloatingMessagesDock = () => {
   const navigate = useNavigate();
@@ -40,10 +41,12 @@ const FloatingMessagesDock = () => {
   const { userData } = useSelector((state) => state.user);
   const { conversations, isFloatingDockOpen, floatingActiveConvo, onlineUsers = [] } = useSelector((state) => state.message);
 
-  const isMessagesPage =
+  const shouldHideDock =
     location.pathname.startsWith("/messages") ||
     location.pathname.startsWith("/direct") ||
-    location.pathname.startsWith("/messageArea");
+    location.pathname.startsWith("/messageArea") ||
+    location.pathname.startsWith("/meet") ||
+    location.pathname.startsWith("/live");
 
   const [isOpen, setIsOpen] = useState(false);
   const [activeConvo, setActiveConvo] = useState(null); // Active conversation inside floating drawer
@@ -321,7 +324,7 @@ const FloatingMessagesDock = () => {
     ? activeConvo.participant || (Array.isArray(activeConvo.participants) ? activeConvo.participants.find((p) => p._id !== userData.user._id) : null)
     : null;
 
-  if (isMessagesPage) return null;
+  if (shouldHideDock) return null;
 
   return (
     <div className="fixed bottom-0 right-6 z-[200] font-sans select-none hidden md:block">
@@ -517,7 +520,14 @@ const FloatingMessagesDock = () => {
                           )}
 
                           {/* Text */}
-                          {text?.trim() && <p className="break-words text-inherit">{text}</p>}
+                          {text?.trim() && (
+                            <p className="break-words text-inherit">
+                              {renderFormattedMessageText(text, {
+                                isSender: isMe,
+                                isGradientTheme: isMe,
+                              })}
+                            </p>
+                          )}
 
                           {/* Media attachments */}
                           {msg.content?.media?.map((m, i) => {

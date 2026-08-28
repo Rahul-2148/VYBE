@@ -9,6 +9,7 @@ import {
   votePoll,
   answerQuiz,
   submitQuestionResponse,
+  respondSlider,
   replyStory,
   fetchStoryAnalytics,
   restoreStory,
@@ -53,6 +54,7 @@ storyRouter.post("/restore/:storyId", isAuthenticated, restoreStory);
 storyRouter.post("/poll/:storyId/vote", isAuthenticated, votePoll);
 storyRouter.post("/quiz/:storyId/answer", isAuthenticated, answerQuiz);
 storyRouter.post("/question/:storyId/submit", isAuthenticated, submitQuestionResponse);
+storyRouter.post("/slider/:storyId/respond", isAuthenticated, respondSlider);
 
 // Story DM Reply
 storyRouter.post("/reply/:storyId", isAuthenticated, replyStory);

@@ -40,6 +40,49 @@ const fetchItunesDirect = async (query, limit = 30) => {
   }
 };
 
+const CURATED_FALLBACK_TRACKS = [
+  {
+    id: "curated_1",
+    title: "Sunset Vibes & Chill",
+    artist: "VYBE Studio Beats",
+    album: "VYBE Trending",
+    audioUrl: "https://actions.google.com/sounds/v1/water/rain_heavy.ogg",
+    coverUrl: "https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=600",
+    duration: 30,
+    genre: "Chill",
+  },
+  {
+    id: "curated_2",
+    title: "Golden Hour Glow",
+    artist: "Aesthetic Wave",
+    album: "Summer Story Tracks",
+    audioUrl: "https://actions.google.com/sounds/v1/ambiences/outdoor_ambience.ogg",
+    coverUrl: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600",
+    duration: 30,
+    genre: "Pop & Beats",
+  },
+  {
+    id: "curated_3",
+    title: "Night Drive Phonk",
+    artist: "Cyber Samurai",
+    album: "Tokyo Phonk Vol 1",
+    audioUrl: "https://actions.google.com/sounds/v1/transportation/car_passing_by.ogg",
+    coverUrl: "https://images.unsplash.com/photo-1519501025264-65ba15a82390?w=600",
+    duration: 30,
+    genre: "Gym & Phonk",
+  },
+  {
+    id: "curated_4",
+    title: "Midnight Rain Lofi",
+    artist: "Cozy Bedroom Beats",
+    album: "Study & Chill",
+    audioUrl: "https://actions.google.com/sounds/v1/weather/rain_heavy.ogg",
+    coverUrl: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600",
+    duration: 30,
+    genre: "Lofi & Chill",
+  },
+];
+
 // All Real Category Tabs (Dynamically updated for any year)
 const getCurrentYear = () => new Date().getFullYear();
 
@@ -218,7 +261,7 @@ export const StoryMusicPickerModal = ({
         }
 
         const fallback = await fetchItunesDirect(`Top Hits Trending ${getCurrentYear()}`, 30);
-        setTracks(fallback);
+        setTracks(fallback.length > 0 ? fallback : CURATED_FALLBACK_TRACKS);
         setLoading(false);
         return;
       }
@@ -240,10 +283,10 @@ export const StoryMusicPickerModal = ({
       }
 
       const direct = await fetchItunesDirect(query, 30);
-      setTracks(direct);
+      setTracks(direct.length > 0 ? direct : CURATED_FALLBACK_TRACKS);
     } catch (err) {
       console.warn("Music load failed:", err);
-      setTracks([]);
+      setTracks(CURATED_FALLBACK_TRACKS);
     } finally {
       setLoading(false);
     }

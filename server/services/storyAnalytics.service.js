@@ -42,6 +42,19 @@ export const getStoryAnalytics = async (storyId, authorId) => {
         correctAnswers: answers.filter((a) => a.isCorrect).length,
       };
     }
+    if (s.type === "slider") {
+      const responses = story.sliderResponses || [];
+      const avg = responses.length > 0
+        ? Math.round(responses.reduce((sum, r) => sum + (r.value || 0), 0) / responses.length)
+        : 0;
+      return {
+        type: "slider",
+        question: s.slider?.question,
+        emoji: s.slider?.emoji,
+        totalResponses: responses.length,
+        averageValue: avg,
+      };
+    }
     return { type: s.type };
   });
 

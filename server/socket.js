@@ -36,6 +36,7 @@ const socketToUserMap = new Map();
 const typingTimers = new Map(); // server-side typing debounce
 const socketCallRooms = new Map(); // socketId -> Set of call room names
 const socketMeetingRooms = new Map(); // socketId -> Set of meeting IDs
+const meetingBreakoutSessions = new Map(); // meetingId -> Active Breakout Session
 
 const getUserRoom = (userId) => {
   const uid = (userId?._id || userId?.id || userId)?.toString();
@@ -1611,6 +1612,22 @@ export const initializeSocket = (httpServer) => {
       });
     });
 
+    socket.on("meeting:caption", (data) => {
+      const { meetingId, text, isFinal, id, speakerId, speakerName, speakerAvatar, language } = data || {};
+      if (!meetingId || !text) return;
+      const roomName = `meeting_${meetingId.toLowerCase()}`;
+      socket.to(roomName).emit("meeting:caption-received", {
+        id: id || `caption_${socket.id}_${Date.now()}`,
+        speakerId: speakerId || socket.userId || socket.id,
+        speakerName: speakerName || socket.userName || "Participant",
+        speakerAvatar: speakerAvatar || socket.profilePicture || null,
+        text: typeof text === "string" ? text.trim() : "",
+        isFinal: Boolean(isFinal),
+        language: language || "en-US",
+        timestamp: Date.now(),
+      });
+    });
+
     socket.on("meeting:chat-message", (data) => {
       const { meetingId, text, id, senderName, senderAvatar, replyTo, file, attachments } = data;
       if (!meetingId || (!text && !file && (!attachments || attachments.length === 0))) return;
@@ -1659,11 +1676,13 @@ export const initializeSocket = (httpServer) => {
     });
 
     socket.on("meeting:reaction", (data) => {
-      const { meetingId, emoji } = data;
+      const { meetingId, emoji, leftPercent, driftX } = data;
       if (!meetingId || !emoji) return;
 
       io.to(`meeting_${meetingId.toLowerCase()}`).emit("meeting:reaction-received", {
         emoji,
+        leftPercent,
+        driftX,
         senderId: socket.userId || socket.id,
         senderName: socket.userName || "Participant",
       });
@@ -1726,9 +1745,167 @@ export const initializeSocket = (httpServer) => {
         try {
           await Meeting.findOneAndUpdate(
             { meetingId: normalizedId, "participants.user": socket.userId },
-            { $set: { "participants.$.status": "left", "participants.$.leftAt": new Date() } }
+            { $set: { "participants.$.leftAt": new Date() } }
           );
-        } catch (e) {}
+        } catch (err) {
+          console.error("meeting:leave-room error:", err);
+        }
+      }
+    });
+
+    // =====================================================
+    // REAL-TIME BREAKOUT ROOMS (GOOGLE MEET PARITY)
+    // =====================================================
+    socket.on("meeting:breakout-start", async (data) => {
+      try {
+        const { meetingId, rooms, durationMinutes } = data || {};
+        if (!meetingId || !rooms || !Array.isArray(rooms)) return;
+        const normalizedId = meetingId.toLowerCase();
+
+        // Verify host authorization server-side
+        const meeting = await Meeting.findOne({ meetingId: normalizedId }).select("host").lean();
+        const isHost = meeting && socket.userId && meeting.host.toString() === socket.userId.toString();
+        if (!isHost) {
+          console.warn(`🛡️ Blocked unauthorized breakout-start by socket ${socket.id} (user: ${socket.userId})`);
+          return;
+        }
+
+        const duration = Number(durationMinutes) || 10;
+        const timerExpiresAt = Date.now() + duration * 60 * 1000;
+
+        const session = {
+          meetingId: normalizedId,
+          hostUserId: socket.userId,
+          status: "active",
+          startedAt: Date.now(),
+          durationMinutes: duration,
+          timerExpiresAt,
+          rooms: rooms.map((r, idx) => ({
+            id: r.id || `room-${idx + 1}`,
+            name: r.name || `Breakout Room ${idx + 1}`,
+            participants: Array.isArray(r.participants) ? r.participants : [],
+          })),
+        };
+
+        meetingBreakoutSessions.set(normalizedId, session);
+
+        // Broadcast breakout launch to all participants in main meeting room
+        io.to(`meeting_${normalizedId}`).emit("meeting:breakout-started", {
+          meetingId: normalizedId,
+          session,
+          timerExpiresAt,
+        });
+
+        console.log(`🚪 [Vybe Meet] Host started ${rooms.length} breakout rooms in "${normalizedId}" (${duration} mins)`);
+      } catch (err) {
+        console.error("meeting:breakout-start error:", err);
+      }
+    });
+
+    socket.on("meeting:breakout-join-room", async (data) => {
+      try {
+        const { meetingId, roomId } = data || {};
+        if (!meetingId || !roomId) return;
+        const normalizedId = meetingId.toLowerCase();
+        const breakoutRoomName = `meeting_${normalizedId}_breakout_${roomId}`;
+
+        // Join breakout sub-room
+        socket.join(breakoutRoomName);
+
+        // Fetch other members in this breakout room
+        const roomSockets = await io.in(breakoutRoomName).fetchSockets();
+        const members = roomSockets
+          .filter((s) => s.id !== socket.id)
+          .map((s) => ({
+            socketId: s.id,
+            userId: s.userId || null,
+            userName: s.userName || "Participant",
+            name: s.name || "",
+            profilePicture: s.profilePicture || null,
+          }));
+
+        socket.emit("meeting:breakout-room-members", {
+          meetingId: normalizedId,
+          roomId,
+          members,
+        });
+
+        // Notify existing members in this breakout room
+        socket.to(breakoutRoomName).emit("meeting:breakout-peer-joined", {
+          socketId: socket.id,
+          userId: socket.userId,
+          userName: socket.userName || "Participant",
+          name: socket.name || "",
+          profilePicture: socket.profilePicture || null,
+        });
+
+        console.log(`🚪 [Vybe Meet] @${socket.userName || socket.id} entered breakout sub-room "${breakoutRoomName}"`);
+      } catch (err) {
+        console.error("meeting:breakout-join-room error:", err);
+      }
+    });
+
+    socket.on("meeting:breakout-leave-room", (data) => {
+      const { meetingId, roomId } = data || {};
+      if (!meetingId || !roomId) return;
+      const normalizedId = meetingId.toLowerCase();
+      const breakoutRoomName = `meeting_${normalizedId}_breakout_${roomId}`;
+
+      socket.leave(breakoutRoomName);
+      socket.to(breakoutRoomName).emit("meeting:breakout-peer-left", {
+        socketId: socket.id,
+        userId: socket.userId,
+      });
+    });
+
+    socket.on("meeting:breakout-broadcast", async (data) => {
+      try {
+        const { meetingId, message } = data || {};
+        if (!meetingId || !message) return;
+        const normalizedId = meetingId.toLowerCase();
+
+        // Broadcast to main room and all breakout participants
+        io.to(`meeting_${normalizedId}`).emit("meeting:breakout-broadcast-received", {
+          message: typeof message === "string" ? message.trim() : "",
+          senderName: socket.userName || "Meeting Host",
+          timestamp: Date.now(),
+        });
+      } catch (err) {
+        console.error("meeting:breakout-broadcast error:", err);
+      }
+    });
+
+    socket.on("meeting:breakout-move-user", (data) => {
+      const { meetingId, targetSocketId, targetUserId, newRoomId, newRoomName } = data || {};
+      if (!meetingId || !newRoomId) return;
+      const normalizedId = meetingId.toLowerCase();
+
+      const target = targetSocketId || (targetUserId ? Array.from(activeUsers.get(targetUserId.toString()) || [])[0] : null);
+      if (target) {
+        io.to(target).emit("meeting:breakout-reassigned", {
+          meetingId: normalizedId,
+          newRoomId,
+          newRoomName: newRoomName || `Room ${newRoomId}`,
+        });
+      }
+    });
+
+    socket.on("meeting:breakout-end", async (data) => {
+      try {
+        const { meetingId } = data || {};
+        if (!meetingId) return;
+        const normalizedId = meetingId.toLowerCase();
+
+        meetingBreakoutSessions.delete(normalizedId);
+
+        // Notify all sockets across all breakout subrooms to return to main meeting
+        io.to(`meeting_${normalizedId}`).emit("meeting:breakout-ended", {
+          meetingId: normalizedId,
+        });
+
+        console.log(`🚪 [Vybe Meet] Breakout session closed in "${normalizedId}". All users returning to main meeting.`);
+      } catch (err) {
+        console.error("meeting:breakout-end error:", err);
       }
     });
 

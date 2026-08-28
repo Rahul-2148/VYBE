@@ -26,4 +26,8 @@ const store = configureStore({
 
 setupListeners(store.dispatch);
 
+if (typeof window !== "undefined") {
+  window.store = store;
+}
+
 export default store;

@@ -5,9 +5,9 @@ export const apiSlice = createApi({
   reducerPath: "api",
   baseQuery: axiosBaseQuery({ baseUrl: "" }),
   tagTypes: ["User", "Post", "Reel", "Story", "Notification", "Message", "Explore", "Hashtag", "Ad"],
-  keepUnusedDataFor: 300, // 5 minutes default in-memory cache (Stale-While-Revalidate)
+  keepUnusedDataFor: 1800, // 30 minutes in-memory cache for instant zero-flash mobile app resume (Stale-While-Revalidate)
   refetchOnReconnect: true,
-  refetchOnFocus: false, // Prevents aggressive flashing on tab focus while maintaining cache
+  refetchOnFocus: false, // Managed gracefully by useAppLifecycle to avoid uncoordinated flashing
 
   endpoints: (builder) => ({
     // ==========================================

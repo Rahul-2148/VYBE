@@ -29,18 +29,20 @@ export const NewMessageModal = ({ isOpen, onClose, onGroupCreated }) => {
   useEffect(() => {
     if (!isOpen) return;
     let isMounted = true;
-    setLoading(true);
-    api
-      .get("/user/suggested")
-      .then((res) => {
+    const fetchSuggested = async () => {
+      try {
+        setLoading(true);
+        const res = await api.get("/user/suggested");
         if (isMounted && res.data?.users) {
           setSuggestedUsers(res.data.users.filter((u) => u._id?.toString() !== currentUserId));
         }
-      })
-      .catch(() => {})
-      .finally(() => {
+      } catch {
+        // silent
+      } finally {
         if (isMounted) setLoading(false);
-      });
+      }
+    };
+    fetchSuggested();
 
     return () => {
       isMounted = false;
@@ -49,15 +51,16 @@ export const NewMessageModal = ({ isOpen, onClose, onGroupCreated }) => {
 
   // Debounced Universal Search
   useEffect(() => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
+    const query = searchQuery.trim();
+    if (!query) {
+      const timer = setTimeout(() => setSearchResults([]), 0);
+      return () => clearTimeout(timer);
     }
 
     const timer = setTimeout(async () => {
       try {
         setLoading(true);
-        const res = await api.get(`/user/search?q=${encodeURIComponent(searchQuery.trim())}`);
+        const res = await api.get(`/user/search?q=${encodeURIComponent(query)}`);
         if (res.data?.users) {
           setSearchResults(res.data.users.filter((u) => u._id?.toString() !== currentUserId));
         }

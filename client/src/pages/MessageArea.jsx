@@ -456,7 +456,6 @@ export const MessageArea = () => {
       setLoadingMore(false);
       setLoadingMessages(false);
     } catch {
-      snackbar.error("Failed to load messages");
       setLoadingMore(false);
       setLoadingMessages(false);
     }

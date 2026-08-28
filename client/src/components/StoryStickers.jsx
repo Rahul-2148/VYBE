@@ -75,7 +75,7 @@ export const StoryStickers = ({ stickers = [], storyId, currentUserId, pollVotes
   });
 
   const [localPollVotes, setLocalPollVotes] = useState(pollVotes);
-  // quiz state removed (unused)
+  const [userQuizAnswer, setUserQuizAnswer] = useState(null);
 
   const [questionText, setQuestionText] = useState("");
   const [questionSubmitted, setQuestionSubmitted] = useState(false);
@@ -112,7 +112,23 @@ export const StoryStickers = ({ stickers = [], storyId, currentUserId, pollVotes
     }
   };
 
-  // quiz handler removed (not used)
+  const handleQuizAnswer = async (optionIndex) => {
+    if (userQuizAnswer !== null) return;
+    setUserQuizAnswer(optionIndex);
+    try {
+      await api.post(`/story/quiz/${storyId}/answer`, { optionIndex });
+    } catch {
+      // silent
+    }
+  };
+
+  const handleSliderRespond = async (val) => {
+    try {
+      await api.post(`/story/slider/${storyId}/respond`, { value: val });
+    } catch {
+      // silent
+    }
+  };
 
   const handleQuestionSubmit = async (e) => {
     e.preventDefault();
@@ -225,6 +241,45 @@ export const StoryStickers = ({ stickers = [], storyId, currentUserId, pollVotes
               </div>
             )}
 
+            {/* 1.5. QUIZ STICKER */}
+            {sticker.type === "quiz" && sticker.quiz && (
+              <div className="bg-white/95 text-zinc-950 rounded-2xl p-4 shadow-2xl text-center space-y-2 border border-white/50">
+                <h4 className="font-extrabold text-xs text-zinc-900 leading-snug">{sticker.quiz.question || "Quiz"}</h4>
+                <div className="space-y-1.5">
+                  {sticker.quiz.options?.map((opt, optIdx) => {
+                    const isSelected = userQuizAnswer === optIdx;
+                    const isCorrect = optIdx === sticker.quiz.correctOptionIndex;
+                    const showResult = userQuizAnswer !== null;
+
+                    let btnClass = "bg-zinc-100 hover:bg-zinc-200 text-zinc-900 border-zinc-200";
+                    if (showResult) {
+                      if (isCorrect) {
+                        btnClass = "bg-emerald-500 text-white font-bold border-emerald-600 shadow-md";
+                      } else if (isSelected && !isCorrect) {
+                        btnClass = "bg-red-500 text-white font-bold border-red-600 shadow-md";
+                      } else {
+                        btnClass = "bg-zinc-100 opacity-60 text-zinc-700 border-zinc-200";
+                      }
+                    }
+
+                    return (
+                      <button
+                        key={optIdx}
+                        disabled={showResult}
+                        onClick={() => handleQuizAnswer(optIdx)}
+                        className={`w-full py-2 px-3 rounded-xl text-[11px] font-semibold transition flex items-center justify-between border cursor-pointer disabled:cursor-default ${btnClass}`}
+                      >
+                        <span className="font-mono font-black mr-2 opacity-75">{String.fromCharCode(65 + optIdx)}</span>
+                        <span className="truncate flex-1 text-left">{opt}</span>
+                        {showResult && isCorrect && <CheckCircle2 className="w-4 h-4 text-white shrink-0 ml-1" />}
+                        {showResult && isSelected && !isCorrect && <XCircle className="w-4 h-4 text-white shrink-0 ml-1" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* 2. MENTION STICKER */}
             {sticker.type === "mention" && sticker.mention && (
               <button
@@ -277,6 +332,8 @@ export const StoryStickers = ({ stickers = [], storyId, currentUserId, pollVotes
                     max="100"
                     value={sliderVal}
                     onChange={(e) => setSliderVal(e.target.value)}
+                    onPointerUp={(e) => handleSliderRespond(e.target.value)}
+                    onKeyUp={(e) => handleSliderRespond(e.target.value)}
                     className="w-full accent-orange-500 cursor-pointer"
                   />
                 </div>

@@ -40,6 +40,10 @@ export const MeetLobby = ({
   const [isCopied, setIsCopied] = useState(false);
   const [micVolume, setMicVolume] = useState(0);
 
+  const [showEffectsPicker, setShowEffectsPicker] = useState(false);
+  const [backgroundEffect, setBackgroundEffect] = useState("none"); // 'none' | 'slight-blur' | 'blur' | 'deep-blur' | 'office' | 'library' | 'cafe' | 'cyberpunk' | 'custom' | 'studio-warm' | 'studio-cool' | 'studio-glow'
+  const [customBackgroundUrl, setCustomBackgroundUrl] = useState(null);
+
   const videoRef = useRef(null);
   const localStreamRef = useRef(null);
   const audioContextCleanerRef = useRef(null);
@@ -154,16 +158,21 @@ export const MeetLobby = ({
     }
   };
 
-  const handleJoin = () => {
+  const handleJoin = (mode = "normal") => {
     triggerHaptic("medium");
     onJoinMeeting({
-      isMuted,
-      isVideoOff,
-      videoFilter,
+      isMuted: mode === "companion" ? true : isMuted,
+      isVideoOff: mode === "companion" ? true : isVideoOff,
+      videoFilter: videoFilter !== "none" ? videoFilter : backgroundEffect,
+      customBackgroundUrl,
       selectedAudioInput,
       selectedVideo,
+      presentOnJoin: mode === "present",
+      companionMode: mode === "companion",
     });
   };
+
+  const activeParticipants = meeting?.participants?.filter((p) => p.status === "joined") || [];
 
   return (
     <div className="w-full h-full flex flex-col lg:flex-row items-center justify-center gap-8 md:gap-12 p-4 md:p-8 max-w-6xl mx-auto select-none">
@@ -177,10 +186,13 @@ export const MeetLobby = ({
             playsInline
             muted
             style={{
-              filter: filterStyleMap[videoFilter || "none"] || "none",
+              filter:
+                backgroundEffect === "blur"
+                  ? "blur(4px)"
+                  : filterStyleMap[videoFilter || "none"] || "none",
               display: isVideoOff || !localStream ? "none" : "block",
             }}
-            className="w-full h-full object-cover -scale-x-100"
+            className="w-full h-full object-cover -scale-x-100 transition-all duration-300"
           />
 
           {(isVideoOff || !localStream) && (
@@ -213,6 +225,19 @@ export const MeetLobby = ({
             >
               {isVideoOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
             </button>
+
+            {/* Visual Effects & Backgrounds Toggle */}
+            <button
+              onClick={() => setShowEffectsPicker((p) => !p)}
+              className={`p-3 rounded-full transition cursor-pointer active:scale-95 ${
+                showEffectsPicker || backgroundEffect !== "none"
+                  ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30"
+                  : "bg-white/20 hover:bg-white/30 text-white"
+              }`}
+              title="Apply visual effects"
+            >
+              <Sparkles className="w-5 h-5" />
+            </button>
           </div>
 
           {/* Real-time Voice Volume Indicator (Green dot pulse) */}
@@ -224,26 +249,85 @@ export const MeetLobby = ({
           )}
         </div>
 
-        {/* Video Filters Bar */}
-        <div className="w-full flex items-center gap-2 overflow-x-auto hide-scrollbar pb-1">
-          {["none", "warm", "cool", "grayscale", "sepia", "contrast"].map((f) => (
-            <button
-              key={f}
-              onClick={() => setVideoFilter(f)}
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider transition cursor-pointer shrink-0 ${
-                videoFilter === f
-                  ? "bg-rose-600 text-white shadow-md shadow-rose-600/30"
-                  : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700"
-              }`}
-            >
-              {f}
-            </button>
-          ))}
-        </div>
+        {/* Visual Effects & Backgrounds Bar (Google Meet Green Room Parity) */}
+        {showEffectsPicker ? (
+          <div className="w-full p-3.5 rounded-2xl bg-[#282a2c] border border-zinc-700/80 space-y-3">
+            <div className="flex items-center justify-between text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+              <span className="flex items-center gap-1.5 text-purple-400">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Visual Effects & Backgrounds</span>
+              </span>
+              <button
+                onClick={() => setShowEffectsPicker(false)}
+                className="text-xs text-zinc-400 hover:text-white cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+
+            {/* Hidden Custom Background Upload Input */}
+            <input
+              type="file"
+              id="lobby-custom-bg-input"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    setBackgroundEffect("custom");
+                    setCustomBackgroundUrl(reader.result);
+                    snackbar.success("Custom background loaded! 🖼️");
+                  };
+                  reader.readAsDataURL(file);
+                }
+              }}
+            />
+
+            {/* Effect Pills Row */}
+            <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar pb-1">
+              {[
+                { id: "none", label: "No Effect" },
+                { id: "slight-blur", label: "Slight Blur" },
+                { id: "blur", label: "Blur" },
+                { id: "deep-blur", label: "Deep Bokeh" },
+                { id: "office", label: "Office" },
+                { id: "library", label: "Library" },
+                { id: "cafe", label: "Cafe" },
+                { id: "cyberpunk", label: "Cyberpunk" },
+                { id: "custom", label: "+ Custom Image" },
+                { id: "studio-warm", label: "Studio Warm" },
+                { id: "studio-cool", label: "Studio Cool" },
+                { id: "studio-glow", label: "Radiance Glow" },
+              ].map((eff) => (
+                <button
+                  key={eff.id}
+                  onClick={() => {
+                    if (eff.id === "custom") {
+                      document.getElementById("lobby-custom-bg-input")?.click();
+                    } else {
+                      setBackgroundEffect(eff.id);
+                      setVideoFilter(eff.id);
+                    }
+                    triggerHaptic("selection");
+                  }}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition shrink-0 cursor-pointer ${
+                    backgroundEffect === eff.id
+                      ? "bg-purple-600 text-white shadow-md shadow-purple-600/30 border border-purple-400"
+                      : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700"
+                  }`}
+                >
+                  {eff.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* RIGHT: Meeting Info & Join Actions */}
-      <div className="w-full max-w-md flex flex-col gap-6 text-left">
+      <div className="w-full max-w-md flex flex-col gap-5 text-left">
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-rose-500 font-bold text-xs uppercase tracking-wider">
             <ShieldCheck className="w-4 h-4" />
@@ -257,45 +341,78 @@ export const MeetLobby = ({
           </p>
         </div>
 
-        {/* Host details */}
-        {meeting?.host && (
-          <div className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-800/60 border border-zinc-700/80">
-            <div className="w-10 h-10 rounded-full overflow-hidden border border-white/20 shrink-0">
-              <img
-                src={meeting.host.profileImage?.url || dp}
-                alt=""
-                className="w-full h-full object-cover"
-              />
-            </div>
-            <div>
-              <p className="text-xs font-bold text-white">Hosted by @{meeting.host.userName}</p>
-              <p className="text-[11px] text-zinc-400">
-                {isHost ? "You are the meeting host" : "Waiting for you to join"}
-              </p>
-            </div>
+        {/* Presence Preview (Google Meet "Who is in this call" Parity) */}
+        <div className="p-3.5 rounded-2xl bg-zinc-800/60 border border-zinc-700/80 space-y-2">
+          <div className="flex items-center gap-2.5">
+            {activeParticipants.length > 0 ? (
+              <>
+                <div className="flex -space-x-2">
+                  {activeParticipants.slice(0, 3).map((p, i) => (
+                    <img
+                      key={i}
+                      src={p.user?.profileImage?.url || dp}
+                      alt=""
+                      className="w-8 h-8 rounded-full border-2 border-zinc-800 object-cover"
+                    />
+                  ))}
+                </div>
+                <p className="text-xs text-zinc-200 font-medium">
+                  {activeParticipants[0]?.user?.userName || "Someone"}{" "}
+                  {activeParticipants.length > 1
+                    ? `and ${activeParticipants.length - 1} other${activeParticipants.length > 2 ? "s" : ""} in this call`
+                    : "is in this call"}
+                </p>
+              </>
+            ) : (
+              <div className="flex items-center gap-2 text-xs text-zinc-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                <span>No one else is here yet</span>
+              </div>
+            )}
           </div>
-        )}
+        </div>
 
-        {/* Join Actions */}
-        <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
-          <button
-            onClick={handleJoin}
-            className="w-full sm:flex-1 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 text-white font-extrabold text-sm shadow-xl shadow-rose-600/30 transition transform active:scale-95 cursor-pointer"
-          >
-            {isHost ? "Start Meeting" : "Join Now"}
-          </button>
+        {/* Primary & Secondary Join Actions */}
+        <div className="space-y-3 pt-1">
+          <div className="flex flex-col sm:flex-row items-center gap-3">
+            <button
+              onClick={() => handleJoin("normal")}
+              className="w-full sm:flex-1 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 text-white font-extrabold text-sm shadow-xl shadow-rose-600/30 transition transform active:scale-95 cursor-pointer text-center"
+            >
+              {isHost ? "Start Meeting" : "Join Now"}
+            </button>
 
-          <button
-            onClick={handleCopyLink}
-            className={`w-full sm:w-auto py-3.5 px-5 rounded-2xl border text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-              isCopied
-                ? "bg-emerald-600 border-emerald-500 text-white"
-                : "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-200"
-            }`}
-          >
-            {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-            <span>{isCopied ? "Copied!" : "Copy Link"}</span>
-          </button>
+            <button
+              onClick={handleCopyLink}
+              className={`w-full sm:w-auto py-3.5 px-5 rounded-2xl border text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+                isCopied
+                  ? "bg-emerald-600 border-emerald-500 text-white"
+                  : "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-200"
+              }`}
+            >
+              {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              <span>{isCopied ? "Copied!" : "Copy Link"}</span>
+            </button>
+          </div>
+
+          {/* Other Join Modes (Google Meet Parity: Present Directly / Companion Mode) */}
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={() => handleJoin("present")}
+              className="flex-1 py-2.5 px-3 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white border border-zinc-700 transition cursor-pointer text-center"
+              title="Join directly presenting your screen"
+            >
+              💻 Present Now
+            </button>
+
+            <button
+              onClick={() => handleJoin("companion")}
+              className="flex-1 py-2.5 px-3 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white border border-zinc-700 transition cursor-pointer text-center"
+              title="Join audio-muted for secondary display"
+            >
+              📱 Use Companion Mode
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -13,6 +13,8 @@ import {
   CornerDownRight,
   Search,
   Heart,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { GoHeart, GoHeartFill } from "react-icons/go";
 import moment from "moment";
@@ -29,12 +31,27 @@ import { triggerHaptic, microAudio } from "../lib/interactiveEffects";
 
 const QUICK_EMOJIS = ["❤️", "🙌", "🔥", "👏", "😍", "😂", "😮", "✨"];
 
-export const CommentsModal = ({ isOpen, onClose, post, reel }) => {
+export const CommentsModal = ({
+  isOpen,
+  onClose,
+  post,
+  reel,
+  isExpanded: externalExpanded,
+  onExpandChange,
+}) => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { userData } = useSelector((state) => state.user);
   const { postData } = useSelector((state) => state.post);
   const { reelData } = useSelector((state) => state.reel);
+
+  const [isExpanded, setIsExpanded] = useState(Boolean(externalExpanded));
+
+  useEffect(() => {
+    if (externalExpanded !== undefined) {
+      setIsExpanded(Boolean(externalExpanded));
+    }
+  }, [externalExpanded]);
 
   const [activeTab, setActiveTab] = useState("comments"); // "comments" | "likes"
   const [likers, setLikers] = useState([]);
@@ -557,7 +574,9 @@ export const CommentsModal = ({ isOpen, onClose, post, reel }) => {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.22 }}
-          className="fixed inset-0 z-[1100] flex items-end justify-center bg-black/50 backdrop-blur-[2px]"
+          className={`fixed inset-0 z-[1100] flex items-end justify-center transition-colors duration-300 ${
+            isExpanded ? "bg-black/80 backdrop-blur-md" : "bg-black/20"
+          }`}
         >
           <motion.div
             key="comments-modal-sheet"
@@ -571,67 +590,111 @@ export const CommentsModal = ({ isOpen, onClose, post, reel }) => {
             transition={{ type: "spring", damping: 28, stiffness: 300 }}
             drag="y"
             dragConstraints={{ top: 0 }}
-            dragElastic={{ top: 0, bottom: 0.4 }}
-            dragSnapToOrigin
+            dragElastic={{ top: 0.1, bottom: 0.3 }}
             onDragEnd={(e, info) => {
-              if (info.offset.y > 80 || info.velocity.y > 400) {
-                triggerHaptic("light");
-                onClose();
+              // Drag up to expand to full screen
+              if (info.offset.y < -40 || info.velocity.y < -250) {
+                if (!isExpanded) {
+                  setIsExpanded(true);
+                  onExpandChange?.(true);
+                  triggerHaptic("medium");
+                }
+              }
+              // Drag down to collapse or close
+              else if (info.offset.y > 60 || info.velocity.y > 300) {
+                if (isExpanded) {
+                  setIsExpanded(false);
+                  onExpandChange?.(false);
+                  triggerHaptic("light");
+                } else {
+                  triggerHaptic("light");
+                  onClose();
+                }
               }
             }}
-            className="relative w-full max-w-lg md:max-w-xl bg-surface/98 backdrop-blur-2xl border-t border-x border-border rounded-t-[28px] shadow-[0_-12px_45px_rgba(0,0,0,0.35)] dark:shadow-[0_-12px_45px_rgba(0,0,0,0.85)] overflow-hidden flex flex-col h-[64vh] md:h-[60vh] max-h-[600px] text-text"
+            className={`relative w-full max-w-lg md:max-w-xl bg-surface/98 backdrop-blur-2xl border-t border-x border-border rounded-t-[28px] shadow-[0_-12px_45px_rgba(0,0,0,0.45)] dark:shadow-[0_-12px_45px_rgba(0,0,0,0.85)] overflow-hidden flex flex-col transition-all duration-300 ease-out text-text ${
+              isExpanded
+                ? "h-[94dvh] md:h-[90dvh]"
+                : "h-[58dvh] md:h-[56dvh] max-h-[580px]"
+            }`}
           >
-            {/* Instagram Top Drag Notch */}
-            <div className="w-10 h-1 rounded-full bg-border-strong mx-auto mt-2.5 mb-1 shrink-0 opacity-60 cursor-pointer" onClick={onClose} />
-          {/* Header with Comments & Likes Tabs (Instagram & Facebook style) */}
-          <div className="flex items-center justify-between px-5 pt-3.5 pb-2 border-b border-border bg-surface-hover/20 shrink-0">
-            <div className="flex items-center gap-5">
-              <button
-                type="button"
-                onClick={() => {
-                  triggerHaptic("light");
-                  setActiveTab("comments");
-                }}
-                className={`text-xs font-bold transition-all relative flex items-center gap-1.5 cursor-pointer pb-2 ${
-                  activeTab === "comments"
-                    ? "text-text border-b-2 border-rose-500"
-                    : "text-text-secondary hover:text-text"
-                }`}
-              >
-                <MessageCircle className="w-4 h-4 text-rose-500" />
-                <span>Comments ({totalCommentsCount})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  triggerHaptic("light");
-                  setActiveTab("likes");
-                }}
-                className={`text-xs font-bold transition-all relative flex items-center gap-1.5 cursor-pointer pb-2 ${
-                  activeTab === "likes"
-                    ? "text-text border-b-2 border-rose-500"
-                    : "text-text-secondary hover:text-text"
-                }`}
-              >
-                <GoHeartFill className="w-4 h-4 text-rose-500" />
-                <span>
-                  Likes ({Math.max(likers.length, activeEntity?.likes?.length || 0, (isPost ? post?.likes?.length : reel?.likes?.length) || 0)})
-                </span>
-              </button>
-            </div>
-
-            <button
-              type="button"
+            {/* Instagram Top Drag Notch / Swipe Handle */}
+            <div
+              className="w-12 h-1.5 rounded-full bg-border-strong hover:bg-border-focus mx-auto mt-2.5 mb-1 shrink-0 opacity-70 cursor-pointer transition-all hover:scale-110 active:scale-95"
               onClick={() => {
+                const next = !isExpanded;
+                setIsExpanded(next);
+                onExpandChange?.(next);
                 triggerHaptic("light");
-                onClose();
               }}
-              className="p-1.5 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+              title={isExpanded ? "Collapse to half screen" : "Expand to full screen"}
+            />
+            {/* Header with Comments & Likes Tabs (Instagram & Facebook style) */}
+            <div className="flex items-center justify-between px-5 pt-3.5 pb-2 border-b border-border bg-surface-hover/20 shrink-0">
+              <div className="flex items-center gap-5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic("light");
+                    setActiveTab("comments");
+                  }}
+                  className={`text-xs font-bold transition-all relative flex items-center gap-1.5 cursor-pointer pb-2 ${
+                    activeTab === "comments"
+                      ? "text-text border-b-2 border-rose-500"
+                      : "text-text-secondary hover:text-text"
+                  }`}
+                >
+                  <MessageCircle className="w-4 h-4 text-rose-500" />
+                  <span>Comments ({totalCommentsCount})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic("light");
+                    setActiveTab("likes");
+                  }}
+                  className={`text-xs font-bold transition-all relative flex items-center gap-1.5 cursor-pointer pb-2 ${
+                    activeTab === "likes"
+                      ? "text-text border-b-2 border-rose-500"
+                      : "text-text-secondary hover:text-text"
+                  }`}
+                >
+                  <GoHeartFill className="w-4 h-4 text-rose-500" />
+                  <span>
+                    Likes ({Math.max(likers.length, activeEntity?.likes?.length || 0, (isPost ? post?.likes?.length : reel?.likes?.length) || 0)})
+                  </span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !isExpanded;
+                    setIsExpanded(next);
+                    onExpandChange?.(next);
+                    triggerHaptic("light");
+                  }}
+                  className="p-1.5 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer"
+                  title={isExpanded ? "Collapse sheet" : "Expand to full screen"}
+                >
+                  {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic("light");
+                    onClose();
+                  }}
+                  className="p-1.5 text-text-secondary hover:text-text rounded-full hover:bg-surface-hover transition cursor-pointer"
+                  title="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
 
           {/* Modal Body: Comments Tab vs Likes Tab */}
           {activeTab === "likes" ? (

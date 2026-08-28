@@ -24,6 +24,12 @@ import {
   CheckCircle2,
   Smartphone,
   Volume2,
+  Split,
+  DoorOpen,
+  Clock,
+  MessageCircle,
+  Send,
+  LogOut,
 } from "lucide-react";
 import {
   triggerHaptic,
@@ -34,19 +40,20 @@ import {
   setSoundEffectsEnabled,
 } from "../lib/interactiveEffects";
 import { snackbar } from "../lib/snackbar";
+import { getSocket } from "../lib/socket";
 
 export const CallActivitiesDrawer = ({
   isOpen,
   onClose,
-  isHost,
-  isRecording,
-  recordingDuration,
-  onToggleRecording,
-  videoFilter,
+  isHost = false,
+  videoFilter = "none",
   onChangeVideoFilter,
+  isRecording = false,
+  onStartRecording,
+  onStopRecording,
   onMuteAll,
   hostSettings = {
-    allowScreenShare: true,
+    allowScreenshare: true,
     allowChat: true,
     allowMic: true,
     allowReactions: true,
@@ -56,9 +63,19 @@ export const CallActivitiesDrawer = ({
   socket,
   room,
 }) => {
-  const [activeActivity, setActiveActivity] = useState(null); // null (grid), 'whiteboard', 'recording', 'polls', 'qna', 'effects', 'host', 'sensory'
+  const [activeActivity, setActiveActivity] = useState(null); // null (grid), 'whiteboard', 'recording', 'polls', 'qna', 'effects', 'host', 'sensory', 'breakout'
   const [drawerHapticsOn, setDrawerHapticsOn] = useState(() => getHapticsEnabled());
   const [drawerSoundsOn, setDrawerSoundsOn] = useState(() => getSoundEffectsEnabled());
+
+  // Breakout Rooms State
+  const [breakoutRooms, setBreakoutRooms] = useState([
+    { id: "room-1", name: "Room 1 (Frontend)", count: 0 },
+    { id: "room-2", name: "Room 2 (Backend)", count: 0 },
+  ]);
+  const [breakoutTimerMinutes, setBreakoutTimerMinutes] = useState(10);
+  const [isBreakoutActive, setIsBreakoutActive] = useState(false);
+  const [breakoutBroadcastMsg, setBreakoutBroadcastMsg] = useState("");
+  const [myBreakoutRoom, setMyBreakoutRoom] = useState(null);
 
   // ==========================================
   // 1. WHITEBOARD STATE & CANVAS
@@ -419,14 +436,52 @@ export const CallActivitiesDrawer = ({
           clearCanvas(false);
           break;
 
+        case "start-breakout":
+          if (data.rooms) {
+            setIsBreakoutActive(true);
+            setBreakoutRooms(data.rooms);
+            snackbar.info(`🚪 Breakout rooms have started (${data.durationMinutes || 10}m)`);
+          }
+          break;
+
+        case "end-breakout":
+          setIsBreakoutActive(false);
+          setMyBreakoutRoom(null);
+          snackbar.info("🏠 Breakout rooms ended. Returned to main meeting.");
+          break;
+
+        case "breakout-broadcast":
+          if (data.message) {
+            snackbar.info(`📢 Host Broadcast: ${data.message}`);
+          }
+          break;
+
         default:
           break;
       }
     };
 
-    socket.on("call:action-broadcast", handleBroadcast);
+    const handleMeetingBreakoutStarted = ({ session }) => {
+      if (session?.rooms) {
+        setIsBreakoutActive(true);
+        setBreakoutRooms(session.rooms);
+      }
+    };
+
+    const handleMeetingBreakoutEnded = () => {
+      setIsBreakoutActive(false);
+      setMyBreakoutRoom(null);
+    };
+
+    const activeSocket = socket || getSocket();
+    activeSocket?.on("call:action-broadcast", handleBroadcast);
+    activeSocket?.on("meeting:breakout-started", handleMeetingBreakoutStarted);
+    activeSocket?.on("meeting:breakout-ended", handleMeetingBreakoutEnded);
+
     return () => {
-      socket.off("call:action-broadcast", handleBroadcast);
+      activeSocket?.off("call:action-broadcast", handleBroadcast);
+      activeSocket?.off("meeting:breakout-started", handleMeetingBreakoutStarted);
+      activeSocket?.off("meeting:breakout-ended", handleMeetingBreakoutEnded);
     };
   }, [socket, drawRemoteStroke, clearCanvas]);
 
@@ -450,10 +505,12 @@ export const CallActivitiesDrawer = ({
             {!activeActivity && <LayoutGrid className="w-4 h-4 text-blue-400" />}
             {activeActivity === "whiteboard" && "Whiteboard"}
             {activeActivity === "recording" && "Call Recording"}
+            {activeActivity === "breakout" && "Breakout Rooms"}
             {activeActivity === "polls" && "Live Polls"}
             {activeActivity === "qna" && "Q&A"}
             {activeActivity === "effects" && "Visual Effects & Tone"}
             {activeActivity === "host" && "Host Controls"}
+            {activeActivity === "sensory" && "Haptics & Audio"}
             {!activeActivity && "Activities"}
           </h3>
         </div>
@@ -515,6 +572,30 @@ export const CallActivitiesDrawer = ({
                     <p className="text-[11px] text-zinc-400">
                       {isRecording ? "🔴 Recording in progress..." : "Record meeting audio & video"}
                     </p>
+                  </div>
+                </div>
+              </button>
+
+              {/* Breakout Rooms */}
+              <button
+                type="button"
+                onClick={() => setActiveActivity("breakout")}
+                className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-[#28292a] hover:bg-[#333537] border border-zinc-700/60 transition cursor-pointer text-left group shadow-xs"
+              >
+                <div className="flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center shrink-0">
+                    <DoorOpen className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-white group-hover:text-indigo-400 transition flex items-center gap-2">
+                      <span>Breakout Rooms</span>
+                      {isBreakoutActive && (
+                        <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 text-[10px] font-bold rounded-full border border-emerald-500/30">
+                          Active
+                        </span>
+                      )}
+                    </h4>
+                    <p className="text-[11px] text-zinc-400">Split into smaller focus group discussions</p>
                   </div>
                 </div>
               </button>
@@ -1172,6 +1253,266 @@ export const CallActivitiesDrawer = ({
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ============================================================
+            9. BREAKOUT ROOMS VIEW (Google Meet Breakout Rooms Parity)
+            ============================================================ */}
+        {activeActivity === "breakout" && (
+          <div className="space-y-4">
+            <div className="p-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-start gap-3">
+              <DoorOpen className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-xs font-bold text-indigo-300 mb-0.5">Breakout Rooms</h4>
+                <p className="text-[11px] text-zinc-400 leading-relaxed">
+                  Split participants into smaller group video sessions. The host can broadcast announcements and close all rooms anytime.
+                </p>
+              </div>
+            </div>
+
+            {/* Active Breakout Status */}
+            {isBreakoutActive ? (
+              <div className="space-y-3">
+                <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+                    <span className="text-xs font-bold text-emerald-300">
+                      Breakout Sessions in Progress
+                    </span>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-zinc-300 flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5" />
+                    {breakoutTimerMinutes}m
+                  </span>
+                </div>
+
+                {/* Host Broadcast Announcement Input */}
+                {isHost && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (!breakoutBroadcastMsg.trim()) return;
+                      const activeSocket = socket || getSocket();
+                      if (activeSocket && room) {
+                        activeSocket.emit("meeting:breakout-broadcast", {
+                          meetingId: room,
+                          message: breakoutBroadcastMsg.trim(),
+                        });
+                        activeSocket.emit("call:action", {
+                          room,
+                          action: "breakout-broadcast",
+                          message: breakoutBroadcastMsg.trim(),
+                          sender: myUserName,
+                        });
+                      }
+                      snackbar.success("Broadcast message sent to all rooms 📢");
+                      setBreakoutBroadcastMsg("");
+                      triggerHaptic("medium");
+                    }}
+                    className="p-3 rounded-2xl bg-[#28292a] border border-zinc-700/80 space-y-2"
+                  >
+                    <label className="text-[11px] font-bold text-zinc-300 flex items-center gap-1.5">
+                      <MessageCircle className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Broadcast to all breakout rooms</span>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={breakoutBroadcastMsg}
+                        onChange={(e) => setBreakoutBroadcastMsg(e.target.value)}
+                        placeholder="e.g. 2 minutes left until return!"
+                        className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-500 outline-none focus:border-indigo-500"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!breakoutBroadcastMsg.trim()}
+                        className="p-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition cursor-pointer"
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {/* Rooms List */}
+                <div className="space-y-2">
+                  {breakoutRooms.map((r) => (
+                    <div
+                      key={r.id}
+                      className={`p-3 rounded-2xl border transition flex items-center justify-between ${
+                        myBreakoutRoom === r.id
+                          ? "bg-indigo-600/20 border-indigo-500/50"
+                          : "bg-[#28292a] border-zinc-700/60"
+                      }`}
+                    >
+                      <div>
+                        <h5 className="text-xs font-bold text-white">{r.name}</h5>
+                        <p className="text-[10px] text-zinc-400">
+                          {myBreakoutRoom === r.id ? "You are here" : "Active focus group"}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMyBreakoutRoom(r.id);
+                          const activeSocket = socket || getSocket();
+                          if (activeSocket && room) {
+                            activeSocket.emit("meeting:breakout-join-room", {
+                              meetingId: room,
+                              roomId: r.id,
+                            });
+                          }
+                          triggerHaptic("light");
+                          snackbar.info(`Joined ${r.name}`);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                          myBreakoutRoom === r.id
+                            ? "bg-indigo-600 text-white shadow-sm"
+                            : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                        }`}
+                      >
+                        {myBreakoutRoom === r.id ? "Connected" : "Join Room"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* End Breakout Rooms (Host Only) */}
+                {isHost && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic("heavy");
+                      setIsBreakoutActive(false);
+                      setMyBreakoutRoom(null);
+                      const activeSocket = socket || getSocket();
+                      if (activeSocket && room) {
+                        activeSocket.emit("meeting:breakout-end", {
+                          meetingId: room,
+                        });
+                        activeSocket.emit("call:action", {
+                          room,
+                          action: "end-breakout",
+                        });
+                      }
+                      snackbar.info("Breakout rooms closed. Everyone returned to main room 🏠");
+                    }}
+                    className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 active:scale-95 text-white text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow-md"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>End Breakout Sessions & Return All</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              /* Host Setup View */
+              <div className="space-y-3">
+                {isHost ? (
+                  <>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-zinc-300">Number of Rooms</label>
+                        <span className="text-xs font-bold text-indigo-400">
+                          {breakoutRooms.length} Rooms
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {[2, 3, 4, 5].map((n) => (
+                          <button
+                            key={n}
+                            type="button"
+                            onClick={() => {
+                              const newRooms = Array.from({ length: n }, (_, i) => ({
+                                id: `room-${i + 1}`,
+                                name: `Breakout Room ${i + 1}`,
+                                count: 0,
+                              }));
+                              setBreakoutRooms(newRooms);
+                              triggerHaptic("light");
+                            }}
+                            className={`flex-1 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                              breakoutRooms.length === n
+                                ? "bg-indigo-600 border-indigo-500 text-white shadow-sm"
+                                : "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-300"
+                            }`}
+                          >
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Timer Configuration */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>Breakout Duration</span>
+                      </label>
+                      <div className="grid grid-cols-4 gap-2">
+                        {[5, 10, 15, 30].map((mins) => (
+                          <button
+                            key={mins}
+                            type="button"
+                            onClick={() => {
+                              setBreakoutTimerMinutes(mins);
+                              triggerHaptic("light");
+                            }}
+                            className={`py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                              breakoutTimerMinutes === mins
+                                ? "bg-indigo-600 border-indigo-500 text-white shadow-sm"
+                                : "bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-300"
+                            }`}
+                          >
+                            {mins}m
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Launch Button */}
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic("medium");
+                          setIsBreakoutActive(true);
+                          const activeSocket = socket || getSocket();
+                          if (activeSocket && room) {
+                            activeSocket.emit("meeting:breakout-start", {
+                              meetingId: room,
+                              rooms: breakoutRooms,
+                              durationMinutes: breakoutTimerMinutes,
+                            });
+                            activeSocket.emit("call:action", {
+                              room,
+                              action: "start-breakout",
+                              rooms: breakoutRooms,
+                              durationMinutes: breakoutTimerMinutes,
+                            });
+                          }
+                          snackbar.success(`Breakout rooms launched (${breakoutTimerMinutes} mins) 🚪`);
+                        }}
+                        className="w-full py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-extrabold text-xs shadow-lg shadow-indigo-600/30 transition transform active:scale-95 cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <DoorOpen className="w-4 h-4" />
+                        <span>Start {breakoutRooms.length} Breakout Rooms</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-4 rounded-2xl bg-[#28292a] border border-zinc-700/60 text-center space-y-2">
+                    <DoorOpen className="w-8 h-8 text-zinc-500 mx-auto" />
+                    <p className="text-xs text-zinc-300 font-medium">
+                      No active breakout rooms right now.
+                    </p>
+                    <p className="text-[11px] text-zinc-500">
+                      The meeting host can launch breakout focus groups at any time.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

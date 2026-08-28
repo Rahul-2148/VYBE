@@ -4,12 +4,18 @@ import { Sparkles, X, Check, Image as ImageIcon } from "lucide-react";
 import { snackbar } from "../lib/snackbar";
 import api from "../lib/axios";
 
-export const StoryHighlighterModal = ({ isOpen, onClose, onSuccess }) => {
+export const StoryHighlighterModal = ({ isOpen, onClose, onSuccess, story }) => {
   const [archivedStories, setArchivedStories] = useState([]);
-  const [selectedStoryIds, setSelectedStoryIds] = useState([]);
+  const [selectedStoryIds, setSelectedStoryIds] = useState(() => (story?._id ? [story._id] : []));
   const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (story?._id) {
+      setSelectedStoryIds((prev) => (prev.includes(story._id) ? prev : [...prev, story._id]));
+    }
+  }, [story]);
 
   useEffect(() => {
     if (!isOpen) return;

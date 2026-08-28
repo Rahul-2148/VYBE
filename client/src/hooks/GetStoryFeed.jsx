@@ -9,7 +9,7 @@ const GetStoryFeed = () => {
   const userId = userData?._id || userData?.user?._id;
 
   // RTK Query with instant cache & stale-while-revalidate
-  const { data: storyData } = useGetStoriesFeedQuery(undefined, {
+  const { data: storyData, refetch: refetchStories } = useGetStoriesFeedQuery(undefined, {
     skip: !userId,
   });
 
@@ -18,6 +18,16 @@ const GetStoryFeed = () => {
       dispatch(setStoryFeed(storyData.stories));
     }
   }, [storyData, dispatch]);
+
+  useEffect(() => {
+    const handleAppResumed = () => {
+      if (userId) {
+        refetchStories();
+      }
+    };
+    window.addEventListener("vybe:app_resumed", handleAppResumed);
+    return () => window.removeEventListener("vybe:app_resumed", handleAppResumed);
+  }, [userId, refetchStories]);
 
   return null;
 };

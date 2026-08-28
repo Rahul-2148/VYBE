@@ -31,16 +31,19 @@ const ForwardMessageModal = () => {
 
   // Debounced Universal Search in Forward Modal
   useEffect(() => {
-    if (!searchQuery.trim()) {
-      setGlobalSearchResults([]);
-      setIsSearchingGlobal(false);
-      return;
+    const query = searchQuery.trim();
+    if (!query) {
+      const timer = setTimeout(() => {
+        setGlobalSearchResults([]);
+        setIsSearchingGlobal(false);
+      }, 0);
+      return () => clearTimeout(timer);
     }
 
     const timer = setTimeout(async () => {
       try {
         setIsSearchingGlobal(true);
-        const res = await api.get(`/user/search?q=${encodeURIComponent(searchQuery.trim())}`);
+        const res = await api.get(`/user/search?q=${encodeURIComponent(query)}`);
         if (res.data?.users) {
           setGlobalSearchResults(res.data.users);
         }

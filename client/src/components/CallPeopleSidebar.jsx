@@ -14,6 +14,7 @@ export const CallPeopleSidebar = ({
   callerAvatar,
   peers = {},
   isHost,
+  hostUserId,
   isMuted,
   isVideoOff,
   isHandRaised,
@@ -132,6 +133,7 @@ export const CallPeopleSidebar = ({
         {(!searchQuery || "you".includes(searchQuery.toLowerCase()) || myUserName?.toLowerCase().includes(searchQuery.toLowerCase())) && (() => {
           const selfQIndex = raisedHandsList?.findIndex((h) => h.isSelf);
           const selfQ = selfQIndex !== -1 && selfQIndex !== undefined ? selfQIndex + 1 : null;
+          const isSelfHost = isHost || (hostUserId && myUserId?.toString() === hostUserId.toString());
           return (
             <div className="flex items-center justify-between p-2.5 rounded-2xl bg-[#28292a] border border-zinc-700/60">
               <div className="flex items-center gap-3">
@@ -142,9 +144,14 @@ export const CallPeopleSidebar = ({
                   className="w-9 h-9 rounded-full object-cover border border-white/20 shadow-xs"
                 />
                 <div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-xs font-bold text-white">You</span>
-                    {isHost && <Crown className="w-3 h-3 text-amber-400" title="Host" />}
+                    {isSelfHost && (
+                      <span className="px-1.5 py-0.5 rounded-md bg-zinc-800 text-zinc-300 text-[10px] font-semibold border border-zinc-700/80 flex items-center gap-1">
+                        <Crown className="w-3 h-3 text-amber-400" />
+                        <span>Host</span>
+                      </span>
+                    )}
                     {isHandRaised && (
                       <span className="px-1.5 py-0.5 rounded-full bg-[#1a73e8] text-white text-[10px] font-black flex items-center gap-1 shadow-xs animate-in zoom-in-75">
                         <span>✋</span>
@@ -232,6 +239,8 @@ export const CallPeopleSidebar = ({
           );
           const peerQ = peerQIndex !== -1 && peerQIndex !== undefined ? peerQIndex + 1 : null;
 
+          const isPeerHost = (hostUserId && peerData.userId?.toString() === hostUserId.toString()) || peerData.isHost;
+
           return (
             <div
               key={socketId}
@@ -245,8 +254,14 @@ export const CallPeopleSidebar = ({
                   className="w-9 h-9 rounded-full object-cover border border-white/20 shadow-xs"
                 />
                 <div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-xs font-bold text-white">{displayPName}</span>
+                    {isPeerHost && (
+                      <span className="px-1.5 py-0.5 rounded-md bg-zinc-800 text-zinc-300 text-[10px] font-semibold border border-zinc-700/80 flex items-center gap-1">
+                        <Crown className="w-3 h-3 text-amber-400" />
+                        <span>Host</span>
+                      </span>
+                    )}
                     {peerData.handRaised && (
                       <span className="px-1.5 py-0.5 rounded-full bg-[#1a73e8] text-white text-[10px] font-black flex items-center gap-1 shadow-xs animate-in zoom-in-75">
                         <span>✋</span>

@@ -85,6 +85,48 @@ const storySlice = createSlice({
       updateInStories(state.followingStories);
     },
 
+    updateStoryPollVotesInRedux: (state, action) => {
+      const { storyId, pollVotes } = action.payload;
+      const updateVotes = (group) => {
+        group?.stories?.forEach((story) => {
+          if (story._id === storyId) {
+            story.pollVotes = pollVotes;
+          }
+        });
+      };
+      state.feed.forEach(updateVotes);
+      if (state.yourStory) updateVotes(state.yourStory);
+      state.followingStories.forEach(updateVotes);
+    },
+
+    updateStoryQuestionResponsesInRedux: (state, action) => {
+      const { storyId, questionResponses } = action.payload;
+      const updateResponses = (group) => {
+        group?.stories?.forEach((story) => {
+          if (story._id === storyId) {
+            story.questionResponses = questionResponses;
+          }
+        });
+      };
+      state.feed.forEach(updateResponses);
+      if (state.yourStory) updateResponses(state.yourStory);
+      state.followingStories.forEach(updateResponses);
+    },
+
+    updateStoryQuizAnswersInRedux: (state, action) => {
+      const { storyId, quizAnswers } = action.payload;
+      const updateQuiz = (group) => {
+        group?.stories?.forEach((story) => {
+          if (story._id === storyId) {
+            story.quizAnswers = quizAnswers;
+          }
+        });
+      };
+      state.feed.forEach(updateQuiz);
+      if (state.yourStory) updateQuiz(state.yourStory);
+      state.followingStories.forEach(updateQuiz);
+    },
+
     removeStoryFromReduxFeed: (state, action) => {
       const { storyId } = action.payload;
       const filterGroup = (group) => {
@@ -106,6 +148,9 @@ export const {
   markStoryAsViewedInRedux,
   toggleStoryLikeInRedux,
   updateStoryReaction,
+  updateStoryPollVotesInRedux,
+  updateStoryQuestionResponsesInRedux,
+  updateStoryQuizAnswersInRedux,
   removeStoryFromReduxFeed,
 } = storySlice.actions;
 

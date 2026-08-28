@@ -15,6 +15,10 @@ import {
   emitStoryViewed,
   emitStoryLiked,
   emitStoryReacted,
+  emitStoryPollVoted,
+  emitStoryQuestionSubmitted,
+  emitStoryQuizAnswered,
+  emitStorySliderResponded,
   emitStoryDeleted,
 } from "../services/storySocket.service.js";
 
@@ -369,6 +373,8 @@ export const votePoll = async (req, res) => {
       { returnDocument: 'after' }
     );
 
+    emitStoryPollVoted(io, storyId, userId, storyObj.author, optionIndex, story.pollVotes);
+
     return res.status(200).json({
       success: true,
       message: "Poll vote recorded!",
@@ -403,6 +409,8 @@ export const answerQuiz = async (req, res) => {
       { returnDocument: 'after' }
     );
 
+    emitStoryQuizAnswered(io, storyId, userId, storyObj.author, optionIndex, isCorrect, story.quizAnswers);
+
     return res.status(200).json({
       success: true,
       isCorrect,
@@ -436,10 +444,50 @@ export const submitQuestionResponse = async (req, res) => {
       { returnDocument: 'after' }
     );
 
+    emitStoryQuestionSubmitted(io, storyId, userId, storyObj.author, responseText, story.questionResponses);
+
     return res.status(200).json({
       success: true,
       message: "Response submitted!",
       questionResponses: story.questionResponses,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: true, message: err.message });
+  }
+};
+
+export const respondSlider = async (req, res) => {
+  try {
+    const { storyId } = req.params;
+    const { value } = req.body;
+    const userId = req.userId;
+
+    const storyObj = await Story.findById(storyId);
+    if (!storyObj) return res.status(404).json({ success: false, message: "Story not found" });
+
+    // Block check
+    const blockedUserIds = await getBlockedUserIds(userId);
+    if (blockedUserIds.includes(storyObj.author.toString())) {
+      return res.status(403).json({ success: false, message: "Action blocked." });
+    }
+
+    // Pull previous response from this user
+    await Story.findByIdAndUpdate(storyId, {
+      $pull: { sliderResponses: { user: userId } },
+    });
+
+    const story = await Story.findByIdAndUpdate(
+      storyId,
+      { $push: { sliderResponses: { user: userId, value: Number(value) || 0, respondedAt: new Date() } } },
+      { returnDocument: "after" }
+    );
+
+    emitStorySliderResponded(io, storyId, userId, storyObj.author, Number(value) || 0, story.sliderResponses);
+
+    return res.status(200).json({
+      success: true,
+      message: "Slider response saved!",
+      sliderResponses: story.sliderResponses,
     });
   } catch (err) {
     res.status(500).json({ success: false, error: true, message: err.message });
@@ -451,7 +499,7 @@ export const replyStory = async (req, res) => {
   try {
     const senderId = req.userId;
     const { storyId } = req.params;
-    const { text } = req.body;
+    const text = req.body.text || req.body.message || "";
 
     const story = await Story.findById(storyId);
     if (!story) return res.status(404).json({ success: false, message: "Story not found" });

@@ -136,7 +136,11 @@ export const VybeVideoCallView = ({
   };
 
   useEffect(() => {
-    resetIdleTimer();
+    idleTimerRef.current = setTimeout(() => {
+      setControlsVisible(false);
+      setShowFiltersBar(false);
+      setShowReactionsBar(false);
+    }, 4500);
     return () => {
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     };

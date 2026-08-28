@@ -1,6 +1,7 @@
 import { Meeting } from "../models/meeting.model.js";
 import { User } from "../models/user.model.js";
 import crypto from "crypto";
+import { generateMeetingAISummary } from "../utils/aiEngine.js";
 
 // Helper to generate Google Meet-style meeting codes (e.g. "abc-defg-hij")
 const generateMeetingCode = () => {
@@ -318,5 +319,40 @@ export const clearAllRecentMeetings = async (req, res) => {
   } catch (error) {
     console.error("[clearAllRecentMeetings] error:", error);
     return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Gemini AI in Meet Assistant
+ * POST /api/v1/meet/:meetingId/ai-assistant
+ */
+export const getMeetingAIAssistant = async (req, res) => {
+  try {
+    const { meetingId } = req.params;
+    const { actionType = "summary", transcript = "", chatMessages = [], customPrompt = "" } = req.body;
+
+    const normalizedId = normalizeMeetingId(meetingId);
+    const meeting = await Meeting.findOne({ meetingId: normalizedId });
+    const meetingTitle = meeting?.title || "VYBE Meeting";
+
+    const aiContent = await generateMeetingAISummary({
+      title: meetingTitle,
+      transcript,
+      chatMessages,
+      actionType,
+      customPrompt,
+    });
+
+    return res.status(200).json({
+      success: true,
+      actionType,
+      content: aiContent,
+    });
+  } catch (error) {
+    console.error("[getMeetingAIAssistant] error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to generate AI meeting intelligence",
+    });
   }
 };

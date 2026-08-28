@@ -426,6 +426,8 @@ const Post = ({ post }) => {
     dispatch(setPostData(updated));
   };
 
+  if (!post || !post._id) return null;
+
   return (
     <div
       ref={containerRef}

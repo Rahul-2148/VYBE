@@ -6,6 +6,7 @@ import { useNavigate, useLocation, useSearchParams, useParams } from "react-rout
 import ReelCard from "../components/ReelCard";
 import ReelPreloader from "../components/ReelPreloader";
 import LeftHome from "../components/LeftHome";
+import RenderErrorBoundary from "../components/RenderErrorBoundary";
 import api from "../lib/axios";
 import { useGetAllReelsQuery } from "../redux/api/apiSlice";
 import { setReelData } from "../redux/features/reelSlice";
@@ -265,14 +266,16 @@ export const Reels = () => {
             >
               {reelData.map((reel, index) => (
                 <div key={reel._id || index} className="h-[100dvh] w-full flex items-center justify-center snap-start snap-always shrink-0 py-0 md:py-4">
-                  <ReelCard
-                    reel={reel}
-                    isActive={index === currentIndex}
-                    onNext={handleNext}
-                    onPrev={handlePrev}
-                    autoScroll={autoScroll}
-                    onToggleAutoScroll={toggleAutoScroll}
-                  />
+                  <RenderErrorBoundary>
+                    <ReelCard
+                      reel={reel}
+                      isActive={index === currentIndex}
+                      onNext={handleNext}
+                      onPrev={handlePrev}
+                      autoScroll={autoScroll}
+                      onToggleAutoScroll={toggleAutoScroll}
+                    />
+                  </RenderErrorBoundary>
                 </div>
               ))}
             </div>

@@ -98,11 +98,6 @@ export const VybeCallOverlay = ({
   const [showAddPeople, setShowAddPeople] = useState(false);
   const [showScreenShareConfirm, setShowScreenShareConfirm] = useState(false);
 
-  // Sync prop changes
-  useEffect(() => {
-    setCurrentCallType(callType);
-  }, [callType]);
-
   // Extract peers list (strictly excluding local user)
   const peerList = useMemo(() => {
     const myIdStr = currentUserId?.toString();
@@ -112,7 +107,7 @@ export const VybeCallOverlay = ({
   }, [peers, currentUserId]);
   const primaryPeer = peerList[0];
   const isConnected = peerList.length > 0;
-  const isVideo = currentCallType === "video";
+  const isVideo = (currentCallType || callType) === "video";
 
   // Recipient details
   const userName =
@@ -127,16 +122,14 @@ export const VybeCallOverlay = ({
 
   // Duration Timer
   useEffect(() => {
-    let timer = null;
-    if (isConnected) {
-      timer = setInterval(() => {
-        setCallDuration((prev) => prev + 1);
-      }, 1000);
-    } else {
-      setCallDuration(0);
+    if (!isConnected) {
+      return;
     }
+    const timer = setInterval(() => {
+      setCallDuration((prev) => prev + 1);
+    }, 1000);
     return () => {
-      if (timer) clearInterval(timer);
+      clearInterval(timer);
     };
   }, [isConnected]);
 

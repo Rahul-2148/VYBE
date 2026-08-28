@@ -9,6 +9,7 @@ import Post from "./Post";
 import SponsoredPost from "./SponsoredPost";
 import FeedFilterBar from "./FeedFilterBar";
 import CloseFriendsModal from "./CloseFriendsModal";
+import RenderErrorBoundary from "./RenderErrorBoundary";
 import { MessageCircle, Loader2, Sparkles, Users, Star, Compass, UserPlus, Plus, Bell } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../lib/axios";
@@ -80,10 +81,17 @@ const Feed = () => {
     socket.on("live:creator-started", handleCreatorLive);
     socket.on("live:creator-ended", handleCreatorEnded);
 
+    // Silent background refresh on mobile app resume
+    const handleAppResumed = () => {
+      fetchActiveLives();
+    };
+    window.addEventListener("vybe:app_resumed", handleAppResumed);
+
     return () => {
       mounted = false;
       socket.off("live:creator-started", handleCreatorLive);
       socket.off("live:creator-ended", handleCreatorEnded);
+      window.removeEventListener("vybe:app_resumed", handleAppResumed);
     };
   }, []);
 
@@ -96,6 +104,15 @@ const Feed = () => {
   } = useGetRankedFeedPostsQuery(feedMode, {
     refetchOnMountOrArgChange: true,
   });
+
+  useEffect(() => {
+    const handleAppResumed = () => {
+      _refetchFeed();
+    };
+    window.addEventListener("vybe:app_resumed", handleAppResumed);
+    return () => window.removeEventListener("vybe:app_resumed", handleAppResumed);
+  }, [_refetchFeed]);
+
   const { data: adsData } = useGetMonetizationAdsQuery();
 
   // If feedData has been returned for current mode, use it; otherwise fallback to postData
@@ -180,26 +197,12 @@ const Feed = () => {
           <LiveStoryDp key={stream._id} stream={stream} />
         ))}
 
-        {yourStory && yourStory.stories?.length > 0 ? (
-          <>
-            <StoryDp
-              userName="Add Story"
-              profileImage={userData?.user?.profileImage?.url}
-              storyGroup={null}
-            />
-            <StoryDp
-              userName="Your Story"
-              profileImage={userData?.user?.profileImage?.url}
-              storyGroup={yourStory}
-            />
-          </>
-        ) : (
-          <StoryDp
-            userName="Your Story"
-            profileImage={userData?.user?.profileImage?.url}
-            storyGroup={null}
-          />
-        )}
+        {/* Your Story tile (Instagram single tile with + badge) */}
+        <StoryDp
+          userName="Your story"
+          profileImage={userData?.user?.profileImage?.url}
+          storyGroup={yourStory || null}
+        />
 
         {followingStories.map((group, index) => (
           <StoryDp
@@ -308,7 +311,9 @@ const Feed = () => {
 
             return (
               <React.Fragment key={post._id || index}>
-                <Post post={post} />
+                <RenderErrorBoundary>
+                  <Post post={post} />
+                </RenderErrorBoundary>
                 {showAd && <SponsoredPost ad={feedAds[adIndex % feedAds.length]} />}
               </React.Fragment>
             );

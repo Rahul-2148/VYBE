@@ -37,6 +37,8 @@ import {
   PlusCircle,
   FolderOpen,
   Users,
+  ChevronRight,
+  ChevronLeft,
 } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
@@ -195,6 +197,7 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
   // Camera State
   const [useCamera, setUseCamera] = useState(false);
   const [facingMode, setFacingMode] = useState("user");
+  const [selectedCameraId, setSelectedCameraId] = useState(null);
   const [stream, setStream] = useState(null);
   const videoRef = useRef(null);
 
@@ -306,6 +309,29 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
         ]);
       }, 0);
       return () => clearTimeout(timer);
+    } else if (initialState?.sharedEntity) {
+      const entity = initialState.sharedEntity;
+      const timer = setTimeout(() => {
+        if (entity.entityType === "questionResponse") {
+          setMode("text");
+          setTextContent(`💬 Q&A with @${entity.authorName || "User"}:\n"${entity.caption || ""}"\n\n`);
+          setActiveTheme(TEXT_THEMES[0]);
+        } else if (entity.mediaUrl) {
+          const isVid = entity.mediaUrl.endsWith(".mp4") || entity.mediaUrl.includes("/video/");
+          setItems([
+            {
+              preview: entity.mediaUrl,
+              mediaType: isVid ? "video" : "image",
+              file: null,
+              stickers: [],
+              filter: "none",
+              isShared: true,
+            },
+          ]);
+          setMode("media");
+        }
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [initialState, handleSetFilter]);
 
@@ -394,8 +420,26 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
     setUseCamera(false);
   };
 
-  const flipCamera = () => {
-    setFacingMode((prev) => (prev === "user" ? "environment" : "user"));
+  const flipCamera = async () => {
+    try {
+      const devices = (await navigator.mediaDevices.enumerateDevices()).filter(
+        (d) => d.kind === "videoinput"
+      );
+      if (devices.length > 1) {
+        const currentIndex = devices.findIndex((d) => d.deviceId === selectedCameraId);
+        const nextIndex = (currentIndex + 1) % devices.length;
+        const nextDevice = devices[nextIndex];
+        setSelectedCameraId(nextDevice.deviceId);
+        const isRear = /back|rear|environment/i.test(nextDevice.label || "");
+        setFacingMode(isRear ? "environment" : (nextIndex === 0 ? "user" : "environment"));
+      } else {
+        setSelectedCameraId(null);
+        setFacingMode((prev) => (prev === "user" ? "environment" : "user"));
+      }
+    } catch {
+      setSelectedCameraId(null);
+      setFacingMode((prev) => (prev === "user" ? "environment" : "user"));
+    }
   };
 
   const capturePhoto = () => {
@@ -434,10 +478,32 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
 
     const initCam = async () => {
       try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode },
-          audio: false,
-        });
+        let videoConstraint = {};
+        if (selectedCameraId) {
+          videoConstraint = { deviceId: { exact: selectedCameraId } };
+        } else if (facingMode === "environment") {
+          videoConstraint = { facingMode: { ideal: "environment" } };
+        } else {
+          videoConstraint = { facingMode: { ideal: "user" } };
+        }
+
+        let mediaStream = null;
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              ...videoConstraint,
+              width: { ideal: 1080 },
+              height: { ideal: 1920 },
+            },
+            audio: false,
+          });
+        } catch {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: facingMode === "environment" ? "environment" : "user" },
+            audio: false,
+          });
+        }
+
         if (isCancelled) {
           mediaStream.getTracks().forEach((t) => t.stop());
           return;
@@ -456,7 +522,7 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
     return () => {
       isCancelled = true;
     };
-  }, [useCamera, facingMode]);
+  }, [useCamera, facingMode, selectedCameraId]);
 
   useEffect(() => {
     return () => {
@@ -1822,105 +1888,65 @@ export const StoryCreator = ({ onClose, onSwitchMode, initialState }) => {
 
       {/* BOTTOM AUDIENCE SELECTION & PUBLISHING DOCK */}
       <div className="h-20 shrink-0 px-3 sm:px-6 bg-black/95 backdrop-blur-xl border-t border-zinc-900 flex items-center justify-between z-50 gap-2">
-        {/* Audience Selector Group */}
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          {/* Your Story (Public) Toggle Button */}
-          <button
-            type="button"
-            onClick={() => {
-              triggerHaptic("light");
-              microAudio.playPop();
-              setVisibleTo("public");
-              snackbar.success("Audience: Your Story (Public) 🌐");
-            }}
-            className={`flex items-center gap-2 px-3 py-2 rounded-full transition-all cursor-pointer select-none shrink-0 ${
-              visibleTo === "public"
-                ? "bg-gradient-to-r from-amber-400 via-rose-500 to-purple-600 text-white font-extrabold shadow-lg shadow-rose-500/20 ring-2 ring-white/60 scale-[1.02]"
-                : "bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-semibold opacity-70 hover:opacity-100"
-            }`}
-          >
-            <div className="relative shrink-0">
-              <img
-                src={userData?.user?.profileImage?.url || dp}
-                className="w-5 h-5 rounded-full object-cover border border-white/40"
-                alt=""
-              />
-              {visibleTo === "public" && (
-                <div className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full bg-white text-black flex items-center justify-center shadow">
-                  <Check className="w-2 h-2 stroke-[3]" />
-                </div>
-              )}
-            </div>
-            <span className="text-xs truncate">Your Story</span>
-          </button>
-
-          {/* Close Friends Toggle Button + Manager */}
-          <div
-            className={`flex items-center rounded-full p-0.5 transition-all select-none shrink-0 ${
-              visibleTo === "closeFriends"
-                ? "bg-emerald-950/90 border-2 border-emerald-400 shadow-lg shadow-emerald-500/30 scale-[1.02]"
-                : "bg-zinc-900/90 border border-zinc-800 opacity-70 hover:opacity-100"
-            }`}
-          >
-            <button
-              type="button"
-              onClick={() => {
-                triggerHaptic("light");
-                microAudio.playPop();
-                setVisibleTo("closeFriends");
-                snackbar.success("Audience: Close Friends Only ⭐️");
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-all cursor-pointer ${
-                visibleTo === "closeFriends"
-                  ? "bg-emerald-500 text-black font-black"
-                  : "text-emerald-400 hover:text-emerald-300 font-bold"
-              }`}
-            >
-              <Star
-                className={`w-3.5 h-3.5 ${
-                  visibleTo === "closeFriends" ? "fill-black text-black" : "fill-emerald-400 text-emerald-400"
-                }`}
-              />
-              <span className="truncate">Close Friends</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerHaptic("light");
-                setShowCloseFriendsModal(true);
-              }}
-              className="p-1.5 text-emerald-400 hover:text-white rounded-full hover:bg-emerald-900/50 transition cursor-pointer"
-              title="Edit Close Friends List"
-            >
-              <Users className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Share / Publish Action Button */}
+        {/* Left: Your Story 1-Tap Publish */}
         <button
           type="button"
-          onClick={() => handlePublishStory(visibleTo)}
+          onClick={() => handlePublishStory("public")}
           disabled={isLoading || (items.length === 0 && mode === "media" && !useCamera)}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-full font-black text-xs uppercase tracking-wider transition-all cursor-pointer disabled:opacity-40 shadow-xl active:scale-95 shrink-0 ${
-            visibleTo === "closeFriends"
-              ? "bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/30"
-              : "bg-white hover:bg-zinc-200 text-black shadow-white/20"
-          }`}
-          title={`Publish Story to ${visibleTo === "closeFriends" ? "Close Friends" : "Your Story"}`}
+          className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-full bg-zinc-900/90 hover:bg-zinc-800 border border-white/10 text-white font-bold text-xs transition cursor-pointer active:scale-95 disabled:opacity-40 shadow-lg"
+          title="Share to Your Story"
+        >
+          <div className="relative shrink-0 p-0.5 rounded-full bg-gradient-to-tr from-amber-400 via-rose-500 to-purple-600">
+            <img
+              src={userData?.user?.profileImage?.url || dp}
+              className="w-5 h-5 rounded-full object-cover"
+              alt=""
+            />
+          </div>
+          <span className="truncate">Your story</span>
+        </button>
+
+        {/* Middle: Close Friends 1-Tap Publish */}
+        <div className="flex-1 flex items-center rounded-full bg-zinc-900/90 border border-emerald-500/30 p-0.5 shadow-lg">
+          <button
+            type="button"
+            onClick={() => handlePublishStory("closeFriends")}
+            disabled={isLoading || (items.length === 0 && mode === "media" && !useCamera)}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-full text-emerald-400 hover:text-emerald-300 font-bold text-xs transition cursor-pointer active:scale-95 disabled:opacity-40"
+            title="Share to Close Friends Only"
+          >
+            <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-black shrink-0 shadow">
+              <Star className="w-3 h-3 fill-black text-black" />
+            </div>
+            <span className="truncate">Close Friends</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              triggerHaptic("light");
+              setShowCloseFriendsModal(true);
+            }}
+            className="p-2 text-emerald-400 hover:text-white rounded-full hover:bg-emerald-900/40 transition cursor-pointer"
+            title="Edit Close Friends List"
+          >
+            <Users className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* Right: Next / Direct Arrow */}
+        <button
+          type="button"
+          onClick={() => handlePublishStory(visibleTo || "public")}
+          disabled={isLoading || (items.length === 0 && mode === "media" && !useCamera)}
+          className="w-10 h-10 rounded-full bg-white hover:bg-zinc-200 text-black flex items-center justify-center shadow-xl transition active:scale-90 disabled:opacity-40 shrink-0 cursor-pointer"
+          title="Share Story"
         >
           {isLoading ? (
-            <div className="flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-black" />
-              <span className="text-[11px] normal-case">{uploadProgressText || "Sharing..."}</span>
-            </div>
+            <Loader2 className="w-4 h-4 animate-spin text-black" />
           ) : (
-            <>
-              <span>Share</span>
-              <Send className="w-3.5 h-3.5 text-black" />
-            </>
+            <ChevronRight className="w-5 h-5 stroke-[2.5]" />
           )}
         </button>
       </div>

@@ -89,22 +89,48 @@ const RouteErrorBoundary = () => {
         )}
 
         {/* Actions */}
-        <div className="flex items-center justify-center gap-3 pt-2">
+        <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
           <button
-            onClick={() => navigate(-1)}
+            onClick={() => {
+              try {
+                if (window.history.length > 1) {
+                  navigate(-1);
+                } else {
+                  window.location.href = "/";
+                }
+              } catch {
+                window.location.href = "/";
+              }
+            }}
             className="px-5 py-2.5 text-sm font-semibold text-text border border-border rounded-xl hover:bg-surface transition-all duration-200 cursor-pointer"
           >
             Go Back
           </button>
           <button
-            onClick={() => navigate("/")}
+            onClick={() => {
+              try {
+                navigate("/");
+              } catch {
+                window.location.href = "/";
+              }
+            }}
             className="px-5 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-rose-500 to-pink-500 rounded-xl hover:from-rose-600 hover:to-pink-600 transition-all duration-200 shadow-lg shadow-rose-500/20 cursor-pointer"
           >
             Go Home
           </button>
+          <button
+            onClick={() => {
+              window.location.reload();
+            }}
+            className="px-5 py-2.5 text-sm font-semibold text-text-secondary border border-border/80 rounded-xl hover:text-text hover:bg-surface transition-all duration-200 cursor-pointer"
+          >
+            Reload Page
+          </button>
           {status === 401 && (
             <button
-              onClick={() => navigate("/signin", { replace: true })}
+              onClick={() => {
+                window.location.href = "/signin";
+              }}
               className="px-5 py-2.5 text-sm font-semibold text-rose-500 border border-rose-500/30 rounded-xl hover:bg-rose-500/10 transition-all duration-200 cursor-pointer"
             >
               Sign In

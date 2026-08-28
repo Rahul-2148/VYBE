@@ -88,6 +88,32 @@ export const initializeSocket = (userId) => {
   return socket;
 };
 
+// Global Mobile / Background Tab Resume Handler
+if (typeof window !== "undefined" && typeof document !== "undefined") {
+  const handleFastSocketResume = () => {
+    if (document.visibilityState === "visible" && socket) {
+      const getCookie = (name) => {
+        const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+        return match ? match[2] : null;
+      };
+      const freshToken = getCookie("accessToken") || getCookie("token");
+      if (socket.auth && freshToken) {
+        socket.auth.token = freshToken;
+      }
+
+      if (socket.disconnected) {
+        console.log("⚡ [FastSocketResume] Mobile/Tab resumed, reconnecting socket immediately...");
+        socket.connect();
+      }
+    }
+  };
+
+  document.addEventListener("visibilitychange", handleFastSocketResume);
+  window.addEventListener("pageshow", handleFastSocketResume);
+  window.addEventListener("focus", handleFastSocketResume);
+  window.addEventListener("online", handleFastSocketResume);
+}
+
 /**
  * Get the Socket.IO instance
  */

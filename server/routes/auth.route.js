@@ -31,7 +31,7 @@ import {
   addAccountLogin,
 } from "../controllers/accountSwitch.controller.js";
 import isAuthenticated from "../middlewares/isAuthenticated.js";
-import { authRateLimiter } from "../middlewares/rateLimiter.js";
+import { authRateLimiter, apiRateLimiter } from "../middlewares/rateLimiter.js";
 
 const authRouter = express.Router();
 
@@ -40,7 +40,7 @@ authRouter.post("/signup", authRateLimiter, signUp);
 authRouter.post("/signup/verify", authRateLimiter, verifySignUpOtp);
 authRouter.post("/signin", authRateLimiter, signIn);
 authRouter.post("/signout", isAuthenticated, signOut);
-authRouter.post("/refresh", authRateLimiter, refreshToken);
+authRouter.post("/refresh", apiRateLimiter, refreshToken);
 
 // Multi-Account Switching
 authRouter.post("/switch-account", isAuthenticated, switchAccount);

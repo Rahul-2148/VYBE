@@ -59,6 +59,13 @@ export const Upload = () => {
   const [uploadType, setUploadType] = useState(queryType);
   const [previousUploadType, setPreviousUploadType] = useState(queryType || "post");
 
+  useEffect(() => {
+    const qType = new URLSearchParams(location.search).get("type") || location.state?.type;
+    if (qType && qType !== uploadType) {
+      setUploadType(qType);
+    }
+  }, [location.search, location.state, uploadType]);
+
   // Post Carousel & Reel Queue State
   const [items, setItems] = useState([]);
   const [activeIndex, setActiveIndex] = useState(0);

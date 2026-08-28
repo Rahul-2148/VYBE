@@ -126,16 +126,19 @@ export const Messages = () => {
 
   // Debounced Global User Search in Direct Messages
   useEffect(() => {
-    if (!searchQuery.trim()) {
-      setGlobalSearchedUsers([]);
-      setIsSearchingUsers(false);
-      return;
+    const query = searchQuery.trim();
+    if (!query) {
+      const timer = setTimeout(() => {
+        setGlobalSearchedUsers([]);
+        setIsSearchingUsers(false);
+      }, 0);
+      return () => clearTimeout(timer);
     }
 
     const timer = setTimeout(async () => {
       try {
         setIsSearchingUsers(true);
-        const res = await api.get(`/user/search?q=${encodeURIComponent(searchQuery.trim())}`);
+        const res = await api.get(`/user/search?q=${encodeURIComponent(query)}`);
         if (res.data?.users) {
           setGlobalSearchedUsers(res.data.users.filter((u) => u._id?.toString() !== currentUserId?.toString()));
         }

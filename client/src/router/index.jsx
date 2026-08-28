@@ -116,6 +116,10 @@ const router = createBrowserRouter([
             element: lazyPage(() => import("../pages/Home")),
           },
           {
+            path: "/home",
+            element: lazyPage(() => import("../pages/Home")),
+          },
+          {
             path: "/profile/:userName",
             element: lazyPage(() => import("../pages/Profile")),
           },

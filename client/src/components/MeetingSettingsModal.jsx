@@ -434,44 +434,121 @@ export const MeetingSettingsModal = ({
                   </div>
                 </div>
 
-                {/* Video Effects Grid */}
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-300 flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-pink-400" />
-                      Video Effect Filter
-                    </span>
-                    {videoFilter && videoFilter !== "none" && (
-                      <span className="text-[10px] text-pink-400 font-bold uppercase">{videoFilter} active</span>
-                    )}
-                  </label>
-                  <div className="grid grid-cols-4 gap-2">
-                    {[
-                      { id: "none", label: "Normal" },
-                      { id: "grayscale", label: "Noir" },
-                      { id: "sepia", label: "Vintage" },
-                      { id: "contrast", label: "Drama" },
-                      { id: "warm", label: "Warm" },
-                      { id: "cool", label: "Cool" },
-                      { id: "blur", label: "Soft Blur" },
-                      { id: "invert", label: "Cyber" },
-                    ].map((f) => (
-                      <button
-                        key={f.id}
-                        type="button"
-                        onClick={() => {
-                          onChangeVideoFilter?.(f.id);
-                          triggerHaptic("selection");
+                {/* Visual Backgrounds & Studio Lighting Categories */}
+                <div className="space-y-4">
+                  {/* Category 1: Background Blur */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-300 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                        Blur & Focus
+                      </span>
+                    </label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {[
+                        { id: "none", label: "No Effect" },
+                        { id: "slight-blur", label: "Slight Blur" },
+                        { id: "blur", label: "Blur" },
+                        { id: "deep-blur", label: "Deep Bokeh" },
+                      ].map((f) => (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => {
+                            onChangeVideoFilter?.(f.id);
+                            triggerHaptic("selection");
+                          }}
+                          className={`p-2 rounded-xl text-[11px] font-semibold border transition cursor-pointer text-center ${
+                            (videoFilter || "none") === f.id
+                              ? "bg-purple-600 text-white border-purple-400 shadow-md shadow-purple-600/30 font-bold"
+                              : "bg-white/[0.04] border-white/10 text-zinc-400 hover:text-white hover:bg-white/[0.08]"
+                          }`}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Category 2: Virtual Backgrounds */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-zinc-300">Virtual Backgrounds</label>
+                      <input
+                        type="file"
+                        id="custom-bg-settings-input"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              onChangeVideoFilter?.("custom", reader.result);
+                              snackbar.success("Custom background applied! 🖼️");
+                            };
+                            reader.readAsDataURL(file);
+                          }
                         }}
-                        className={`p-2.5 rounded-xl text-[11px] font-semibold border transition cursor-pointer text-center ${
-                          (videoFilter || "none") === f.id
-                            ? "bg-pink-600 text-white border-pink-400 shadow-lg shadow-pink-600/30 font-bold"
-                            : "bg-white/[0.04] border-white/10 text-zinc-400 hover:text-white hover:bg-white/[0.08]"
-                        }`}
-                      >
-                        {f.label}
-                      </button>
-                    ))}
+                      />
+                    </div>
+                    <div className="grid grid-cols-5 gap-2">
+                      {[
+                        { id: "office", label: "Office" },
+                        { id: "library", label: "Library" },
+                        { id: "cafe", label: "Cafe" },
+                        { id: "cyberpunk", label: "Cyberpunk" },
+                        { id: "custom", label: "+ Custom" },
+                      ].map((f) => (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => {
+                            if (f.id === "custom") {
+                              document.getElementById("custom-bg-settings-input")?.click();
+                            } else {
+                              onChangeVideoFilter?.(f.id);
+                            }
+                            triggerHaptic("selection");
+                          }}
+                          className={`p-2 rounded-xl text-[11px] font-semibold border transition cursor-pointer text-center ${
+                            (videoFilter || "none") === f.id
+                              ? "bg-purple-600 text-white border-purple-400 shadow-md shadow-purple-600/30 font-bold"
+                              : "bg-white/[0.04] border-white/10 text-zinc-400 hover:text-white hover:bg-white/[0.08]"
+                          }`}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Category 3: Studio Lighting & Aesthetics */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-300">Studio Lighting</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { id: "studio-warm", label: "Studio Warm" },
+                        { id: "studio-cool", label: "Studio Cool" },
+                        { id: "studio-glow", label: "Radiance Glow" },
+                      ].map((f) => (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => {
+                            onChangeVideoFilter?.(f.id);
+                            triggerHaptic("selection");
+                          }}
+                          className={`p-2 rounded-xl text-[11px] font-semibold border transition cursor-pointer text-center ${
+                            (videoFilter || "none") === f.id
+                              ? "bg-purple-600 text-white border-purple-400 shadow-md shadow-purple-600/30 font-bold"
+                              : "bg-white/[0.04] border-white/10 text-zinc-400 hover:text-white hover:bg-white/[0.08]"
+                          }`}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>

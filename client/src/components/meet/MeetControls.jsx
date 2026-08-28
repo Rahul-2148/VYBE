@@ -72,18 +72,33 @@ export const GoogleMeetHandIcon = ({ className = "w-5 h-5", isRaised = false }) 
   </svg>
 );
 
+/**
+ * Google Meet Official Closed Captions (CC) Icon
+ */
+export const GoogleMeetCCIcon = ({ className = "w-5 h-5", active = false }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    className={className}
+  >
+    <path d="M19 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1z" />
+  </svg>
+);
+
 export const MeetControls = ({
   isMuted,
   isVideoOff,
   isScreenSharing,
   isHandRaised,
+  isCaptionsOn = false,
+  onToggleCaptions,
   onToggleMute,
   onToggleVideo,
   onToggleScreenShare,
   onToggleHand,
   onEndCall,
   onSendReaction,
-  activeSidebar, // 'chat', 'activities', 'people', 'info', or null
+  activeSidebar, // 'chat', 'activities', 'people', 'info', 'gemini', or null
   onToggleSidebar, // (sidebarName) => void
   unreadChatCount = 0,
   participantCount = 1,
@@ -92,6 +107,8 @@ export const MeetControls = ({
   onToggleFullscreen,
   isFullscreen = false,
   isHost = false,
+  layoutMode = "tiled", // 'tiled' | 'spotlight' | 'sidebar'
+  onChangeLayoutMode,
 }) => {
   const [showReactions, setShowReactions] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -165,6 +182,23 @@ export const MeetControls = ({
           {isVideoOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
         </button>
 
+        {/* Live Closed Captions (CC) Toggle */}
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic("medium");
+            onToggleCaptions?.();
+          }}
+          className={`p-3 rounded-full transition-all duration-200 cursor-pointer ${
+            isCaptionsOn
+              ? "bg-blue-600 hover:bg-blue-500 text-white ring-2 ring-blue-400/50 shadow-md shadow-blue-600/30"
+              : "bg-[#3c4043] hover:bg-[#474a4d] text-white"
+          }`}
+          title={isCaptionsOn ? "Turn off captions (c)" : "Turn on captions (c)"}
+        >
+          <GoogleMeetCCIcon className="w-5 h-5" active={isCaptionsOn} />
+        </button>
+
         {/* Screen Share Toggle */}
         <button
           type="button"
@@ -230,29 +264,65 @@ export const MeetControls = ({
           )}
         </div>
 
-        {/* More Options Menu (Settings, Fullscreen) */}
+        {/* More Options Menu (Layout, Fullscreen, Settings) */}
         <div className="relative" ref={moreMenuRef}>
           <button
             type="button"
-            onClick={() => {
+            data-testid="meet-more-options-btn"
+            onClick={(e) => {
+              e.stopPropagation();
               triggerHaptic("light");
-              setShowMoreMenu(!showMoreMenu);
+              setShowMoreMenu((prev) => !prev);
             }}
-            className="p-3 rounded-full bg-[#3c4043] hover:bg-[#474a4d] text-white transition cursor-pointer"
+            className={`p-3 rounded-full transition cursor-pointer ${
+              showMoreMenu ? "bg-blue-600 text-white" : "bg-[#3c4043] hover:bg-[#474a4d] text-white"
+            }`}
             title="More options"
           >
             <MoreVertical className="w-5 h-5" />
           </button>
 
           {showMoreMenu && (
-            <div className="absolute bottom-14 right-0 w-52 bg-[#2d2e30] border border-zinc-700 rounded-2xl shadow-2xl p-1.5 z-50 text-xs font-semibold text-white space-y-1">
+            <div
+              data-testid="meet-more-options-menu"
+              className="absolute bottom-16 right-0 sm:left-1/2 sm:-translate-x-1/2 w-60 bg-[#2d2e30] border border-zinc-700/90 rounded-2xl shadow-2xl p-2 z-50 text-xs font-semibold text-white space-y-1.5 backdrop-blur-md"
+            >
+              {/* Change Layout Option */}
+              <div className="px-2 py-0.5 text-[10px] uppercase font-bold text-zinc-400 tracking-wider">
+                Change Layout
+              </div>
+              <div className="grid grid-cols-3 gap-1 px-1.5 pb-1 border-b border-zinc-700/80">
+                {[
+                  { id: "tiled", label: "Tiled" },
+                  { id: "spotlight", label: "Spotlight" },
+                  { id: "sidebar", label: "Sidebar" },
+                ].map((layout) => (
+                  <button
+                    key={layout.id}
+                    type="button"
+                    onClick={() => {
+                      onChangeLayoutMode?.(layout.id);
+                      triggerHaptic("light");
+                      setShowMoreMenu(false);
+                    }}
+                    className={`py-1.5 px-1 rounded-lg text-[11px] font-bold text-center transition cursor-pointer ${
+                      layoutMode === layout.id
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-[#383a3d] hover:bg-white/10 text-zinc-300"
+                    }`}
+                  >
+                    {layout.label}
+                  </button>
+                ))}
+              </div>
+
               <button
                 type="button"
                 onClick={() => {
                   setShowMoreMenu(false);
                   onOpenSettings?.();
                 }}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-left transition cursor-pointer"
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/10 text-left transition cursor-pointer"
               >
                 <Settings className="w-4 h-4 text-zinc-400" />
                 <span>Audio & Video Settings</span>
@@ -264,7 +334,7 @@ export const MeetControls = ({
                   setShowMoreMenu(false);
                   onToggleFullscreen?.();
                 }}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-left transition cursor-pointer"
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/10 text-left transition cursor-pointer"
               >
                 {isFullscreen ? (
                   <>
@@ -297,16 +367,36 @@ export const MeetControls = ({
         </button>
       </div>
 
-      {/* 3. Right: Workspace Drawers Toggles (Info, People, Chat, Activities) */}
-      <div className="hidden sm:flex items-center gap-1.5">
+      {/* 3. Right: Workspace Drawers Toggles (Gemini, Info, People, Chat, Activities) */}
+      <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+        {/* Ask Gemini in Meet */}
+        <button
+          type="button"
+          data-testid="meet-gemini-btn"
+          onClick={() => {
+            triggerHaptic("medium");
+            onToggleSidebar(activeSidebar === "gemini" ? null : "gemini");
+          }}
+          className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-full transition cursor-pointer font-bold text-xs ${
+            activeSidebar === "gemini"
+              ? "bg-gradient-to-tr from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-600/30"
+              : "bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30"
+          }`}
+          title="Ask Gemini (AI Notes & Summary)"
+        >
+          <Sparkles className="w-4 h-4 text-purple-300 animate-pulse" />
+          <span className="hidden md:inline text-[11px]">Gemini</span>
+        </button>
+
         {/* Info Sidebar Toggle */}
         <button
           type="button"
+          data-testid="meet-info-btn"
           onClick={() => {
             triggerHaptic("light");
             onToggleSidebar(activeSidebar === "info" ? null : "info");
           }}
-          className={`p-2.5 rounded-full transition cursor-pointer ${
+          className={`p-2 sm:p-2.5 rounded-full transition cursor-pointer ${
             activeSidebar === "info"
               ? "bg-blue-600 text-white"
               : "text-zinc-400 hover:text-white hover:bg-white/10"
@@ -319,11 +409,12 @@ export const MeetControls = ({
         {/* People Sidebar Toggle with Count Badge */}
         <button
           type="button"
+          data-testid="meet-people-btn"
           onClick={() => {
             triggerHaptic("light");
             onToggleSidebar(activeSidebar === "people" ? null : "people");
           }}
-          className={`relative p-2.5 rounded-full transition cursor-pointer ${
+          className={`relative p-2 sm:p-2.5 rounded-full transition cursor-pointer ${
             activeSidebar === "people"
               ? "bg-blue-600 text-white"
               : "text-zinc-400 hover:text-white hover:bg-white/10"
@@ -341,11 +432,12 @@ export const MeetControls = ({
         {/* In-Meeting Chat Toggle with Unread Badge */}
         <button
           type="button"
+          data-testid="meet-chat-btn"
           onClick={() => {
             triggerHaptic("light");
             onToggleSidebar(activeSidebar === "chat" ? null : "chat");
           }}
-          className={`relative p-2.5 rounded-full transition cursor-pointer ${
+          className={`relative p-2 sm:p-2.5 rounded-full transition cursor-pointer ${
             activeSidebar === "chat"
               ? "bg-blue-600 text-white"
               : "text-zinc-400 hover:text-white hover:bg-white/10"
@@ -363,16 +455,17 @@ export const MeetControls = ({
         {/* Activities Drawer Toggle (Polls, Whiteboard, Breakouts) */}
         <button
           type="button"
+          data-testid="meet-activities-btn"
           onClick={() => {
             triggerHaptic("light");
             onToggleSidebar(activeSidebar === "activities" ? null : "activities");
           }}
-          className={`p-2.5 rounded-full transition cursor-pointer ${
+          className={`p-2 sm:p-2.5 rounded-full transition cursor-pointer ${
             activeSidebar === "activities"
               ? "bg-blue-600 text-white"
               : "text-zinc-400 hover:text-white hover:bg-white/10"
           }`}
-          title="Activities (Whiteboard, Polls)"
+          title="Activities (Whiteboard, Polls, Breakout Rooms)"
         >
           <Shapes className="w-5 h-5" />
         </button>

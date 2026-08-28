@@ -6,9 +6,12 @@ import logo2 from "../assets/logo2.png";
 import GetCurrentUser from "../hooks/GetCurrentUser";
 import useStorySocket from "../hooks/useStorySocket";
 import useChatSync from "../hooks/useChatSync";
+import useAppLifecycle from "../hooks/useAppLifecycle";
 
 import FloatingMessagesDock from "../components/FloatingMessagesDock";
 import CallManager from "../components/CallManager";
+import { MeetProvider } from "../context/MeetContext";
+import MeetFloatingWindow from "../components/meet/MeetFloatingWindow";
 import NotificationLightBar from "../components/NotificationLightBar";
 import NetworkStatusBar from "../components/NetworkStatusBar";
 
@@ -19,7 +22,7 @@ import { setUserData } from "../redux/features/userSlice";
  * RootLayout — the outermost layout for the entire Vybe application.
  *
  * Responsibilities:
- * - Bootstrap auth (GetCurrentUser), story socket, chat sync hooks
+ * - Bootstrap auth (GetCurrentUser), story socket, chat sync, app lifecycle hooks
  * - Manage Socket.IO connection lifecycle based on auth state
  * - Show auth-initialization splash screen
  * - Render a subtle navigation-state loading bar
@@ -30,6 +33,7 @@ const RootLayout = () => {
   GetCurrentUser();
   useStorySocket();
   useChatSync();
+  useAppLifecycle();
 
   const dispatch = useDispatch();
   const { userData, isAuthInitialized } = useSelector((state) => state.user);
@@ -67,7 +71,7 @@ const RootLayout = () => {
   }
 
   return (
-    <>
+    <MeetProvider>
       {/* Navigation-state loading bar — subtle top indicator during route transitions */}
       {navigation.state === "loading" && (
         <div className="fixed top-0 left-0 right-0 z-[9999] h-[2px]">
@@ -81,9 +85,10 @@ const RootLayout = () => {
       {/* Global overlay components — always rendered regardless of route */}
       <FloatingMessagesDock />
       <CallManager />
+      <MeetFloatingWindow />
       <NotificationLightBar />
       <NetworkStatusBar />
-    </>
+    </MeetProvider>
   );
 };
 

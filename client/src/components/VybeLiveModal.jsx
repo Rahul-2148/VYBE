@@ -33,6 +33,8 @@ export const VybeLiveModal = ({ isOpen, onClose }) => {
   const [streamTitle, setStreamTitle] = useState("");
   const [audience, setAudience] = useState("everyone"); // "everyone" | "close_friends"
   const [facingMode, setFacingMode] = useState("user");
+  const [selectedCameraId, setSelectedCameraId] = useState(null);
+  const [videoDevices, setVideoDevices] = useState([]);
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
 
@@ -78,14 +80,62 @@ export const VybeLiveModal = ({ isOpen, onClose }) => {
           localStreamRef.current.getTracks().forEach((t) => t.stop());
         }
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode,
-            width: { ideal: 1080 },
-            height: { ideal: 1920 },
-          },
-          audio: true,
-        });
+        let devices = [];
+        try {
+          devices = (await navigator.mediaDevices.enumerateDevices()).filter(
+            (d) => d.kind === "videoinput"
+          );
+          setVideoDevices(devices);
+        } catch {}
+
+        let videoConstraint = {};
+
+        if (selectedCameraId) {
+          videoConstraint = { deviceId: { exact: selectedCameraId } };
+        } else if (facingMode === "environment") {
+          const rearDev = devices.find((d) =>
+            /back|rear|environment|facing\s*back/i.test(d.label || "")
+          );
+          if (rearDev) {
+            videoConstraint = { deviceId: { exact: rearDev.deviceId } };
+          } else if (devices.length > 1) {
+            const otherDev = devices[1];
+            videoConstraint = { deviceId: { exact: otherDev.deviceId } };
+          } else {
+            videoConstraint = { facingMode: { ideal: "environment" } };
+          }
+        } else {
+          const frontDev = devices.find((d) =>
+            /front|user|facing\s*front|selfie/i.test(d.label || "")
+          );
+          if (frontDev) {
+            videoConstraint = { deviceId: { exact: frontDev.deviceId } };
+          } else {
+            videoConstraint = { facingMode: { ideal: "user" } };
+          }
+        }
+
+        let stream = null;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              ...videoConstraint,
+              width: { ideal: 1080 },
+              height: { ideal: 1920 },
+            },
+            audio: true,
+          });
+        } catch (firstErr) {
+          console.warn("[VybeLive] First camera attempt failed, falling back:", firstErr);
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: facingMode === "environment" ? "environment" : "user",
+              width: { ideal: 1080 },
+              height: { ideal: 1920 },
+            },
+            audio: true,
+          });
+        }
 
         if (!isSubscribed) {
           stream.getTracks().forEach((t) => t.stop());
@@ -95,6 +145,17 @@ export const VybeLiveModal = ({ isOpen, onClose }) => {
         localStreamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+        }
+
+        // Replace track in existing live peer connections if currently broadcasting
+        const newTrack = stream.getVideoTracks()[0];
+        if (newTrack && peerConnections.current) {
+          Object.values(peerConnections.current).forEach((pc) => {
+            const sender = pc.getSenders?.().find((s) => s.track && s.track.kind === "video");
+            if (sender) {
+              sender.replaceTrack(newTrack).catch((e) => console.warn("replaceTrack error:", e));
+            }
+          });
         }
       } catch (err) {
         console.warn("Camera init failed:", err);
@@ -112,7 +173,7 @@ export const VybeLiveModal = ({ isOpen, onClose }) => {
       }
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isOpen, facingMode]);
+  }, [isOpen, facingMode, selectedCameraId]);
 
   // Duration Timer
   useEffect(() => {
@@ -403,11 +464,31 @@ export const VybeLiveModal = ({ isOpen, onClose }) => {
     onClose();
   };
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // 5. Controls & Interaction Handlers
-  // ──────────────────────────────────────────────────────────────────────────
-  const handleFlipCamera = () => {
-    setFacingMode((prev) => (prev === "user" ? "environment" : "user"));
+  const handleFlipCamera = async () => {
+    try {
+      const devices = (await navigator.mediaDevices.enumerateDevices()).filter(
+        (d) => d.kind === "videoinput"
+      );
+      setVideoDevices(devices);
+
+      if (devices.length > 1) {
+        // Multi-camera setup (mobile front/back or laptop with external cam): cycle devices
+        const currentIndex = devices.findIndex((d) => d.deviceId === selectedCameraId);
+        const nextIndex = (currentIndex + 1) % devices.length;
+        const nextDevice = devices[nextIndex];
+        setSelectedCameraId(nextDevice.deviceId);
+
+        const isRear = /back|rear|environment/i.test(nextDevice.label || "");
+        setFacingMode(isRear ? "environment" : (nextIndex === 0 ? "user" : "environment"));
+      } else {
+        // Single camera setup (standard laptop): toggle selfie mirror orientation smoothly
+        setSelectedCameraId(null);
+        setFacingMode((prev) => (prev === "user" ? "environment" : "user"));
+      }
+    } catch {
+      setSelectedCameraId(null);
+      setFacingMode((prev) => (prev === "user" ? "environment" : "user"));
+    }
   };
 
   const handleToggleMic = () => {

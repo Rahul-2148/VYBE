@@ -114,10 +114,9 @@ export const ReelCard = ({
   );
 
   // Real-Time Audio Transcript & Live Captions
-  const [liveTranscript, setLiveTranscript] = useState("");
   const [reelCaptions, setReelCaptions] = useState(currentItem?.captions || []);
   const [syncedSubtitle, setSyncedSubtitle] = useState({ text: "", activeIndex: -1, words: [], hasContent: false });
-  const speechRecognitionRef = useRef(null);
+  const [commentsExpanded, setCommentsExpanded] = useState(false);
   
   // Heart Burst & Play/Pause Animation State
   const [showHeart, setShowHeart] = useState(false);
@@ -244,6 +243,7 @@ export const ReelCard = ({
 
   const handleCloseAllModals = () => {
     setShowComments(false);
+    setCommentsExpanded(false);
     setShowViewers(false);
     setShowLikersModal(false);
     setShowOptionsModal(false);
@@ -642,74 +642,6 @@ export const ReelCard = ({
     }
   }, [isActive, showCaptions, currentItem?._id, reelCaptions]);
 
-  // Real-Time Audio Transcript (Multilingual Web Speech Recognition Engine)
-  useEffect(() => {
-    if (showCaptions && isActive && isPlaying) {
-      const SpeechRecognition =
-        typeof window !== "undefined"
-          ? window.SpeechRecognition || window.webkitSpeechRecognition
-          : null;
-      if (SpeechRecognition && !speechRecognitionRef.current) {
-        try {
-          const recognition = new SpeechRecognition();
-          recognition.continuous = true;
-          recognition.interimResults = true;
-          // Set to Hindi / Indian English to recognize Hindi/Indian speech like "Maa Saraswati Sharde"
-          recognition.lang = "hi-IN";
-          recognition.onresult = (event) => {
-            let fullText = "";
-            for (let i = event.resultIndex; i < event.results.length; ++i) {
-              fullText += event.results[i][0].transcript;
-            }
-            const trimmed = fullText.trim();
-            if (trimmed) {
-              setLiveTranscript(trimmed);
-              const words = trimmed.split(/\s+/).filter(Boolean);
-              setSyncedSubtitle({
-                text: trimmed,
-                words,
-                activeIndex: words.length - 1,
-                hasContent: true,
-              });
-            }
-          };
-          recognition.onerror = (err) => {
-            if (err.error === "language-not-supported" && recognition.lang === "hi-IN") {
-              recognition.lang = "en-IN";
-              try { recognition.start(); } catch { /* ignore */ }
-            }
-          };
-          recognition.onend = () => {
-            if (showCaptions && isActive && isPlaying && speechRecognitionRef.current) {
-              try {
-                recognition.start();
-              } catch { /* ignore */ }
-            }
-          };
-          try {
-            recognition.start();
-            speechRecognitionRef.current = recognition;
-          } catch { /* ignore */ }
-        } catch { /* ignore */ }
-      }
-    } else {
-      if (speechRecognitionRef.current) {
-        try {
-          speechRecognitionRef.current.stop();
-        } catch { /* ignore */ }
-        speechRecognitionRef.current = null;
-      }
-    }
-    return () => {
-      if (speechRecognitionRef.current) {
-        try {
-          speechRecognitionRef.current.stop();
-        } catch { /* ignore */ }
-        speechRecognitionRef.current = null;
-      }
-    };
-  }, [showCaptions, isActive, isPlaying]);
-
   useEffect(() => {
     const handleGlobalCaptionsChange = (e) => {
       if (e.detail && typeof e.detail.enabled === "boolean") {
@@ -803,17 +735,7 @@ export const ReelCard = ({
             }
           }
         }
-        // 2. Live speech recognition from audio (multilingual speech)
-        else if (liveTranscript) {
-          const words = liveTranscript.split(/\s+/).filter(Boolean);
-          setSyncedSubtitle({
-            text: liveTranscript,
-            words,
-            activeIndex: words.length - 1,
-            hasContent: true,
-          });
-        }
-        // 3. Pre-transcribed speech / transcript field
+        // 2. Pre-transcribed speech / transcript field
         else if (currentItem?.transcript || currentItem?.subtitles || currentItem?.audioTranscript) {
           const rawTranscript = (currentItem.transcript || currentItem.subtitles || currentItem.audioTranscript).trim();
           const words = rawTranscript.split(/\s+/).filter(Boolean);
@@ -882,7 +804,11 @@ export const ReelCard = ({
   };
 
   // Zero-Jitter Optimistic Like Handler (Toggle for Heart Button)
-  const handleOptimisticLike = async () => {
+  const handleOptimisticLike = async (e) => {
+    if (e) {
+      e.stopPropagation?.();
+      e.preventDefault?.();
+    }
     if (!currentUserId) {
       snackbar.error("Please login to like reels");
       return;
@@ -981,8 +907,19 @@ export const ReelCard = ({
   };
 
   // Tap Gesture Handler: Single Tap (Play / Pause), Double Tap (Like), Triple Tap (Comments Modal)
-  const handleVideoTap = () => {
+  const handleVideoTap = (e) => {
     if (isAnyModalOpen) return;
+
+    // Ignore taps originating from buttons, links, controls, or action bars
+    if (e?.target?.closest) {
+      if (
+        e.target.closest(
+          'button, a, input, textarea, select, [role="button"], .interactive-btn, .action-dock, .interactive-overlay, .seek-bar, [data-interactive="true"]'
+        )
+      ) {
+        return;
+      }
+    }
 
     // If 2X is currently locked, a single tap immediately unlocks and returns to 1X
     if (is2XLocked) {
@@ -1015,6 +952,19 @@ export const ReelCard = ({
 
   // Touch & Pointer handlers for Long Press 2X Fast-Forwarding
   const handleTouchStart = (e) => {
+    if (isAnyModalOpen) return;
+
+    // Ignore gestures on buttons, links, controls, or action bars
+    if (e?.target?.closest) {
+      if (
+        e.target.closest(
+          'button, a, input, textarea, select, [role="button"], .interactive-btn, .action-dock, .interactive-overlay, .seek-bar, [data-interactive="true"]'
+        )
+      ) {
+        return;
+      }
+    }
+
     touchStartYRef.current = e?.clientY || (e?.touches ? e.touches[0]?.clientY : null);
     pressTimerRef.current = setTimeout(() => {
       hasFastForwardedRef.current = true;
@@ -1057,7 +1007,11 @@ export const ReelCard = ({
 
   const handlePointerUp = handleTouchEnd;
 
-  const handleToggleSave = async () => {
+  const handleToggleSave = async (e) => {
+    if (e) {
+      e.stopPropagation?.();
+      e.preventDefault?.();
+    }
     try {
       const res = await api.post(`/reel/save/${currentItem?._id}`);
       if (res.data.success) {
@@ -1112,13 +1066,21 @@ export const ReelCard = ({
   return (
     <div ref={containerRef} className="relative flex items-center justify-center h-[100dvh] md:h-[calc(100dvh-32px)] md:max-h-[760px] my-auto">
       {/* DESKTOP-ONLY LEFT-BOTTOM AUTHOR & CAPTION INFO (COMPACT & ANCHORED TO LEFT OF CENTERED VIDEO) */}
-      <div className="hidden md:flex flex-col justify-end w-[180px] lg:w-[210px] xl:w-[240px] max-w-[240px] absolute right-full mr-3.5 lg:mr-4.5 bottom-0 pb-3 space-y-2 text-text pointer-events-auto select-text z-40">
+      <div
+        data-interactive="true"
+        onPointerDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        className="hidden md:flex flex-col justify-end w-[180px] lg:w-[210px] xl:w-[240px] max-w-[240px] absolute right-full mr-3.5 lg:mr-4.5 bottom-0 pb-3 space-y-2 text-text pointer-events-auto select-text z-40"
+      >
         {/* Author Row */}
         <div className="flex items-center gap-2 flex-wrap">
           <img
             src={currentItem?.author?.profileImage?.url || dp}
             alt=""
             className="w-8 h-8 rounded-full object-cover border border-border cursor-pointer hover:opacity-90 transition shrink-0"
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
               navigate(`/profile/${currentItem?.author?.userName}`);
@@ -1127,6 +1089,8 @@ export const ReelCard = ({
           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
             <span
               className="text-text text-xs lg:text-[13px] font-bold cursor-pointer hover:underline flex items-center gap-1 truncate max-w-[100px] lg:max-w-[125px]"
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 navigate(`/profile/${currentItem?.author?.userName}`);
@@ -1137,7 +1101,12 @@ export const ReelCard = ({
             </span>
 
             {currentItem?.author?._id !== userData?.user?._id && (
-              <div className="flex items-center gap-1 shrink-0">
+              <div
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                className="flex items-center gap-1 shrink-0"
+              >
                 <span className="text-text-secondary text-xs">•</span>
                 <FollowButton
                   targetUserId={currentItem?.author?._id}
@@ -1151,6 +1120,8 @@ export const ReelCard = ({
         {/* Location */}
         {currentItem?.location && (
           <div
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
               navigate(`/explore/location/${encodeURIComponent(currentItem.location)}`);
@@ -1163,7 +1134,12 @@ export const ReelCard = ({
 
         {/* Caption */}
         {currentItem?.caption && (
-          <div className="text-xs text-text font-normal leading-snug break-words max-h-[110px] lg:max-h-[130px] overflow-y-auto hide-scrollbar pr-1">
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            className="text-xs text-text font-normal leading-snug break-words max-h-[110px] lg:max-h-[130px] overflow-y-auto hide-scrollbar pr-1"
+          >
             <span>{renderCaptionWithLinks(currentItem.caption)}</span>
           </div>
         )}
@@ -1180,6 +1156,8 @@ export const ReelCard = ({
               return (
                 <button
                   key={u?.userName || `tag_${i}`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
                     navigate(`/profile/${u.userName}`);
@@ -1209,6 +1187,8 @@ export const ReelCard = ({
 
           return (
             <div
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 navigate(`/audio/${encodeURIComponent(trackParam)}`, {
@@ -1391,7 +1371,9 @@ export const ReelCard = ({
         }}
         className={`w-full transition-all duration-300 ease-out flex items-center justify-center relative overflow-hidden ${
           isAnyModalOpen
-            ? "h-[36vh] md:h-[40vh] max-h-[360px] rounded-2xl scale-[0.98] -translate-y-2 md:-translate-y-4 shadow-2xl z-20 cursor-pointer"
+            ? commentsExpanded
+              ? "opacity-0 pointer-events-none scale-75 -translate-y-8 h-[20vh]"
+              : "h-[38dvh] md:h-[42dvh] max-h-[380px] rounded-3xl scale-[0.92] md:scale-[0.96] -translate-y-1 md:-translate-y-3 shadow-[0_20px_50px_rgba(0,0,0,0.85)] z-20 cursor-pointer border border-white/15 ring-1 ring-white/10"
             : "h-full scale-100 translate-y-0 z-0"
         }`}
       >
@@ -1480,9 +1462,17 @@ export const ReelCard = ({
 
       {/* CONTROLS (CC SUBTITLES & VOLUME) */}
       {!isFastForwarding && (
-        <div className="absolute top-4 right-4 md:top-auto md:bottom-4 z-[100] flex items-center gap-2 pointer-events-auto">
+        <div
+          data-interactive="true"
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute top-4 right-4 md:top-auto md:bottom-4 z-[100] flex items-center gap-2 pointer-events-auto"
+        >
           {/* Quick 1-Tap CC Toggle Button */}
           <button
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
               handleToggleCaptions();
@@ -1499,6 +1489,8 @@ export const ReelCard = ({
 
           {/* Mute / Unmute Button */}
           <button
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
               toggleMute();
@@ -1518,14 +1510,28 @@ export const ReelCard = ({
 
       {/* MOBILE-ONLY BOTTOM INFO OVERLAY (INSIDE VIDEO CARD) */}
       {!isFastForwarding && !isAnyModalOpen && (
-        <div className="flex md:hidden w-full absolute bottom-0 inset-x-0 px-3.5 pb-4 pt-12 flex justify-between items-end z-40 bg-gradient-to-t from-black/95 via-black/50 to-transparent pointer-events-none">
-          <div className="space-y-3 max-w-[75%] pointer-events-auto">
+        <div
+          data-interactive="true"
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          className="flex md:hidden w-full absolute bottom-0 inset-x-0 px-3.5 pb-4 pt-12 flex justify-between items-end z-40 bg-gradient-to-t from-black/95 via-black/50 to-transparent pointer-events-none"
+        >
+          <div
+            data-interactive="true"
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            className="space-y-3 max-w-[75%] pointer-events-auto"
+          >
             {/* Author */}
             <div className="flex items-center gap-2.5">
               <img
                 src={currentItem?.author?.profileImage?.url || dp}
                 alt=""
                 className="w-9 h-9 rounded-full object-cover border border-border-strong cursor-pointer interactive-btn"
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   navigate(`/profile/${currentItem?.author?.userName}`);
@@ -1533,6 +1539,8 @@ export const ReelCard = ({
               />
               <span
                 className="text-white text-xs font-bold cursor-pointer hover:underline interactive-btn flex items-center gap-0.5"
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   navigate(`/profile/${currentItem?.author?.userName}`);
@@ -1545,16 +1553,24 @@ export const ReelCard = ({
               </span>
 
               {currentItem?.author?._id !== userData?.user?._id && (
-                <FollowButton
-                  targetUserId={currentItem?.author?._id}
-                  tailwind="px-3 py-1 bg-rose-600 text-white text-[11px] font-semibold rounded-full shadow interactive-btn"
-                />
+                <div
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <FollowButton
+                    targetUserId={currentItem?.author?._id}
+                    tailwind="px-3 py-1 bg-rose-600 text-white text-[11px] font-semibold rounded-full shadow interactive-btn"
+                  />
+                </div>
               )}
             </div>
 
             {/* Location */}
             {currentItem?.location && (
               <div
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   navigate(`/explore/location/${encodeURIComponent(currentItem.location)}`);
@@ -1568,7 +1584,12 @@ export const ReelCard = ({
 
             {/* Interactive Caption with clickable #hashtags and @mentions + Instagram-style "...more / less" */}
             {currentItem?.caption && (
-              <div className="text-xs text-white font-normal leading-relaxed pointer-events-auto break-words mt-0.5">
+              <div
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                className="text-xs text-white font-normal leading-relaxed pointer-events-auto break-words mt-0.5"
+              >
                 {(() => {
                   const cap = currentItem.caption;
                   const isLong = cap.length > 85;
@@ -1579,6 +1600,8 @@ export const ReelCard = ({
                         {isLong && (
                           <button
                             type="button"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onTouchStart={(e) => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation();
                               setIsCaptionExpanded(false);
@@ -1596,6 +1619,8 @@ export const ReelCard = ({
                       <span>{renderCaptionWithLinks(cap.slice(0, 80))}</span>
                       <button
                         type="button"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onTouchStart={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
                           setIsCaptionExpanded(true);
@@ -1612,7 +1637,12 @@ export const ReelCard = ({
 
             {/* Tagged People Pill */}
             {currentItem?.taggedUsers && currentItem.taggedUsers.length > 0 && (
-              <div className="flex items-center gap-1.5 flex-wrap pointer-events-auto mt-0.5">
+              <div
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                className="flex items-center gap-1.5 flex-wrap pointer-events-auto mt-0.5"
+              >
                 <span className="text-[11px] text-zinc-300 font-medium flex items-center gap-0.5">
                   <span>🏷️</span>
                   <span>with</span>
@@ -1622,6 +1652,8 @@ export const ReelCard = ({
                   return (
                     <button
                       key={u?.userName || `mobile_tag_${i}`}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation();
                         navigate(`/profile/${u.userName}`);
@@ -1640,6 +1672,8 @@ export const ReelCard = ({
             {currentItem?.aiLabel?.isAIGenerated && (
               <button
                 type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   triggerHaptic("light");
@@ -1668,6 +1702,8 @@ export const ReelCard = ({
 
               return (
                 <div
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
                     navigate(`/audio/${encodeURIComponent(trackParam)}`, {
@@ -1686,11 +1722,27 @@ export const ReelCard = ({
           </div>
 
           {/* MOBILE-ONLY RIGHT SIDE ACTION BUTTONS (INSIDE VIDEO CARD) */}
-          <div className="flex md:hidden flex-col items-center gap-2.5 text-white pointer-events-auto pb-1">
+          <div
+            data-interactive="true"
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            className="flex md:hidden flex-col items-center gap-2.5 text-white pointer-events-auto pb-1"
+          >
             {/* Like */}
-            <div className="flex flex-col items-center">
+            <div
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              className="flex flex-col items-center"
+            >
               <button
-                onClick={handleOptimisticLike}
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOptimisticLike(e);
+                }}
                 className="p-1 group cursor-pointer active:scale-75 transition-transform"
                 title={isLiked ? "Unlike" : "Like"}
               >
@@ -1701,6 +1753,8 @@ export const ReelCard = ({
                 )}
               </button>
               <span
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   triggerHaptic("light");
@@ -1714,9 +1768,19 @@ export const ReelCard = ({
             </div>
 
             {/* Comment */}
-            <div className="flex flex-col items-center">
+            <div
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              className="flex flex-col items-center"
+            >
               <button
-                onClick={() => setShowComments(true)}
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowComments(true);
+                }}
                 className="p-1 group cursor-pointer active:scale-75 transition-transform"
                 title="Comments"
               >
@@ -1728,9 +1792,19 @@ export const ReelCard = ({
             </div>
 
             {/* Share */}
-            <div className="flex flex-col items-center">
+            <div
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              className="flex flex-col items-center"
+            >
               <button
-                onClick={() => setShowShare(true)}
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowShare(true);
+                }}
                 className="p-1 group cursor-pointer active:scale-75 transition-transform"
                 title="Share"
               >
@@ -1743,9 +1817,15 @@ export const ReelCard = ({
 
             {/* Save Bookmark */}
             <button
-              onClick={handleToggleSave}
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleToggleSave(e);
+              }}
               onContextMenu={(e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 setShowCollectionsModal(true);
               }}
               className="p-1 group cursor-pointer active:scale-75 transition-transform"
@@ -1760,7 +1840,12 @@ export const ReelCard = ({
 
             {/* Reshare & Repost */}
             <button
-              onClick={() => setShowReshareModal(true)}
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowReshareModal(true);
+              }}
               className="p-1 group cursor-pointer active:scale-75 transition-transform"
               title="Reshare & Repost Reel"
             >
@@ -1768,9 +1853,19 @@ export const ReelCard = ({
             </button>
 
             {/* Views & Insights */}
-            <div className="flex flex-col items-center">
+            <div
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              className="flex flex-col items-center"
+            >
               <button
-                onClick={() => setShowViewers(true)}
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowViewers(true);
+                }}
                 className="p-1 group cursor-pointer active:scale-75 transition-transform"
                 title="Views & Insights"
               >
@@ -1783,7 +1878,12 @@ export const ReelCard = ({
 
             {/* 3-Dot Options & Settings */}
             <button
-              onClick={() => setShowOptionsModal(true)}
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowOptionsModal(true);
+              }}
               className="p-1 group cursor-pointer active:scale-75 transition-transform"
               title="More Options"
             >
@@ -1793,7 +1893,12 @@ export const ReelCard = ({
             {/* Delete Reel (Owner only) */}
             {isAuthor && (
               <button
-                onClick={() => setShowDeleteModal(true)}
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDeleteModal(true);
+                }}
                 className="p-1 group cursor-pointer active:scale-75 transition-transform"
                 title="Delete Reel"
               >
@@ -1803,6 +1908,8 @@ export const ReelCard = ({
 
             {/* Spinning Audio Album Art (Instagram Style) */}
             <div
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 let trackObj = currentItem?.audioTrack || currentItem?.music;
@@ -1834,9 +1941,11 @@ export const ReelCard = ({
       {/* SEEK & PROGRESS BAR OVERLAY */}
       <div
         ref={seekBarRef}
+        data-interactive="true"
         onPointerDown={handleSeekPointerDown}
+        onTouchStart={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
-        className="absolute bottom-0 left-0 right-0 z-[130] h-6 flex items-end cursor-pointer group/seek pointer-events-auto touch-none select-none"
+        className="seek-bar absolute bottom-0 left-0 right-0 z-[130] h-6 flex items-end cursor-pointer group/seek pointer-events-auto touch-none select-none"
       >
         {/* Scrubber Tooltip when dragging */}
         {isScrubbing && (
@@ -1867,11 +1976,27 @@ export const ReelCard = ({
       </div>
 
       {/* DESKTOP-ONLY RIGHT ACTION BAR (ANCHORED TO RIGHT OF CENTERED VIDEO - EXACT INSTAGRAM WEB) */}
-      <div className="hidden md:flex flex-col items-center justify-end absolute left-full ml-4 lg:ml-6 bottom-0 pb-2 gap-3 text-text select-none shrink-0 z-40">
+      <div
+        data-interactive="true"
+        onPointerDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        className="action-dock hidden md:flex flex-col items-center justify-end absolute left-full ml-4 lg:ml-6 bottom-0 pb-2 gap-3 text-text select-none shrink-0 z-40"
+      >
         {/* 1. Like */}
-        <div className="flex flex-col items-center">
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          className="flex flex-col items-center"
+        >
           <button
-            onClick={handleOptimisticLike}
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleOptimisticLike(e);
+            }}
             className="p-2 group cursor-pointer active:scale-75 transition-transform text-text"
             title={isLiked ? "Unlike" : "Like"}
           >
@@ -1882,6 +2007,8 @@ export const ReelCard = ({
             )}
           </button>
           <span
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
               triggerHaptic("light");
@@ -1895,9 +2022,19 @@ export const ReelCard = ({
         </div>
 
         {/* 2. Comment */}
-        <div className="flex flex-col items-center">
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          className="flex flex-col items-center"
+        >
           <button
-            onClick={() => setShowComments(true)}
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowComments(true);
+            }}
             className="p-2 group cursor-pointer active:scale-75 transition-transform text-text"
             title="Comments"
           >
@@ -1909,9 +2046,19 @@ export const ReelCard = ({
         </div>
 
         {/* 3. Repost / Reshare */}
-        <div className="flex flex-col items-center">
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          className="flex flex-col items-center"
+        >
           <button
-            onClick={() => setShowReshareModal(true)}
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowReshareModal(true);
+            }}
             className="p-2 group cursor-pointer active:scale-75 transition-transform text-text"
             title="Reshare & Repost Reel"
           >
@@ -1923,9 +2070,19 @@ export const ReelCard = ({
         </div>
 
         {/* 4. Share / Send */}
-        <div className="flex flex-col items-center">
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          className="flex flex-col items-center"
+        >
           <button
-            onClick={() => setShowShare(true)}
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowShare(true);
+            }}
             className="p-2 group cursor-pointer active:scale-75 transition-transform text-text"
             title="Share"
           >
@@ -1935,9 +2092,15 @@ export const ReelCard = ({
 
         {/* 5. Save Bookmark */}
         <button
-          onClick={handleToggleSave}
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleToggleSave(e);
+          }}
           onContextMenu={(e) => {
             e.preventDefault();
+            e.stopPropagation();
             setShowCollectionsModal(true);
           }}
           className="p-2 group cursor-pointer active:scale-75 transition-transform text-text"
@@ -1951,9 +2114,19 @@ export const ReelCard = ({
         </button>
 
         {/* 6. Views & Insights */}
-        <div className="flex flex-col items-center">
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          className="flex flex-col items-center"
+        >
           <button
-            onClick={() => setShowViewers(true)}
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowViewers(true);
+            }}
             className="p-2 group cursor-pointer active:scale-75 transition-transform text-text"
             title="Views & Insights"
           >
@@ -1966,7 +2139,12 @@ export const ReelCard = ({
 
         {/* 7. 3-Dot Options */}
         <button
-          onClick={() => setShowOptionsModal(true)}
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowOptionsModal(true);
+          }}
           className="p-2 group cursor-pointer active:scale-75 transition-transform text-text"
           title="More Options"
         >
@@ -1976,7 +2154,12 @@ export const ReelCard = ({
         {/* 8. Delete Reel (Owner only) */}
         {isAuthor && (
           <button
-            onClick={() => setShowDeleteModal(true)}
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowDeleteModal(true);
+            }}
             className="p-2 group cursor-pointer active:scale-75 transition-transform text-rose-500"
             title="Delete Reel"
           >
@@ -1998,6 +2181,8 @@ export const ReelCard = ({
 
           return (
             <div
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 navigate(`/audio/${encodeURIComponent(trackParam)}`, {
@@ -2120,8 +2305,13 @@ export const ReelCard = ({
         {showComments && (
           <CommentsModal
             isOpen={showComments}
-            onClose={() => setShowComments(false)}
+            onClose={() => {
+              setShowComments(false);
+              setCommentsExpanded(false);
+            }}
             reel={currentItem}
+            isExpanded={commentsExpanded}
+            onExpandChange={setCommentsExpanded}
           />
         )}
 

@@ -239,6 +239,7 @@ const STICKER_CATEGORIES = [
   { id: "mention", icon: AtSign, label: "MENTION", color: "text-emerald-400", hoverBorder: "hover:border-emerald-500/50" },
   { id: "hashtag", icon: Hash, label: "HASHTAG", color: "text-amber-400", hoverBorder: "hover:border-amber-500/50" },
   { id: "poll", icon: BarChart2, label: "POLL", color: "text-rose-400", hoverBorder: "hover:border-rose-500/50" },
+  { id: "quiz", icon: HelpCircle, label: "QUIZ", color: "text-emerald-400", hoverBorder: "hover:border-emerald-500/50" },
   { id: "question", icon: HelpCircle, label: "QUESTIONS", color: "text-purple-400", hoverBorder: "hover:border-purple-500/50" },
   { id: "slider", icon: Flame, label: "SLIDER", color: "text-orange-400", hoverBorder: "hover:border-orange-500/50" },
   { id: "countdown", icon: Clock, label: "COUNTDOWN", color: "text-cyan-400", hoverBorder: "hover:border-cyan-500/50" },
@@ -281,6 +282,10 @@ export const StoryStickersDrawer = ({ open, onClose, onAddSticker }) => {
 
   const [pollQuestion, setPollQuestion] = useState("");
   const [pollOptions, setPollOptions] = useState(["Yes", "No"]);
+
+  const [quizQuestion, setQuizQuestion] = useState("");
+  const [quizOptions, setQuizOptions] = useState(["Option A", "Option B", "Option C", "Option D"]);
+  const [correctQuizOptionIdx, setCorrectQuizOptionIdx] = useState(0);
 
   const [questionPrompt, setQuestionPrompt] = useState("Ask me a question");
   const [sliderQuestion, setSliderQuestion] = useState("Rate this!");
@@ -1004,6 +1009,81 @@ export const StoryStickersDrawer = ({ open, onClose, onAddSticker }) => {
     </div>
   );
 
+  // ─── 8.5. QUIZ VIEW ─────────────────────────────
+  const renderQuiz = () => (
+    <div className="space-y-3 flex-1 min-h-0 flex flex-col justify-between">
+      <div className="space-y-3 overflow-y-auto flex-1 min-h-0 hide-scrollbar pr-0.5">
+        <div className="bg-white text-zinc-950 rounded-2xl p-4 shadow-2xl space-y-3 border border-white/40">
+          <input
+            type="text"
+            placeholder="Guess my favorite...?"
+            value={quizQuestion}
+            onChange={(e) => setQuizQuestion(e.target.value)}
+            className="w-full text-center font-extrabold text-sm text-zinc-950 placeholder:text-zinc-400 outline-none bg-transparent"
+            autoFocus
+          />
+          <p className="text-[10px] text-zinc-500 font-semibold text-center">Tap the green check to set the correct answer</p>
+          <div className="space-y-2">
+            {quizOptions.map((opt, idx) => {
+              const isCorrect = correctQuizOptionIdx === idx;
+              return (
+                <div key={idx} className="flex items-center gap-2">
+                  <span className="font-mono font-black text-xs text-zinc-400 w-4 text-center">
+                    {String.fromCharCode(65 + idx)}
+                  </span>
+                  <input
+                    type="text"
+                    placeholder={`Option ${String.fromCharCode(65 + idx)}`}
+                    value={opt}
+                    onChange={(e) => {
+                      const next = [...quizOptions];
+                      next[idx] = e.target.value;
+                      setQuizOptions(next);
+                    }}
+                    className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs border outline-none ${
+                      isCorrect ? "border-emerald-500 bg-emerald-50 text-emerald-950" : "border-zinc-200 bg-zinc-100 text-zinc-900"
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setCorrectQuizOptionIdx(idx)}
+                    className={`p-2 rounded-xl transition border cursor-pointer ${
+                      isCorrect
+                        ? "bg-emerald-500 text-white border-emerald-600 shadow-sm"
+                        : "bg-zinc-100 text-zinc-400 border-zinc-200 hover:text-zinc-700"
+                    }`}
+                    title="Set as correct answer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <button
+        onClick={() => {
+          if (!quizQuestion.trim()) return;
+          const filteredOptions = quizOptions.map((o, i) => o.trim() || `Option ${String.fromCharCode(65 + i)}`);
+          addAndClose({
+            type: "quiz",
+            quiz: {
+              question: quizQuestion.trim(),
+              options: filteredOptions,
+              correctOptionIndex: correctQuizOptionIdx,
+            },
+          });
+        }}
+        disabled={!quizQuestion.trim()}
+        className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-600 font-extrabold text-xs text-white rounded-xl shadow-lg transition active:scale-[0.98] disabled:opacity-40"
+      >
+        Done
+      </button>
+    </div>
+  );
+
   // ─── 9. QUESTIONS VIEW ──────────────────────────
   const renderQuestion = () => (
     <div className="space-y-3 flex-1 min-h-0 flex flex-col justify-between">
@@ -1353,6 +1433,7 @@ export const StoryStickersDrawer = ({ open, onClose, onAddSticker }) => {
     mention: renderMention,
     hashtag: renderHashtag,
     poll: renderPoll,
+    quiz: renderQuiz,
     question: renderQuestion,
     slider: renderSlider,
     countdown: renderCountdown,

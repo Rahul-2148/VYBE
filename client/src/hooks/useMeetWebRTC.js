@@ -12,12 +12,13 @@ import {
   tuneOpusSdp,
   unlockAudioContext,
 } from "../lib/webrtcCore";
+import { VideoBackgroundProcessor } from "../lib/videoBackgroundProcessor";
 import { playJoinSound, playLeaveSound, playHandRaiseSound } from "../lib/sounds";
 
 /**
  * useMeetWebRTC - Enterprise Multi-Party Mesh WebRTC Engine for Vybe Meet
  * Implements Perfect Negotiation, Opus HD 64kbps SDP Tuning, Hardware AEC,
- * Reliable Candidate Queuing, Multi-Track Separation & Resilient State Management.
+ * Real-Time Video Background & Studio Lighting Processing, Multi-Track Separation & Resilient State Management.
  */
 export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => {
   const { userData } = useSelector((s) => s.user || {});
@@ -54,6 +55,8 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
 
   const socketRef = useRef(null);
   const localStreamRef = useRef(null);
+  const rawStreamRef = useRef(null);
+  const videoProcessorRef = useRef(null);
   const screenStreamRef = useRef(null);
   const peerConnections = useRef({}); // { [socketId]: RTCPeerConnection }
   const cameraSendersRef = useRef({}); // { [socketId]: RTCRtpSender }
@@ -137,6 +140,11 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
       vadCleanupRef.current = null;
     }
 
+    if (videoProcessorRef.current) {
+      videoProcessorRef.current.cleanup();
+      videoProcessorRef.current = null;
+    }
+
     if (screenStreamRef.current) {
       screenStreamRef.current.getTracks().forEach((t) => {
         try {
@@ -144,6 +152,15 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
         } catch {}
       });
       screenStreamRef.current = null;
+    }
+
+    if (rawStreamRef.current) {
+      rawStreamRef.current.getTracks().forEach((t) => {
+        try {
+          t.stop();
+        } catch {}
+      });
+      rawStreamRef.current = null;
     }
 
     if (localStreamRef.current) {
@@ -386,8 +403,35 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
           stream.getVideoTracks().forEach((t) => (t.enabled = false));
         }
 
-        localStreamRef.current = stream;
-        setLocalStream(stream);
+        rawStreamRef.current = stream;
+
+        // Initialize Real-Time Video Background & Studio Lighting Processor
+        let activeVideoTrack = stream.getVideoTracks()[0];
+        try {
+          const processor = new VideoBackgroundProcessor();
+          videoProcessorRef.current = processor;
+          const processed = await processor.initialize(stream);
+          if (initialOptions.videoFilter && initialOptions.videoFilter !== "none") {
+            processor.setEffect(initialOptions.videoFilter, initialOptions.customBackgroundUrl);
+          }
+          const pTrack = processor.getProcessedVideoTrack();
+          if (pTrack) {
+            activeVideoTrack = pTrack;
+            if (initialOptions.isVideoOff) {
+              pTrack.enabled = false;
+            }
+          }
+        } catch (procErr) {
+          console.warn("[MeetWebRTC] VideoProcessor initialization notice:", procErr);
+        }
+
+        const compositeStream = new MediaStream([
+          ...stream.getAudioTracks(),
+          ...(activeVideoTrack ? [activeVideoTrack] : []),
+        ]);
+
+        localStreamRef.current = compositeStream;
+        setLocalStream(compositeStream);
         setIsMediaReady(true);
 
         // Voice activity detector for active speaker indicator
@@ -421,6 +465,48 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
     };
 
     startMeeting();
+
+    // 5. Connection Health & Stats Polling Loop (Google Meet Adaptive Quality Parity)
+    const statsInterval = setInterval(async () => {
+      const pcs = Object.values(peerConnections.current);
+      if (pcs.length === 0) return;
+
+      let totalRtt = 0;
+      let sampleCount = 0;
+      let hasFailed = false;
+
+      for (const pc of pcs) {
+        if (pc.iceConnectionState === "failed" || pc.connectionState === "failed") {
+          hasFailed = true;
+          try {
+            pc.restartIce();
+          } catch {}
+        }
+
+        try {
+          const stats = await pc.getStats();
+          stats.forEach((report) => {
+            if (
+              report.type === "candidate-pair" &&
+              report.state === "succeeded" &&
+              report.currentRoundTripTime
+            ) {
+              totalRtt += report.currentRoundTripTime * 1000;
+              sampleCount += 1;
+            }
+          });
+        } catch {}
+      }
+
+      if (hasFailed) {
+        setConnectionQuality("poor");
+      } else if (sampleCount > 0) {
+        const avgRtt = totalRtt / sampleCount;
+        if (avgRtt < 160) setConnectionQuality("good");
+        else if (avgRtt < 360) setConnectionQuality("fair");
+        else setConnectionQuality("poor");
+      }
+    }, 3000);
 
     const myResolvedId = (currentUserId || userData?.user?._id || userData?._id)?.toString();
 
@@ -587,27 +673,114 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
       });
     };
 
+    // Socket Event: Breakout Room Members Received (WebRTC mesh isolation)
+    const handleBreakoutRoomMembers = ({ members }) => {
+      console.log(`🚪 [MeetWebRTC] Entering breakout sub-mesh with ${members?.length || 0} peers`);
+      // Close existing connections to main room peers
+      Object.keys(peerConnections.current).forEach((sid) => {
+        closePeerConnection(sid);
+      });
+      setPeers({});
+
+      if (Array.isArray(members)) {
+        members.forEach((member) => {
+          const isSelf = (member.socketId && member.socketId === socket?.id) || (member.userId && myResolvedId && member.userId.toString() === myResolvedId);
+          if (!isSelf && member.socketId) {
+            setPeers((prev) => ({
+              ...prev,
+              [member.socketId]: {
+                ...member,
+                muted: false,
+                videoOff: false,
+                screenSharing: false,
+                handRaised: false,
+                handRaisedAt: null,
+                videoFilter: "none",
+              },
+            }));
+            createPeerConnection(member.socketId, true, member);
+          }
+        });
+      }
+    };
+
+    // Socket Event: Breakout Peer Joined
+    const handleBreakoutPeerJoined = (data) => {
+      const isSelf = (data.socketId && data.socketId === socket?.id) || (data.userId && myResolvedId && data.userId.toString() === myResolvedId);
+      if (isSelf || !data.socketId) return;
+      playJoinSound();
+      snackbar.info(`@${data.userName || "Participant"} joined this breakout room`);
+      setPeers((prev) => ({
+        ...prev,
+        [data.socketId]: {
+          ...data,
+          muted: false,
+          videoOff: false,
+          screenSharing: false,
+          handRaised: false,
+          handRaisedAt: null,
+          videoFilter: "none",
+        },
+      }));
+      createPeerConnection(data.socketId, false, data);
+    };
+
+    // Socket Event: Breakout Peer Left
+    const handleBreakoutPeerLeft = ({ socketId }) => {
+      if (socketId) {
+        closePeerConnection(socketId);
+      }
+    };
+
+    // Socket Event: Breakout Session Ended (Return to main room mesh)
+    const handleBreakoutEnded = () => {
+      console.log(`🚪 [MeetWebRTC] Breakout session closed, rejoining main room mesh`);
+      Object.keys(peerConnections.current).forEach((sid) => {
+        closePeerConnection(sid);
+      });
+      setPeers({});
+
+      // Rejoin main meeting room to receive full room members
+      socket?.emit("meeting:join-room", {
+        meetingId,
+        userName: rawUserName,
+        name: rawName,
+        profilePicture: myProfileAvatar,
+        isMuted,
+        isVideoOff,
+        videoFilter,
+      });
+    };
+
     // Socket Event: Meeting Ended by Host
     const handleMeetingEnded = () => {
       snackbar.info("The host has ended this meeting");
       leaveRoom();
     };
 
-    socket?.on("meeting:room-members", handleRoomMembers);
-    socket?.on("meeting:peer-joined", handlePeerJoined);
-    socket?.on("meeting:peer-left", handlePeerLeft);
-    socket?.on("meeting:signal-received", handleSignalReceived);
-    socket?.on("meeting:action-broadcast", handleActionBroadcast);
-    socket?.on("meeting:ended", handleMeetingEnded);
+    socket.on("meeting:room-members", handleRoomMembers);
+    socket.on("meeting:peer-joined", handlePeerJoined);
+    socket.on("meeting:peer-left", handlePeerLeft);
+    socket.on("meeting:signal-received", handleSignalReceived);
+    socket.on("meeting:action-broadcast", handleActionBroadcast);
+    socket.on("meeting:breakout-room-members", handleBreakoutRoomMembers);
+    socket.on("meeting:breakout-peer-joined", handleBreakoutPeerJoined);
+    socket.on("meeting:breakout-peer-left", handleBreakoutPeerLeft);
+    socket.on("meeting:breakout-ended", handleBreakoutEnded);
+    socket.on("meeting:ended", handleMeetingEnded);
 
     return () => {
-      socket?.off("meeting:room-members", handleRoomMembers);
-      socket?.off("meeting:peer-joined", handlePeerJoined);
-      socket?.off("meeting:peer-left", handlePeerLeft);
-      socket?.off("meeting:signal-received", handleSignalReceived);
-      socket?.off("meeting:action-broadcast", handleActionBroadcast);
-      socket?.off("meeting:ended", handleMeetingEnded);
-      leaveRoom();
+      clearInterval(statsInterval);
+      socket.off("meeting:room-members", handleRoomMembers);
+      socket.off("meeting:peer-joined", handlePeerJoined);
+      socket.off("meeting:peer-left", handlePeerLeft);
+      socket.off("meeting:signal-received", handleSignalReceived);
+      socket.off("meeting:action-broadcast", handleActionBroadcast);
+      socket.off("meeting:breakout-room-members", handleBreakoutRoomMembers);
+      socket.off("meeting:breakout-peer-joined", handleBreakoutPeerJoined);
+      socket.off("meeting:breakout-peer-left", handleBreakoutPeerLeft);
+      socket.off("meeting:breakout-ended", handleBreakoutEnded);
+      socket.off("meeting:ended", handleMeetingEnded);
     };
   }, [
     meetingId,
@@ -617,9 +790,6 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
     myProfileAvatar,
     selectedAudioInput,
     selectedVideo,
-    initialOptions.isMuted,
-    initialOptions.isVideoOff,
-    initialOptions.videoFilter,
     createPeerConnection,
     closePeerConnection,
     leaveRoom,
@@ -775,17 +945,28 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
     });
   }, [isHandRaised, meetingId]);
 
-  // Media Controls: Video Filter
+  // Media Controls: Video Filter & Virtual Backgrounds
   const changeVideoFilter = useCallback(
-    (filterName) => {
+    (filterName, customImageUrl = null) => {
       setVideoFilter(filterName);
+      if (videoProcessorRef.current) {
+        videoProcessorRef.current.setEffect(filterName, customImageUrl);
+        const pTrack = videoProcessorRef.current.getProcessedVideoTrack();
+        if (pTrack && !isVideoOff) {
+          Object.keys(peerConnections.current).forEach((sid) => {
+            if (cameraSendersRef.current[sid]) {
+              cameraSendersRef.current[sid].replaceTrack(pTrack).catch(() => null);
+            }
+          });
+        }
+      }
       socketRef.current?.emit("meeting:action", {
         meetingId,
         action: "filter",
         videoFilter: filterName,
       });
     },
-    [meetingId]
+    [meetingId, isVideoOff]
   );
 
   return {

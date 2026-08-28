@@ -13,14 +13,20 @@ const Story = () => {
   const { feed } = useSelector((s) => s.story);
   const [loading, setLoading] = useState(() => {
     if (state?.stories && state.stories.length > 0) return false;
-    if (state?.initialUserIndex !== undefined && feed?.length > 0) return false;
-    return !feed || feed.length === 0;
+    if (feed && feed.length > 0) return false;
+    return true;
   });
 
   useEffect(() => {
     // If state has highlight/story data, we are ready
-    if (state?.stories && state.stories.length > 0) return;
-    if (state?.initialUserIndex !== undefined && feed?.length > 0) return;
+    if (state?.stories && state.stories.length > 0) {
+      setLoading(false);
+      return;
+    }
+    if (feed && feed.length > 0) {
+      setLoading(false);
+      return;
+    }
 
     let isMounted = true;
     // If Redux feed is empty, fetch feed from API

@@ -7,6 +7,9 @@ import {
   markStoryAsViewedInRedux,
   removeStoryFromReduxFeed,
   setStoryFeed,
+  updateStoryPollVotesInRedux,
+  updateStoryQuestionResponsesInRedux,
+  updateStoryQuizAnswersInRedux,
 } from "../redux/features/storySlice";
 import api from "../lib/axios";
 
@@ -67,11 +70,47 @@ export const useStorySocket = () => {
       }).catch(() => null);
     };
 
+    const handleStoryPollVoted = (data) => {
+      if (data?.storyId && data?.pollVotes) {
+        dispatch(
+          updateStoryPollVotesInRedux({
+            storyId: data.storyId,
+            pollVotes: data.pollVotes,
+          })
+        );
+      }
+    };
+
+    const handleStoryQuestionSubmitted = (data) => {
+      if (data?.storyId && data?.questionResponses) {
+        dispatch(
+          updateStoryQuestionResponsesInRedux({
+            storyId: data.storyId,
+            questionResponses: data.questionResponses,
+          })
+        );
+      }
+    };
+
+    const handleStoryQuizAnswered = (data) => {
+      if (data?.storyId && data?.quizAnswers) {
+        dispatch(
+          updateStoryQuizAnswersInRedux({
+            storyId: data.storyId,
+            quizAnswers: data.quizAnswers,
+          })
+        );
+      }
+    };
+
     socket.on("story-liked", handleStoryLiked);
     socket.on("story-reacted", handleStoryReacted);
     socket.on("story-viewed", handleStoryViewed);
     socket.on("story-deleted", handleStoryDeleted);
     socket.on("story-created", handleStoryCreated);
+    socket.on("story-poll-voted", handleStoryPollVoted);
+    socket.on("story-question-submitted", handleStoryQuestionSubmitted);
+    socket.on("story-quiz-answered", handleStoryQuizAnswered);
 
     return () => {
       socket.off("story-liked", handleStoryLiked);
@@ -79,6 +118,9 @@ export const useStorySocket = () => {
       socket.off("story-viewed", handleStoryViewed);
       socket.off("story-deleted", handleStoryDeleted);
       socket.off("story-created", handleStoryCreated);
+      socket.off("story-poll-voted", handleStoryPollVoted);
+      socket.off("story-question-submitted", handleStoryQuestionSubmitted);
+      socket.off("story-quiz-answered", handleStoryQuizAnswered);
     };
   }, [dispatch, userData]);
 };

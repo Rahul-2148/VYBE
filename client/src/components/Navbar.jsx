@@ -121,8 +121,7 @@ const Navbar = () => {
 
   return (
     <nav
-      className="w-full h-14 bg-bg/95 border-t border-border/80 backdrop-blur-xl flex justify-around items-center fixed bottom-0 left-0 right-0 z-50 md:hidden select-none px-1"
-      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      className="w-full min-h-[3.5rem] h-[calc(3.5rem+env(safe-area-inset-bottom))] pb-[env(safe-area-inset-bottom)] bg-bg/95 border-t border-border/80 backdrop-blur-xl flex justify-around items-center fixed bottom-0 left-0 right-0 z-50 md:hidden select-none px-1"
     >
       {/* 1. Home */}
       <button

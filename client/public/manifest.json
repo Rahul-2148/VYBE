@@ -1,0 +1,18 @@
+{
+  "short_name": "Vybe",
+  "name": "Vybe - Not Just A Platform, It's A VYBE",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192 512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "categories": ["social", "entertainment", "lifestyle"]
+}

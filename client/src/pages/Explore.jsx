@@ -9,6 +9,7 @@ import Navbar from "../components/Navbar";
 import api from "../lib/axios";
 import dp from "../assets/dp3.png";
 import VerifiedBadge from "../components/VerifiedBadge";
+import RenderErrorBoundary from "../components/RenderErrorBoundary";
 
 const CATEGORIES = [
   { id: "all", label: "For You", icon: "✨" },
@@ -33,6 +34,11 @@ const TABS = [
 
 // ExploreMediaCard handles individual item state, hover play/pause, and touch hold autoplay.
 const ExploreMediaCard = ({ post, index, activeTab, navigate, formatCount, getVideoThumbnail }) => {
+  const videoRef = useRef(null);
+  const [, setIsPlaying] = useState(false);
+
+  if (!post || !post._id) return null;
+
   const isVideo =
     post.mediaType === "video" ||
     post.audioUrl ||
@@ -44,8 +50,6 @@ const ExploreMediaCard = ({ post, index, activeTab, navigate, formatCount, getVi
 
   const isLarge = activeTab === "grid" && (index % 10 === 0 || index % 10 === 6);
   const thumbnail = isVideo ? getVideoThumbnail(post) : null;
-  const videoRef = useRef(null);
-  const [, setIsPlaying] = useState(false);
 
   const getOptimizedImageUrl = (url) => {
     if (url && url.includes("cloudinary.com") && url.includes("/image/upload/")) {
@@ -522,21 +526,22 @@ export const Explore = () => {
           </div>
         ) : (
           /* Staggered Media Grid */
-          <div className={`grid gap-0.5 ${
+          <div className={`grid gap-0.5 sm:gap-1 md:gap-1.5 ${
             activeTab === "reels"
-              ? "grid-cols-2 sm:grid-cols-3"
-              : "grid-cols-3"
+              ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5"
+              : "grid-cols-3 md:grid-cols-4 xl:grid-cols-5"
           }`}>
             {displayPosts.map((post, index) => (
-              <ExploreMediaCard
-                key={post._id}
-                post={post}
-                index={index}
-                activeTab={activeTab}
-                navigate={navigate}
-                formatCount={formatCount}
-                getVideoThumbnail={getVideoThumbnail}
-              />
+              <RenderErrorBoundary key={post._id || index}>
+                <ExploreMediaCard
+                  post={post}
+                  index={index}
+                  activeTab={activeTab}
+                  navigate={navigate}
+                  formatCount={formatCount}
+                  getVideoThumbnail={getVideoThumbnail}
+                />
+              </RenderErrorBoundary>
             ))}
           </div>
         )}

@@ -9,6 +9,7 @@ import {
   getRecentMeetings,
   removeRecentMeeting,
   clearAllRecentMeetings,
+  getMeetingAIAssistant,
 } from "../controllers/meeting.controller.js";
 
 const meetingRouter = express.Router();
@@ -21,5 +22,6 @@ meetingRouter.get("/:meetingId", isAuthenticated, getMeetingInfo);
 meetingRouter.post("/:meetingId/join", isAuthenticated, joinMeeting);
 meetingRouter.post("/:meetingId/end", isAuthenticated, endMeeting);
 meetingRouter.patch("/:meetingId/settings", isAuthenticated, updateMeetingSettings);
+meetingRouter.post("/:meetingId/ai-assistant", isAuthenticated, getMeetingAIAssistant);
 
 export default meetingRouter;

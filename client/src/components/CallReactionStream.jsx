@@ -71,47 +71,58 @@ export const AnimatedEmoji = ({ emoji, className = "w-11 h-11", instanceId }) =>
 
 /**
  * GMeet-Exact Live Floating Reaction Stream
- * 2.0s duration with Google Meet organic cubic-bezier acceleration and authentic Noto animations
+ * Spawns immediately from bottom toolbar area with organic drift, wave motion, and cubic-bezier acceleration
  */
 export const CallReactionStream = ({ reactions = [] }) => {
   return (
-    <div className="fixed inset-0 pointer-events-none overflow-hidden z-[999]">
+    <div className="fixed inset-0 pointer-events-none overflow-hidden z-[9999]">
       <AnimatePresence>
         {reactions.map((r) => {
           const startX = typeof r.leftPercent === "number" ? r.leftPercent : 50;
+          const driftX = typeof r.driftX === "number" ? r.driftX : 0;
+          const displayName = r.senderName || r.userName || "";
 
           return (
             <motion.div
               key={r.id}
               initial={{
                 opacity: 0,
-                y: 0,
+                y: 15,
                 x: "-50%",
-                scale: 0.65,
+                scale: 0.45,
+                rotate: 0,
               }}
               animate={{
-                opacity: [0, 1, 1, 0],
-                y: -300,
-                scale: [0.65, 1.12, 1.0, 0.85],
+                opacity: [0, 1, 1, 1, 0],
+                y: [15, -60, -200, -360, -480],
+                x: [
+                  "-50%",
+                  `calc(-50% + ${driftX * 0.35}px)`,
+                  `calc(-50% + ${driftX * 0.75}px)`,
+                  `calc(-50% + ${driftX}px)`,
+                  `calc(-50% + ${driftX * 1.25}px)`,
+                ],
+                scale: [0.45, 1.28, 1.15, 1.0, 0.75],
+                rotate: [0, -7, 7, -4, 0],
               }}
               exit={{ opacity: 0 }}
               transition={{
-                duration: 2.0,
-                ease: [0.25, 0.46, 0.45, 0.94],
-                times: [0, 0.12, 0.75, 1],
+                duration: 2.2,
+                ease: [0.16, 1, 0.3, 1], // Google Meet smooth organic physics
+                times: [0, 0.12, 0.45, 0.78, 1],
               }}
-              className="fixed bottom-24 flex flex-col items-center gap-1 select-none pointer-events-none z-[999]"
+              className="fixed bottom-16 flex flex-col items-center gap-1 select-none pointer-events-none z-[9999]"
               style={{
                 left: `${startX}%`,
               }}
             >
               {/* Google Meet Authentic Animated Reaction */}
-              <AnimatedEmoji emoji={r.emoji} className="w-8.5 h-8.5 sm:w-9.5 sm:h-9.5" instanceId={r.id} />
+              <AnimatedEmoji emoji={r.emoji} className="w-9 h-9 sm:w-10 sm:h-10" instanceId={r.id} />
 
               {/* Sender Label Badge */}
-              {r.userName && (
-                <span className="px-2 py-0.5 rounded-full bg-[#181a1d]/90 backdrop-blur-md border border-white/20 text-[9px] font-bold text-white shadow-lg whitespace-nowrap mt-0.5">
-                  {r.userName}
+              {displayName && (
+                <span className="px-2 py-0.5 rounded-full bg-[#181a1d]/90 backdrop-blur-md border border-white/20 text-[9px] font-bold text-white shadow-lg whitespace-nowrap mt-0.5 animate-in fade-in zoom-in-75">
+                  {displayName}
                 </span>
               )}
             </motion.div>
@@ -123,4 +134,3 @@ export const CallReactionStream = ({ reactions = [] }) => {
 };
 
 export default CallReactionStream;
-

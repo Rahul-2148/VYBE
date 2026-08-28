@@ -161,6 +161,15 @@ const storySchema = new mongoose.Schema(
       },
     ],
 
+    // Slider Responses Tracking
+    sliderResponses: [
+      {
+        user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+        value: { type: Number, required: true },
+        respondedAt: { type: Date, default: Date.now },
+      },
+    ],
+
     viewers: [
       {
         type: mongoose.Schema.Types.ObjectId,

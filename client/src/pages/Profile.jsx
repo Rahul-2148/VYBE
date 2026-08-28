@@ -44,6 +44,7 @@ import AboutAccountModal from "../components/AboutAccountModal";
 import DraftsModal from "../components/DraftsModal";
 import VerifiedBadge from "../components/VerifiedBadge";
 import StoryMusicPickerModal from "../components/StoryMusicPickerModal";
+import RenderErrorBoundary from "../components/RenderErrorBoundary";
 import dp from "../assets/dp3.png";
 import { setProfileData, setUserData } from "../redux/features/userSlice";
 import { setSelectedChatUser } from "../redux/features/messageSlice";
@@ -1049,25 +1050,27 @@ const Profile = () => {
                   )}
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                <div className="grid grid-cols-3 gap-1 sm:gap-3 lg:grid-cols-4 xl:grid-cols-5">
                   {activeFeed.map((item) => {
+                    if (!item) return null;
                     const itemKind = item.__kind || (postType === "reels" ? "reel" : "post");
 
                     return (
-                      <ProfileTile
-                        key={item._id || item.id}
-                        item={item}
-                        kind={itemKind}
-                        onClick={() => {
-                          if (itemKind === "audio") {
-                            navigate(`/audio/${encodeURIComponent(item.id || item.title)}`, { state: { music: item } });
-                          } else if (itemKind === "reel") {
-                            navigate(`/reels?reelId=${item._id}`);
-                          } else {
-                            navigate(`/?postId=${item._id}`);
-                          }
-                        }}
-                      />
+                      <RenderErrorBoundary key={item._id || item.id}>
+                        <ProfileTile
+                          item={item}
+                          kind={itemKind}
+                          onClick={() => {
+                            if (itemKind === "audio") {
+                              navigate(`/audio/${encodeURIComponent(item.id || item.title)}`, { state: { music: item } });
+                            } else if (itemKind === "reel") {
+                              navigate(`/reels?reelId=${item._id}`);
+                            } else {
+                              navigate(`/?postId=${item._id}`);
+                            }
+                          }}
+                        />
+                      </RenderErrorBoundary>
                     );
                   })}
                 </div>

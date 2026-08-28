@@ -5,26 +5,19 @@ import api from "../../lib/axios";
 import { snackbar } from "../../lib/snackbar";
 import MeetLobby from "./MeetLobby";
 import MeetRoomView from "../../components/meet/MeetRoomView";
-import { useMeetWebRTC } from "../../hooks/useMeetWebRTC";
+import { useMeet } from "../../context/MeetContext";
 
 export const MeetRoom = () => {
   const { meetingId } = useParams();
   const navigate = useNavigate();
   const { userData } = useSelector((s) => s.user);
-  const currentUserId = userData?.user?._id || userData?._id;
+
+  const { activeMeeting, startMeeting, minimizeMeeting, leaveMeeting, rtc } = useMeet();
 
   const [meeting, setMeeting] = useState(null);
   const [isHost, setIsHost] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [hasJoined, setHasJoined] = useState(false);
   const [error, setError] = useState(null);
-
-  // Pre-join options chosen in Lobby
-  const [lobbyOptions, setLobbyOptions] = useState({
-    isMuted: false,
-    isVideoOff: false,
-    videoFilter: "none",
-  });
 
   // Fetch Meeting Information
   useEffect(() => {
@@ -58,20 +51,21 @@ export const MeetRoom = () => {
   }, [meetingId]);
 
   const handleJoinFromLobby = async (options) => {
-    setLobbyOptions(options);
     try {
       await api.post(`/meet/${meetingId}/join`);
-      setHasJoined(true);
+      startMeeting({
+        meetingId,
+        roomTitle: meeting?.title || "VYBE Meeting",
+        isHost,
+        hostUserId: meeting?.host?._id || meeting?.host || null,
+        lobbyOptions: options,
+      });
     } catch (err) {
       snackbar.error(err.response?.data?.message || "Failed to join meeting");
     }
   };
 
-  const handleLeaveMeeting = () => {
-    navigate("/meet", { replace: true });
-  };
-
-  if (isLoading) {
+  if (isLoading && !activeMeeting) {
     return (
       <div className="w-screen h-screen bg-[#202124] flex flex-col items-center justify-center gap-3 text-white">
         <div className="w-8 h-8 border-3 border-rose-500 border-t-transparent rounded-full animate-spin" />
@@ -80,7 +74,7 @@ export const MeetRoom = () => {
     );
   }
 
-  if (error || !meeting) {
+  if ((error || !meeting) && !activeMeeting) {
     return (
       <div className="w-screen h-screen bg-[#202124] flex flex-col items-center justify-center p-6 text-center text-white space-y-4">
         <div className="w-16 h-16 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center text-2xl font-black">
@@ -98,8 +92,9 @@ export const MeetRoom = () => {
     );
   }
 
-  // Pre-join Lobby State
-  if (!hasJoined) {
+  // Pre-join Lobby State (if not currently in this active meeting session)
+  const isCurrentlyInThisMeeting = activeMeeting?.meetingId === meetingId;
+  if (!isCurrentlyInThisMeeting) {
     return (
       <div className="w-screen h-screen bg-[#202124] flex items-center justify-center overflow-y-auto">
         <MeetLobby
@@ -113,35 +108,13 @@ export const MeetRoom = () => {
     );
   }
 
-  // Active In-Meeting Room
-  return (
-    <ActiveMeetRoomWrapper
-      meetingId={meetingId}
-      meetingTitle={meeting.title}
-      isHost={isHost}
-      currentUserId={currentUserId}
-      lobbyOptions={lobbyOptions}
-      onLeave={handleLeaveMeeting}
-    />
-  );
-};
-
-// Wrapper that connects the dedicated multi-peer WebRTC engine with MeetRoomView
-const ActiveMeetRoomWrapper = ({
-  meetingId,
-  meetingTitle,
-  isHost,
-  currentUserId,
-  lobbyOptions,
-  onLeave,
-}) => {
-  const rtc = useMeetWebRTC(meetingId, currentUserId, lobbyOptions);
-
+  // Active In-Meeting Room View
   return (
     <MeetRoomView
       meetingId={meetingId}
-      roomTitle={meetingTitle || "VYBE Meeting"}
-      isHost={isHost}
+      roomTitle={activeMeeting.roomTitle || meeting?.title || "VYBE Meeting"}
+      isHost={activeMeeting.isHost ?? isHost}
+      hostUserId={activeMeeting.hostUserId || meeting?.host?._id || meeting?.host || null}
       localStream={rtc.localStream}
       screenStream={rtc.screenStream}
       peers={rtc.peers}
@@ -167,10 +140,8 @@ const ActiveMeetRoomWrapper = ({
       onToggleVideo={rtc.toggleVideo}
       onToggleScreenShare={rtc.toggleScreenShare}
       onToggleHand={rtc.toggleHand}
-      onEndCall={() => {
-        rtc.leaveRoom();
-        onLeave();
-      }}
+      onMinimize={minimizeMeeting}
+      onEndCall={leaveMeeting}
     />
   );
 };
