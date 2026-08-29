@@ -19,6 +19,7 @@ import {
   Minus,
   Mic,
   Video,
+  VideoOff,
   PhoneOff,
 } from "lucide-react";
 import MeetControls, { GoogleMeetHandIcon } from "./MeetControls";
@@ -267,6 +268,8 @@ export const MeetRoomView = ({
   setSelectedAudioOutput,
   onToggleMute,
   onToggleVideo,
+  onFlipCamera,
+  isFrontCamera = true,
   onToggleScreenShare,
   onToggleHand,
   onChangeVideoFilter,
@@ -321,17 +324,17 @@ export const MeetRoomView = ({
 
   // Breakout Countdown Timer Loop
   useEffect(() => {
-    if (!breakoutSession?.timerExpiresAt) {
-      setBreakoutRemainingSeconds(null);
-      return;
-    }
+    if (!breakoutSession?.timerExpiresAt) return;
     const updateCountdown = () => {
       const diff = Math.max(0, Math.floor((breakoutSession.timerExpiresAt - Date.now()) / 1000));
       setBreakoutRemainingSeconds(diff);
     };
     updateCountdown();
     const interval = setInterval(updateCountdown, 1000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      setBreakoutRemainingSeconds(null);
+    };
   }, [breakoutSession?.timerExpiresAt]);
 
   // Fullscreen Management
@@ -403,10 +406,7 @@ export const MeetRoomView = ({
 
   // Real-time Voice Activity Detection on local microphone stream
   useEffect(() => {
-    if (!localStream || isMuted || !isCaptionsOn) {
-      setIsSpeakingAudio(false);
-      return;
-    }
+    if (!localStream || isMuted || !isCaptionsOn) return;
 
     let audioContext = null;
     let analyser = null;
@@ -462,22 +462,14 @@ export const MeetRoomView = ({
 
   // Web Speech Recognition for Real-Time Closed Captions (CC)
   useEffect(() => {
-    if (!isCaptionsOn || isMuted) {
-      if (speechRecognitionRef.current) {
-        try {
-          speechRecognitionRef.current.abort();
-        } catch {}
-        speechRecognitionRef.current = null;
-      }
-      isRecognizingRef.current = false;
-      setSpeechNotice(null);
-      return;
-    }
+    if (!isCaptionsOn || isMuted) return;
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      setSpeechNotice("Speech recognition is not supported in this browser");
-      return;
+      const timer = setTimeout(() => {
+        setSpeechNotice("Speech recognition is not supported in this browser");
+      }, 0);
+      return () => clearTimeout(timer);
     }
 
     let recognition = null;
@@ -738,7 +730,7 @@ export const MeetRoomView = ({
       socket.off("meeting:breakout-reassigned", handleBreakoutReassigned);
       socket.off("meeting:breakout-ended", handleBreakoutEnded);
     };
-  }, [meetingId, activeSidebar]);
+  }, [meetingId, activeSidebar, currentUserId]);
 
   // Send In-Meeting Chat
   const handleSendChat = (e, customText) => {
@@ -922,7 +914,7 @@ export const MeetRoomView = ({
   }
 
   return (
-    <div className="relative w-screen h-screen bg-[#202124] text-white flex flex-col justify-between overflow-hidden select-none font-sans">
+    <div className="relative w-screen h-[100dvh] min-h-[100dvh] bg-[#202124] text-white flex flex-col justify-between overflow-hidden select-none font-sans">
       {/* Background Remote Audio Players (Ensures crystal-clear continuous voice output) */}
       {peerList.map((p) =>
         p.stream ? (
@@ -1680,6 +1672,8 @@ export const MeetRoomView = ({
         onToggleCaptions={() => setIsCaptionsOn((p) => !p)}
         onToggleMute={onToggleMute}
         onToggleVideo={onToggleVideo}
+        onFlipCamera={onFlipCamera}
+        isFrontCamera={isFrontCamera}
         onToggleScreenShare={onToggleScreenShare}
         onToggleHand={onToggleHand}
         onEndCall={onEndCall}

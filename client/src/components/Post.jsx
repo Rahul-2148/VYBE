@@ -230,7 +230,7 @@ const Post = ({ post }) => {
       }
       return next;
     });
-  }, [post?._id]);
+  }, [post]);
 
 
   // Modals state

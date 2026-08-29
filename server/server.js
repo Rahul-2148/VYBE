@@ -1,18 +1,17 @@
-// server.js - Vybe Enterprise Backend Server (Clean Reboot)
-import { configDotenv } from "dotenv";
+// server.js - Vybe Enterprise Backend Server
+import "dotenv/config";
 import http from "http";
 import connectDB from "./config/db.js";
 import app from "./app.js";
 import { initializeSocket } from "./socket.js";
-
-configDotenv();
+import { archiveExpiredStories, purgeExpiredArchivedStories } from "./services/storyArchive.service.js";
 
 // Process Level Error Catchers for Runtime Stability
 process.on("uncaughtException", (error) => {
   console.error("💥 UNCAUGHT EXCEPTION! Shutting down gracefully...", error);
 });
 
-process.on("unhandledRejection", (reason, promise) => {
+process.on("unhandledRejection", (reason) => {
   console.error("💥 UNHANDLED REJECTION! Detail:", reason);
 });
 
@@ -28,33 +27,46 @@ const io = initializeSocket(httpServer);
 app.locals.io = io;
 global.io = io;
 
-import { archiveExpiredStories, purgeExpiredArchivedStories } from "./services/storyArchive.service.js";
+// Ultra-fast parallelized bootstrap
+const startServer = async () => {
+  const startTime = performance.now();
 
-// Connect to DB and then start server
-httpServer.listen(PORT, async () => {
-  await connectDB();
-  console.log(`🚀 Server is running on port ${PORT}`);
-  console.log(`🔌 Socket.IO initialized and ready for connections`);
+  // 1. Start HTTP Server immediately (zero-wait network readiness)
+  httpServer.listen(PORT, () => {
+    const elapsed = (performance.now() - startTime).toFixed(1);
+    console.log(`🚀 VYBE Server is running on port ${PORT} [Boot time: ${elapsed}ms]`);
+    console.log(`🔌 Socket.IO initialized and ready for connections`);
+  });
 
-  // Run initial Story Auto-Archive and 30-Day Archive Purge on startup
-  archiveExpiredStories().catch((e) =>
-    console.error("Startup story auto-archive error:", e.message)
-  );
-  purgeExpiredArchivedStories().catch((e) =>
-    console.error("Startup story archive purge error:", e.message)
-  );
+  // 2. Connect to Database in parallel with connection pooling & IPv4 acceleration
+  connectDB()
+    .then(() => {
+      // 3. Dispatch background maintenance without blocking HTTP readiness
+      setImmediate(() => {
+        archiveExpiredStories().catch((e) =>
+          console.error("Startup story auto-archive notice:", e.message)
+        );
+        purgeExpiredArchivedStories().catch((e) =>
+          console.error("Startup story archive purge notice:", e.message)
+        );
+      });
+    })
+    .catch((err) => {
+      console.error("💥 MongoDB Fatal Connection Error:", err.message);
+    });
 
-  // Periodic Story Auto-Archive check every 5 minutes
+  // 4. Periodic background tasks (Story auto-archive & 30-day purge)
   setInterval(() => {
     archiveExpiredStories().catch((e) =>
       console.error("Periodic story auto-archive error:", e.message)
     );
   }, 5 * 60 * 1000);
 
-  // Periodic 30-Day Archive Purge check once every 2 hours
   setInterval(() => {
     purgeExpiredArchivedStories().catch((e) =>
       console.error("Periodic story archive purge error:", e.message)
     );
   }, 2 * 60 * 60 * 1000);
-});
+};
+
+startServer();

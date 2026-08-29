@@ -10,13 +10,14 @@ import SponsoredPost from "./SponsoredPost";
 import FeedFilterBar from "./FeedFilterBar";
 import CloseFriendsModal from "./CloseFriendsModal";
 import RenderErrorBoundary from "./RenderErrorBoundary";
-import { MessageCircle, Loader2, Sparkles, Users, Star, Compass, UserPlus, Plus, Bell } from "lucide-react";
+import { MessageCircle, Loader2, Sparkles, Users, Star, Compass, UserPlus, Plus, Bell, Video } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../lib/axios";
 import { getSocket } from "../lib/socket";
 import { useGetRankedFeedPostsQuery, useGetMonetizationAdsQuery } from "../redux/api/apiSlice";
 import { setPostData } from "../redux/features/postSlice";
 import GetStoryFeed from "../hooks/GetStoryFeed";
+import { useMeet } from "../context/MeetContext";
 
 const Feed = () => {
   const feedRef = useRef(null);
@@ -28,6 +29,7 @@ const Feed = () => {
   }, []);
 
   GetStoryFeed();
+  const { activeMeeting } = useMeet();
   const { postData } = useSelector((state) => state.post);
   const { userData } = useSelector((state) => state.user);
   const { yourStory, followingStories } = useSelector((state) => state.story);
@@ -168,8 +170,18 @@ const Feed = () => {
           />
         </div>
 
-        {/* Right: Communities & Notifications */}
-        <div className="flex items-center gap-1">
+        {/* Right: Meet (Video Calls), Communities & Notifications */}
+        <div className="flex items-center gap-0.5 sm:gap-1">
+          <button
+            onClick={() => navigate("/meet")}
+            className="p-2 text-text hover:text-blue-500 active:scale-95 transition cursor-pointer relative flex items-center justify-center"
+            title="Vybe Meet (Video Calls)"
+          >
+            <Video className="w-6 h-6 stroke-[1.8] text-text" />
+            {activeMeeting?.meetingId && (
+              <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.9)] ring-2 ring-bg animate-pulse" />
+            )}
+          </button>
           <button
             onClick={() => navigate("/communities")}
             className="p-2 text-text hover:text-purple-400 active:scale-95 transition cursor-pointer relative flex items-center justify-center"

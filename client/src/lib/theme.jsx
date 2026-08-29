@@ -1,8 +1,5 @@
-// src/lib/theme.jsx — ThemeProvider + useTheme hook
-// Zero-rerender theme switching via CSS class toggling on <html>
-// Enterprise-grade sync with user settings on the server
-
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { flushSync } from "react-dom";
 import { useSelector } from "react-redux";
 import api from "./axios";
 import ThemeContext from "./themeContext";
@@ -58,41 +55,34 @@ export function ThemeProvider({ children, defaultTheme = "system" }) {
   const userId = userData?._id || userData?.user?._id;
 
   const [theme, setThemeState] = useState(() => getStoredTheme(userId) || defaultTheme);
-  const [resolvedTheme, setResolvedTheme] = useState(() => {
-    const stored = getStoredTheme(userId) || defaultTheme;
-    return stored === "system" ? getSystemTheme() : stored;
-  });
+  const [systemTheme, setSystemTheme] = useState(getSystemTheme);
+  const resolvedTheme = useMemo(() => (theme === "system" ? systemTheme : theme), [theme, systemTheme]);
 
-  const [mounted, setMounted] = useState(false);
+  const mountedRef = useRef(false);
 
   // Apply theme on mount and when theme changes
   useEffect(() => {
-    const resolved = theme === "system" ? getSystemTheme() : theme;
-    const id = setTimeout(() => setResolvedTheme(resolved), 0);
-    applyThemeToDOM(resolved);
+    applyThemeToDOM(resolvedTheme);
 
-    if (!mounted) {
-      const mountId = setTimeout(() => setMounted(true), 0);
+    if (!mountedRef.current) {
+      mountedRef.current = true;
       document.documentElement.classList.add("no-transitions");
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           document.documentElement.classList.remove("no-transitions");
         });
       });
-      return () => clearTimeout(mountId);
     }
-
-    return () => clearTimeout(id);
-  }, [theme, mounted]);
+  }, [resolvedTheme]);
 
   // Sync theme when user logs in or switches accounts
   useEffect(() => {
     if (!userId) return;
 
     let isMounted = true;
+    let timer = null;
     // 1. Immediately read cached theme for this specific user
     const localUserTheme = getStoredTheme(userId);
-    let timer = null;
     if (localUserTheme && THEMES.includes(localUserTheme)) {
       timer = setTimeout(() => {
         if (isMounted) setThemeState(localUserTheme);
@@ -133,9 +123,7 @@ export function ThemeProvider({ children, defaultTheme = "system" }) {
 
     const mediaQuery = window.matchMedia("(prefers-color-scheme: light)");
     const handleChange = (e) => {
-      const newTheme = e.matches ? "light" : "dark";
-      setResolvedTheme(newTheme);
-      applyThemeToDOM(newTheme);
+      setSystemTheme(e.matches ? "light" : "dark");
     };
 
     mediaQuery.addEventListener("change", handleChange);
@@ -145,6 +133,9 @@ export function ThemeProvider({ children, defaultTheme = "system" }) {
   const setTheme = useCallback((newTheme) => {
     if (!THEMES.includes(newTheme)) return;
     setThemeState(newTheme);
+    const resolved = newTheme === "system" ? getSystemTheme() : newTheme;
+    applyThemeToDOM(resolved);
+
     try {
       localStorage.setItem(getUserStorageKey(userId), newTheme);
       localStorage.setItem(DEFAULT_STORAGE_KEY, newTheme);
@@ -164,9 +155,134 @@ export function ThemeProvider({ children, defaultTheme = "system" }) {
     setTheme(resolvedTheme === "dark" ? "light" : "dark");
   }, [resolvedTheme, setTheme]);
 
+  const activeAnimationRef = useRef(null);
+  const transitionCountRef = useRef(0);
+
+  // Telegram-Grade Directional Theme Transition (Day: Bottom-Left -> Top-Right, Night: Top-Right -> Bottom-Left)
+  const toggleThemeWithTransition = useCallback(
+    (event, targetTheme = null) => {
+      // Cancel / finish any in-flight animation immediately so new transition starts instantly
+      if (activeAnimationRef.current) {
+        try {
+          activeAnimationRef.current.finish();
+        } catch {
+          // ignore if already completed
+        }
+        activeAnimationRef.current = null;
+      }
+
+      // Always get exact current theme from DOM state to eliminate any stale closure delay / 2-click lag
+      const currentIsLight =
+        typeof document !== "undefined"
+          ? document.documentElement.classList.contains("light")
+          : resolvedTheme === "light";
+
+      const currentActive = currentIsLight ? "light" : "dark";
+      const nextTheme = targetTheme || (currentActive === "dark" ? "light" : "dark");
+
+      // Fallback if View Transitions API is not supported in the browser
+      if (typeof document === "undefined" || !document.startViewTransition) {
+        setTheme(nextTheme);
+        return;
+      }
+
+      const currentRunId = ++transitionCountRef.current;
+
+      const w = window.innerWidth || (typeof document !== "undefined" && document.documentElement.clientWidth) || 390;
+      const h = window.innerHeight || (typeof document !== "undefined" && document.documentElement.clientHeight) || 844;
+
+      const isTargetLight =
+        nextTheme === "light" || (nextTheme === "system" && getSystemTheme() === "light");
+
+      let x, y;
+      if (isTargetLight) {
+        // DAY THEME (Light): Sweeps from Bottom-Left ➔ Top-Right
+        x = 0;
+        y = h;
+      } else {
+        // NIGHT THEME (Dark): Sweeps from Top-Right ➔ Bottom-Left
+        x = w;
+        y = 0;
+      }
+
+      const endRadius = Math.hypot(
+        Math.max(x, w - x),
+        Math.max(y, h - y)
+      );
+
+      const isDesktop = w >= 1024;
+
+      // Disable individual CSS transitions during DOM snap to eliminate reflow jitter & frame drops
+      document.documentElement.classList.add("theme-transitioning");
+
+      const transition = document.startViewTransition(() => {
+        flushSync(() => {
+          setTheme(nextTheme);
+        });
+      });
+
+      transition.ready
+        .then(() => {
+          if (transitionCountRef.current !== currentRunId) return;
+
+          // Desktop: Smooth clean crossfade without circular clip-path
+          // Mobile: Signature Telegram directional circular ripple
+          const keyframes = isDesktop
+            ? { opacity: [0, 1] }
+            : {
+                clipPath: [
+                  `circle(0px at ${x}px ${y}px)`,
+                  `circle(${endRadius}px at ${x}px ${y}px)`,
+                ],
+              };
+
+          const animationOptions = isDesktop
+            ? {
+                duration: 260,
+                easing: "cubic-bezier(0.4, 0, 0.2, 1)",
+                pseudoElement: "::view-transition-new(root)",
+                fill: "forwards",
+              }
+            : {
+                duration: 520,
+                easing: "cubic-bezier(0.32, 0.72, 0, 1)",
+                pseudoElement: "::view-transition-new(root)",
+                fill: "forwards",
+              };
+
+          const animation = document.documentElement.animate(keyframes, animationOptions);
+
+          activeAnimationRef.current = animation;
+
+          animation.finished
+            .finally(() => {
+              if (activeAnimationRef.current === animation) {
+                activeAnimationRef.current = null;
+              }
+              if (transitionCountRef.current === currentRunId) {
+                document.documentElement.classList.remove("theme-transitioning");
+              }
+            });
+        })
+        .catch(() => {
+          if (transitionCountRef.current === currentRunId) {
+            document.documentElement.classList.remove("theme-transitioning");
+          }
+        });
+
+      transition.finished
+        .finally(() => {
+          if (transitionCountRef.current === currentRunId) {
+            document.documentElement.classList.remove("theme-transitioning");
+          }
+        });
+    },
+    [resolvedTheme, setTheme]
+  );
+
   const value = useMemo(
-    () => ({ theme, resolvedTheme, setTheme, toggleTheme }),
-    [theme, resolvedTheme, setTheme, toggleTheme]
+    () => ({ theme, resolvedTheme, setTheme, toggleTheme, toggleThemeWithTransition }),
+    [theme, resolvedTheme, setTheme, toggleTheme, toggleThemeWithTransition]
   );
 
   return (

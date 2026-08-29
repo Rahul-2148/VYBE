@@ -37,7 +37,7 @@ const EditProfile = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const [isLoading, setIsLoading] = useState(false);
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, toggleThemeWithTransition } = useTheme();
 
   // Settings Dashboard Tab States
   const [activeTab, setActiveTab] = useState("profile");
@@ -672,7 +672,7 @@ const EditProfile = () => {
           <button
             key={opt.id}
             type="button"
-            onClick={() => setTheme(opt.id)}
+            onClick={(e) => (toggleThemeWithTransition ? toggleThemeWithTransition(e, opt.id) : setTheme(opt.id))}
             className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between transition cursor-pointer select-none ${
               theme === opt.id
                 ? "border-rose-500 bg-rose-500/5 shadow-sm font-bold"

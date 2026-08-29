@@ -171,11 +171,13 @@ const Navbar = () => {
         onClick={handleProfileClick}
         onTouchStart={handleProfileTouchStart}
         onTouchEnd={handleProfileTouchEnd}
+        onMouseDown={handleProfileTouchStart}
+        onMouseUp={handleProfileTouchEnd}
         onContextMenu={(e) => {
           e.preventDefault();
           setShowAccountSwitcher(true);
         }}
-        className="flex-1 flex justify-center items-center py-2 transition-transform active:scale-90 interactive-tap"
+        className="flex-1 flex justify-center items-center py-2 transition-transform active:scale-90 interactive-tap cursor-pointer"
         title="Profile (Long press or double-tap to switch account)"
       >
         <div

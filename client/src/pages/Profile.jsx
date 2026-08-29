@@ -31,6 +31,8 @@ import {
   Phone,
   Tag,
   Music,
+  Sun,
+  Moon,
 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import ProfileQRModal from "../components/ProfileQRModal";
@@ -46,6 +48,7 @@ import VerifiedBadge from "../components/VerifiedBadge";
 import StoryMusicPickerModal from "../components/StoryMusicPickerModal";
 import RenderErrorBoundary from "../components/RenderErrorBoundary";
 import dp from "../assets/dp3.png";
+import { useTheme } from "../lib/themeContext";
 import { setProfileData, setUserData } from "../redux/features/userSlice";
 import { setSelectedChatUser } from "../redux/features/messageSlice";
 import { useGetUserFullProfileQuery, useGetUserHighlightsQuery } from "../redux/api/apiSlice";
@@ -93,7 +96,7 @@ const ProfileTile = ({ item, kind, onClick }) => {
     <button
       type="button"
       onClick={onClick}
-      className="group relative aspect-square overflow-hidden rounded-2xl bg-zinc-900 border border-zinc-800/80 text-left shadow-sm transition duration-300 hover:-translate-y-1 hover:border-zinc-700"
+      className="group relative aspect-square overflow-hidden rounded-2xl bg-surface border border-border text-left shadow-sm transition duration-300 hover:-translate-y-1 hover:border-border-strong cursor-pointer"
     >
       {mediaUrl ? (
         previewKind === "reel" ? (
@@ -102,9 +105,9 @@ const ProfileTile = ({ item, kind, onClick }) => {
           <img src={mediaUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
         )
       ) : (
-        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-900 via-zinc-950 to-black">
-          <div className="rounded-2xl border border-zinc-800 bg-black/40 p-4">
-            <Camera className="h-6 w-6 text-zinc-500" />
+        <div className="flex h-full w-full items-center justify-center bg-surface-hover">
+          <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm">
+            <Camera className="h-6 w-6 text-text-secondary" />
           </div>
         </div>
       )}
@@ -114,7 +117,7 @@ const ProfileTile = ({ item, kind, onClick }) => {
       <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 p-3">
         <div className="min-w-0">
           <p className="truncate text-[11px] font-semibold text-white">{item?.caption || item?.title || item?.name || "Untitled"}</p>
-          <p className="mt-0.5 text-[10px] text-zinc-300">
+          <p className="mt-0.5 text-[10px] text-white/80">
             {kind === "audio" || previewKind === "audio"
               ? item?.artist || "Audio Track"
               : kind === "reel"
@@ -122,7 +125,7 @@ const ProfileTile = ({ item, kind, onClick }) => {
               : `${likeCount} likes · ${commentCount} comments`}
           </p>
         </div>
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/45 backdrop-blur border border-white/10 text-white">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/50 backdrop-blur border border-white/20 text-white shadow-xs">
           {previewKind === "audio" ? (
             <Music className="h-4 w-4 text-rose-400" />
           ) : previewKind === "reel" ? (
@@ -133,7 +136,7 @@ const ProfileTile = ({ item, kind, onClick }) => {
         </div>
       </div>
 
-      <div className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-[10px] font-bold text-white backdrop-blur border border-white/10">
+      <div className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-[10px] font-bold text-white backdrop-blur border border-white/20 shadow-xs">
         {previewKind === "audio" ? (
           <>
             <Music className="h-3 w-3 text-rose-400" />
@@ -163,35 +166,35 @@ const ProfileTile = ({ item, kind, onClick }) => {
 const SectionSkeleton = () => (
   <div className="animate-pulse space-y-6 w-full">
     {/* 1. Header Card Skeleton */}
-    <div className="rounded-[2rem] border border-zinc-900 bg-zinc-950/90 p-4 sm:p-6 shadow-2xl space-y-6">
+    <div className="rounded-[2rem] border border-border bg-surface/90 p-4 sm:p-6 shadow-xl space-y-6">
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
         {/* Avatar + Info Block */}
         <div className="flex items-start gap-5 flex-1">
           {/* Avatar Skeleton */}
-          <div className="h-24 w-24 sm:h-32 sm:w-32 rounded-full bg-zinc-800/80 shrink-0 border border-zinc-800" />
+          <div className="h-24 w-24 sm:h-32 sm:w-32 rounded-full bg-surface-hover shrink-0 border border-border" />
 
           {/* Info Lines Skeleton */}
           <div className="flex-1 space-y-3 pt-1">
-            <div className="h-7 w-48 rounded-lg bg-zinc-800/80" />
-            <div className="h-4 w-32 rounded-md bg-zinc-850" />
-            <div className="h-4 w-full max-w-md rounded-md bg-zinc-900" />
+            <div className="h-7 w-48 rounded-lg bg-surface-hover" />
+            <div className="h-4 w-32 rounded-md bg-surface-hover" />
+            <div className="h-4 w-full max-w-md rounded-md bg-surface-hover" />
             <div className="flex gap-2 pt-1">
-              <div className="h-7 w-24 rounded-full bg-zinc-850" />
-              <div className="h-7 w-20 rounded-full bg-zinc-850" />
+              <div className="h-7 w-24 rounded-full bg-surface-hover" />
+              <div className="h-7 w-20 rounded-full bg-surface-hover" />
             </div>
           </div>
         </div>
 
         {/* Stats Grid Box Skeleton */}
-        <div className="rounded-3xl border border-zinc-900 bg-black/40 p-4 lg:min-w-[310px] space-y-3">
+        <div className="rounded-3xl border border-border bg-surface/50 p-4 lg:min-w-[310px] space-y-3">
           <div className="grid grid-cols-3 gap-3">
-            <div className="h-16 rounded-2xl bg-zinc-900/80" />
-            <div className="h-16 rounded-2xl bg-zinc-900/80" />
-            <div className="h-16 rounded-2xl bg-zinc-900/80" />
+            <div className="h-16 rounded-2xl bg-surface-hover" />
+            <div className="h-16 rounded-2xl bg-surface-hover" />
+            <div className="h-16 rounded-2xl bg-surface-hover" />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="h-12 rounded-2xl bg-zinc-900/50" />
-            <div className="h-12 rounded-2xl bg-zinc-900/50" />
+            <div className="h-12 rounded-2xl bg-surface-hover" />
+            <div className="h-12 rounded-2xl bg-surface-hover" />
           </div>
         </div>
       </div>
@@ -242,6 +245,7 @@ const SectionSkeleton = () => (
 );
 
 const Profile = () => {
+  const themeCtx = useTheme();
   const { profileData, userData } = useSelector((state) => state.user);
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -403,10 +407,10 @@ const Profile = () => {
   useEffect(() => {
     let isMounted = true;
     if (isOwnProfile && postType === "saved") {
-      setLoadingSaved(true);
-      api
-        .get("/user/saved-items")
-        .then((res) => {
+      const fetchSaved = async () => {
+        try {
+          if (isMounted) setLoadingSaved(true);
+          const res = await api.get("/user/saved-items");
           if (isMounted && res.data?.success) {
             setSavedItems({
               posts: res.data.savedPosts || [],
@@ -414,13 +418,13 @@ const Profile = () => {
               audios: res.data.savedAudios || [],
             });
           }
-        })
-        .catch((err) => {
+        } catch (err) {
           if (isMounted) console.warn("Profile: fetchSavedItems failed", err);
-        })
-        .finally(() => {
+        } finally {
           if (isMounted) setLoadingSaved(false);
-        });
+        }
+      };
+      fetchSaved();
     }
     return () => {
       isMounted = false;
@@ -520,9 +524,9 @@ const Profile = () => {
   const isVerified = Boolean(profileData?.user?.isVerified);
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      <div className="sticky top-0 z-40 overflow-hidden border-b border-zinc-900/90 bg-zinc-950/90 backdrop-blur-2xl shadow-xl shadow-black/40">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(225,48,108,0.16),_transparent_40%),radial-gradient(circle_at_80%_10%,_rgba(64,93,230,0.12),_transparent_25%)]" />
+    <div className="min-h-screen bg-bg text-text transition-colors duration-200">
+      <div className="sticky top-0 z-40 overflow-hidden border-b border-border/80 bg-bg/90 backdrop-blur-2xl shadow-xl shadow-black/10">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(225,48,108,0.12),_transparent_40%),radial-gradient(circle_at_80%_10%,_rgba(64,93,230,0.08),_transparent_25%)]" />
         <div className="relative mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <button
             onClick={() => {
@@ -532,56 +536,71 @@ const Profile = () => {
                 navigate("/");
               }
             }}
-            className="rounded-full border border-zinc-800 bg-zinc-950/80 p-2 text-zinc-300 transition hover:border-zinc-700 hover:text-white cursor-pointer"
+            className="rounded-full border border-border bg-surface p-2 text-text-secondary hover:text-text transition hover:border-border-strong hover:bg-surface-hover cursor-pointer"
             title="Go Back"
           >
             <MdOutlineKeyboardBackspace className="h-6 w-6" />
           </button>
 
           <div className="text-center">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Profile</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-text-secondary">Profile</p>
             {isOwnProfile ? (
               <button
                 onClick={() => setShowAccountSwitcher(true)}
-                className="mt-1 flex items-center justify-center gap-1.5 text-sm font-bold text-white hover:text-rose-400 transition cursor-pointer px-3 py-1 rounded-full hover:bg-zinc-900/70 border border-transparent hover:border-zinc-800/80 active:scale-95 group"
+                className="mt-1 flex items-center justify-center gap-1.5 text-sm font-bold text-text hover:text-rose-500 transition cursor-pointer px-3 py-1 rounded-full hover:bg-surface-hover border border-transparent hover:border-border active:scale-95 group"
                 title="Switch Account"
               >
-                <span className="text-rose-400">@</span>
+                <span className="text-rose-500">@</span>
                 <span className="truncate max-w-[180px] sm:max-w-xs">{profileData?.user?.userName || userName}</span>
                 {isVerified && <VerifiedBadge size="xs" />}
                 {profileData?.user?.accountType === "private" && (
-                  <Lock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                  <Lock className="w-3.5 h-3.5 text-text-secondary shrink-0" />
                 )}
-                <ChevronDown className="w-3.5 h-3.5 text-zinc-400 shrink-0 group-hover:text-rose-400 transition-transform" />
+                <ChevronDown className="w-3.5 h-3.5 text-text-secondary shrink-0 group-hover:text-rose-500 transition-transform" />
               </button>
             ) : (
-              <div className="mt-1 flex items-center justify-center gap-1.5 text-sm font-bold text-white px-3 py-1">
-                <span className="text-rose-400">@</span>
+              <div className="mt-1 flex items-center justify-center gap-1.5 text-sm font-bold text-text px-3 py-1">
+                <span className="text-rose-500">@</span>
                 <span className="truncate max-w-[180px] sm:max-w-xs">{profileData?.user?.userName || userName}</span>
                 {isVerified && <VerifiedBadge size="xs" />}
                 {profileData?.user?.accountType === "private" && (
-                  <Lock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                  <Lock className="w-3.5 h-3.5 text-text-secondary shrink-0" />
                 )}
               </div>
             )}
           </div>
 
-          {isOwnProfile ? (
+          <div className="flex items-center gap-2">
+            {/* Pro-UX Theme Toggle with Circular Ripple Animation */}
             <button
-              className="rounded-full border border-zinc-800 bg-zinc-950/80 px-4 py-2 text-xs font-semibold text-rose-400 transition hover:border-rose-500/40 hover:text-white"
-              onClick={handleLogOut}
+              onClick={(e) => themeCtx?.toggleThemeWithTransition?.(e)}
+              className="p-2 rounded-full border border-border bg-surface text-text hover:bg-surface-hover transition-all cursor-pointer active:scale-90 shadow-sm"
+              title={`Switch to ${themeCtx?.resolvedTheme === "dark" ? "Light" : "Dark"} Mode`}
             >
-              Log Out
+              {themeCtx?.resolvedTheme === "dark" ? (
+                <Sun className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Moon className="w-4 h-4 text-indigo-500" />
+              )}
             </button>
-          ) : (
-            <button
-              onClick={() => setShowAboutModal(true)}
-              className="p-2 rounded-full border border-zinc-800 bg-zinc-950/80 text-zinc-400 hover:text-rose-400 hover:border-rose-500/40 transition cursor-pointer"
-              title="About this account"
-            >
-              <Info className="w-4 h-4" />
-            </button>
-          )}
+
+            {isOwnProfile ? (
+              <button
+                className="rounded-full border border-border bg-surface px-4 py-2 text-xs font-semibold text-rose-500 hover:bg-rose-500/10 hover:border-rose-500/40 transition cursor-pointer"
+                onClick={handleLogOut}
+              >
+                Log Out
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowAboutModal(true)}
+                className="p-2 rounded-full border border-border bg-surface text-text-secondary hover:text-rose-500 hover:border-rose-500/40 transition cursor-pointer"
+                title="About this account"
+              >
+                <Info className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -589,7 +608,7 @@ const Profile = () => {
         {loading ? (
           <SectionSkeleton />
         ) : (
-          <section className="rounded-[2rem] border border-zinc-900 bg-zinc-950/90 p-4 shadow-2xl shadow-black/30 backdrop-blur-sm sm:p-6">
+          <section className="rounded-[2rem] border border-border bg-surface/90 p-4 shadow-xl shadow-black/10 backdrop-blur-sm sm:p-6">
             <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
               <div className="flex items-start gap-5">
                 <button
@@ -617,26 +636,25 @@ const Profile = () => {
                     <span className="rounded-full bg-white/20 backdrop-blur px-2.5 py-1 text-[10px] font-bold text-white border border-white/10">View</span>
                   </div>
                 </button>
-
                 <div className="flex-1 space-y-3">
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h1 className="text-2xl font-black tracking-tight text-white sm:text-3xl">{profileData?.user?.name}</h1>
+                      <h1 className="text-2xl font-black tracking-tight text-text sm:text-3xl">{profileData?.user?.name}</h1>
                       {isVerified && <VerifiedBadge size="md" />}
                       {profileData?.user?.accountType === "private" && (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-bold text-amber-300 shadow-xs" title="Private Account">
-                          <Lock className="w-3 h-3 text-amber-400" />
+                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-300 shadow-xs" title="Private Account">
+                          <Lock className="w-3 h-3 text-amber-500" />
                           <span>Private</span>
                         </span>
                       )}
                       {profileData?.user?.category && (
-                        <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-rose-300">
+                        <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-rose-600 dark:text-rose-300">
                           {profileData.user.category}
                         </span>
                       )}
                     </div>
-                    <div className="text-sm font-medium text-zinc-400">{profileData?.user?.profession || "VYBE Creator"}</div>
-                    <div className="max-w-2xl text-sm leading-6 text-zinc-200">{profileData?.user?.bio || "No bio yet."}</div>
+                    <div className="text-sm font-medium text-text-secondary">{profileData?.user?.profession || "VYBE Creator"}</div>
+                    <div className="max-w-2xl text-sm leading-6 text-text">{profileData?.user?.bio || "No bio yet."}</div>
                   </div>
 
                   {profileData?.user?.links?.length > 0 && (
@@ -647,9 +665,9 @@ const Profile = () => {
                           href={link.url.startsWith("http") ? link.url : `https://${link.url}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-xs font-semibold text-rose-300 transition hover:border-zinc-700 hover:text-white"
+                          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text hover:border-border-strong hover:text-rose-500 transition shadow-xs"
                         >
-                          <Link2 className="h-3.5 w-3.5" />
+                          <Link2 className="h-3.5 w-3.5 text-rose-500" />
                           <span>{link.title || "Website"}</span>
                         </a>
                       ))}
@@ -670,7 +688,7 @@ const Profile = () => {
                           className={`h-7 w-7 rounded-full flex items-center justify-center transition-all cursor-pointer ${
                             isPlayingProfileSong
                               ? "bg-rose-500 text-white shadow-md shadow-rose-500/30 animate-pulse"
-                              : "bg-white/10 hover:bg-rose-500 hover:text-white text-rose-300"
+                              : "bg-surface-hover hover:bg-rose-500 hover:text-white text-rose-500"
                           }`}
                           title={isPlayingProfileSong ? "Pause Music" : "Play Profile Music"}
                         >
@@ -693,20 +711,20 @@ const Profile = () => {
                             <img
                               src={profileData.user.profileSong.coverUrl}
                               alt=""
-                              className={`h-6 w-6 rounded-full object-cover border border-white/20 shadow-xs ${
+                              className={`h-6 w-6 rounded-full object-cover border border-border shadow-xs ${
                                 isPlayingProfileSong ? "animate-spin" : ""
                               }`}
                               style={{ animationDuration: "3s" }}
                             />
                           ) : (
-                            <Music className="h-4 w-4 text-rose-400" />
+                            <Music className="h-4 w-4 text-rose-500" />
                           )}
 
                           <div className="flex flex-col text-left">
-                            <span className="text-xs font-black text-white leading-tight hover:underline flex items-center gap-1.5">
+                            <span className="text-xs font-black text-text leading-tight hover:underline flex items-center gap-1.5">
                               <span>{profileData.user.profileSong.title}</span>
-                              <span className="text-[10px] text-rose-400 font-normal">·</span>
-                              <span className="text-[11px] font-medium text-zinc-400">
+                              <span className="text-[10px] text-rose-500 font-normal">·</span>
+                              <span className="text-[11px] font-medium text-text-secondary">
                                 {profileData.user.profileSong.artist || "Original Soundtrack"}
                               </span>
                             </span>
@@ -715,14 +733,14 @@ const Profile = () => {
 
                         {/* Own Profile Quick Change/Remove Actions */}
                         {isOwnProfile && (
-                          <div className="flex items-center gap-1 pl-1 border-l border-white/10 ml-1">
+                          <div className="flex items-center gap-1 pl-1 border-l border-border ml-1">
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setShowMusicPicker(true);
                               }}
-                              className="p-1 text-zinc-400 hover:text-white transition cursor-pointer"
+                              className="p-1 text-text-secondary hover:text-text transition cursor-pointer"
                               title="Change profile music"
                             >
                               <Music className="h-3.5 w-3.5" />
@@ -730,7 +748,7 @@ const Profile = () => {
                             <button
                               type="button"
                               onClick={handleRemoveProfileSong}
-                              className="p-1 text-zinc-400 hover:text-rose-400 transition cursor-pointer"
+                              className="p-1 text-text-secondary hover:text-rose-500 transition cursor-pointer"
                               title="Remove profile music"
                             >
                               <X className="h-3.5 w-3.5" />
@@ -744,9 +762,9 @@ const Profile = () => {
                       <button
                         type="button"
                         onClick={() => setShowMusicPicker(true)}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-zinc-700 bg-zinc-900/40 hover:bg-zinc-900 hover:border-rose-500/50 px-3.5 py-1.5 text-xs font-semibold text-zinc-300 hover:text-white transition cursor-pointer shadow-xs"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border-strong/60 bg-surface hover:bg-surface-hover hover:border-rose-500/50 px-3.5 py-1.5 text-xs font-semibold text-text-secondary hover:text-text transition cursor-pointer shadow-xs"
                       >
-                        <Music className="h-3.5 w-3.5 text-rose-400" />
+                        <Music className="h-3.5 w-3.5 text-rose-500" />
                         <span>+ Add music to your profile</span>
                       </button>
                     </div>
@@ -754,11 +772,11 @@ const Profile = () => {
                 </div>
               </div>
 
-              <div className="rounded-3xl border border-zinc-900 bg-black/40 p-3 sm:p-4 lg:min-w-[310px]">
+              <div className="rounded-3xl border border-border bg-surface/50 p-3 sm:p-4 lg:min-w-[310px]">
                 <div className="grid grid-cols-3 gap-3">
-                  <div className="rounded-2xl border border-zinc-900/80 bg-zinc-950/80 p-3 text-center">
-                    <div className="text-2xl font-black text-white">{tabCounts.posts}</div>
-                    <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Posts</div>
+                  <div className="rounded-2xl border border-border bg-surface p-3 text-center">
+                    <div className="text-2xl font-black text-text">{tabCounts.posts}</div>
+                    <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] text-text-secondary">Posts</div>
                   </div>
                   <button
                     type="button"
@@ -766,7 +784,7 @@ const Profile = () => {
                       setFollowModalTab("followers");
                       setFollowModalOpen(true);
                     }}
-                    className="rounded-2xl border border-zinc-900/80 bg-zinc-950/80 p-3 text-left transition-colors duration-150 hover:border-zinc-700 cursor-pointer group"
+                    className="rounded-2xl border border-border bg-surface p-3 text-left transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover cursor-pointer group"
                     title="View Followers"
                   >
                     <div className="flex -space-x-2">
@@ -776,17 +794,17 @@ const Profile = () => {
                             key={follower?._id || idx}
                             src={getUserAvatarUrl(follower)}
                             alt=""
-                            className="h-8 w-8 rounded-full border-2 border-black object-cover"
+                            className="h-8 w-8 rounded-full border-2 border-surface object-cover"
                           />
                         ))
                       ) : (
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-black bg-zinc-800 text-[10px] font-bold text-zinc-400">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-surface bg-surface-hover text-[10px] font-bold text-text-secondary">
                           0
                         </div>
                       )}
                     </div>
-                    <div className="mt-3 text-2xl font-black text-white group-hover:text-rose-400 transition-colors">{followerList.length}</div>
-                    <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Followers</div>
+                    <div className="mt-3 text-2xl font-black text-text group-hover:text-rose-500 transition-colors">{followerList.length}</div>
+                    <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] text-text-secondary">Followers</div>
                   </button>
                   <button
                     type="button"
@@ -794,7 +812,7 @@ const Profile = () => {
                       setFollowModalTab("following");
                       setFollowModalOpen(true);
                     }}
-                    className="rounded-2xl border border-zinc-900/80 bg-zinc-950/80 p-3 text-left transition-colors duration-150 hover:border-zinc-700 cursor-pointer group"
+                    className="rounded-2xl border border-border bg-surface p-3 text-left transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover cursor-pointer group"
                     title="View Following"
                   >
                     <div className="flex -space-x-2">
@@ -804,17 +822,17 @@ const Profile = () => {
                             key={followingUser?._id || idx}
                             src={getUserAvatarUrl(followingUser)}
                             alt=""
-                            className="h-8 w-8 rounded-full border-2 border-black object-cover"
+                            className="h-8 w-8 rounded-full border-2 border-surface object-cover"
                           />
                         ))
                       ) : (
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-black bg-zinc-800 text-[10px] font-bold text-zinc-400">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-surface bg-surface-hover text-[10px] font-bold text-text-secondary">
                           0
                         </div>
                       )}
                     </div>
-                    <div className="mt-3 text-2xl font-black text-white group-hover:text-rose-400 transition-colors">{followingList.length}</div>
-                    <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">Following</div>
+                    <div className="mt-3 text-2xl font-black text-text group-hover:text-rose-500 transition-colors">{followingList.length}</div>
+                    <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] text-text-secondary">Following</div>
                   </button>
                 </div>
 
@@ -825,11 +843,11 @@ const Profile = () => {
                       setFollowModalTab("mutuals");
                       setFollowModalOpen(true);
                     }}
-                    className="rounded-2xl border border-zinc-900 bg-zinc-950/60 px-3 py-2 text-left hover:border-zinc-700 transition cursor-pointer group"
+                    className="rounded-2xl border border-border bg-surface px-3 py-2 text-left hover:border-border-strong hover:bg-surface-hover transition cursor-pointer group"
                     title="View Mutual Connections"
                   >
-                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500 group-hover:text-rose-400 transition">Mutual vibes</div>
-                    <div className="mt-1 text-sm font-semibold text-white">{Math.min(followerList.length, followingList.length)} connections</div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-text-secondary group-hover:text-rose-500 transition">Mutual vibes</div>
+                    <div className="mt-1 text-sm font-semibold text-text">{Math.min(followerList.length, followingList.length)} connections</div>
                   </button>
                   <button
                     type="button"
@@ -837,11 +855,11 @@ const Profile = () => {
                       setFollowModalTab("followers");
                       setFollowModalOpen(true);
                     }}
-                    className="rounded-2xl border border-zinc-900 bg-zinc-950/60 px-3 py-2 text-left hover:border-zinc-700 transition cursor-pointer group"
+                    className="rounded-2xl border border-border bg-surface px-3 py-2 text-left hover:border-border-strong hover:bg-surface-hover transition cursor-pointer group"
                     title="View Network"
                   >
-                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500 group-hover:text-rose-400 transition">Network</div>
-                    <div className="mt-1 text-sm font-semibold text-white">{followerList.length + followingList.length} total</div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-text-secondary group-hover:text-rose-500 transition">Network</div>
+                    <div className="mt-1 text-sm font-semibold text-text">{followerList.length + followingList.length} total</div>
                   </button>
                 </div>
               </div>
@@ -851,19 +869,19 @@ const Profile = () => {
               {isOwnProfile ? (
                 <>
                   <button
-                    className="rounded-full bg-white px-4 py-2 text-xs font-bold text-black transition hover:bg-zinc-200 cursor-pointer"
+                    className="rounded-full bg-text px-4 py-2 text-xs font-bold text-bg transition hover:opacity-90 cursor-pointer shadow-sm"
                     onClick={() => navigate("/edit-profile")}
                   >
                     Edit Profile
                   </button>
                   <button
-                    className="rounded-full border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs font-bold text-rose-300 transition hover:border-rose-500 hover:text-white cursor-pointer"
+                    className="rounded-full border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs font-bold text-rose-600 dark:text-rose-300 transition hover:border-rose-500 hover:bg-rose-500/20 cursor-pointer shadow-sm"
                     onClick={() => setShowQRModal(true)}
                   >
                     Share Profile
                   </button>
                   <button
-                    className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs font-bold text-amber-300 transition hover:border-amber-400 hover:text-white cursor-pointer"
+                    className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs font-bold text-amber-600 dark:text-amber-300 transition hover:border-amber-400 hover:bg-amber-500/20 cursor-pointer shadow-sm"
                     onClick={() => setShowDraftsModal(true)}
                     title="Saved Drafts"
                   >
@@ -871,46 +889,53 @@ const Profile = () => {
                     Drafts
                   </button>
                   <button
-                    className="inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-500/10 px-4 py-2 text-xs font-bold text-purple-300 transition hover:border-purple-400 hover:text-white cursor-pointer"
+                    className="inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-500/10 px-4 py-2 text-xs font-bold text-purple-600 dark:text-purple-300 transition hover:border-purple-400 hover:bg-purple-500/20 cursor-pointer shadow-sm"
                     onClick={() => setShowInsightsModal(true)}
                   >
                     <BarChart2 className="h-3.5 w-3.5" />
                     Insights
                   </button>
                   <button
-                    className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-300 transition hover:border-emerald-400 hover:text-white cursor-pointer"
+                    className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-600 dark:text-emerald-300 transition hover:border-emerald-400 hover:bg-emerald-500/20 cursor-pointer shadow-sm"
                     onClick={() => setShowCloseFriendsModal(true)}
                   >
                     <Star className="h-3.5 w-3.5 fill-current" />
                     Close Friends
                   </button>
                   <button
-                    className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-xs font-bold text-zinc-300 transition hover:border-zinc-700 hover:text-white cursor-pointer"
+                    className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-xs font-bold text-text hover:border-border-strong hover:bg-surface-hover transition cursor-pointer shadow-sm"
                     onClick={() => navigate("/story/archive")}
                   >
-                    <Archive className="h-3.5 w-3.5" />
+                    <Archive className="h-3.5 w-3.5 text-rose-500" />
                     Archive
                   </button>
                   <button
-                    className="inline-flex items-center gap-2 rounded-full border border-rose-500/30 bg-gradient-to-r from-purple-500/10 to-rose-500/10 px-4 py-2 text-xs font-bold text-rose-300 transition hover:border-rose-500 hover:text-white"
+                    className="inline-flex items-center gap-2 rounded-full border border-rose-500/30 bg-gradient-to-r from-purple-500/10 to-rose-500/10 px-4 py-2 text-xs font-bold text-rose-600 dark:text-rose-300 transition hover:border-rose-500 hover:bg-rose-500/20 shadow-sm"
                     onClick={() => navigate("/monetization")}
                   >
                     <ShieldCheck className="h-3.5 w-3.5" />
                     Monetization
                   </button>
                   <button
-                    className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-xs font-bold text-cyan-300 transition hover:border-cyan-400 hover:text-white cursor-pointer"
+                    className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-xs font-bold text-cyan-600 dark:text-cyan-300 transition hover:border-cyan-400 hover:bg-cyan-500/20 cursor-pointer shadow-sm"
                     onClick={() => navigate("/security")}
                   >
                     <ShieldCheck className="h-3.5 w-3.5" />
                     Security & Accounts
+                  </button>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-xs font-bold text-text hover:border-border-strong hover:bg-surface-hover transition cursor-pointer shadow-sm"
+                    onClick={() => setShowQRModal(true)}
+                  >
+                    <QrCode className="h-3.5 w-3.5 text-rose-500" />
+                    QR
                   </button>
                 </>
               ) : (
                 <>
                   <FollowButton
                     targetUserId={profileData?.user?._id}
-                    tailwind="rounded-full bg-white px-5 py-2 text-xs font-bold text-black transition hover:bg-zinc-200"
+                    tailwind="rounded-full bg-text px-5 py-2 text-xs font-bold text-bg transition hover:opacity-90 shadow-sm"
                     onFollowChange={handleProfile}
                   />
                   <button
@@ -942,16 +967,16 @@ const Profile = () => {
         )}
 
         {(isOwnProfile || profileData?.user?.accountType !== "private" || isFollowing) && (
-        <section className="rounded-[2rem] border border-zinc-900 bg-zinc-950/70 p-4 backdrop-blur-sm sm:p-5">
+        <section className="rounded-[2rem] border border-border bg-surface/80 p-4 backdrop-blur-sm sm:p-5">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-zinc-500">Highlights</p>
-              <h2 className="mt-1 text-sm font-bold text-white">Stories worth keeping</h2>
+              <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-text-secondary">Highlights</p>
+              <h2 className="mt-1 text-sm font-bold text-text">Stories worth keeping</h2>
             </div>
             {isOwnProfile && (
               <button
                 onClick={() => setShowHighlighterModal(true)}
-                className="rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-[11px] font-bold text-zinc-300 transition hover:border-rose-500/40 hover:text-white"
+                className="rounded-full border border-border bg-surface px-3 py-1.5 text-[11px] font-bold text-text-secondary transition hover:border-rose-500/40 hover:text-rose-500 cursor-pointer"
               >
                 Add Highlight
               </button>
@@ -965,10 +990,10 @@ const Profile = () => {
                 className="flex w-[84px] shrink-0 flex-col items-center gap-2 cursor-pointer"
                 title="Create New Highlight"
               >
-                <div className="flex h-20 w-20 items-center justify-center rounded-full border border-dashed border-zinc-700 bg-zinc-950 text-zinc-400 transition hover:border-rose-500 hover:text-rose-500">
+                <div className="flex h-20 w-20 items-center justify-center rounded-full border border-dashed border-border-strong/60 bg-surface text-text-secondary transition hover:border-rose-500 hover:text-rose-500">
                   <Plus className="h-6 w-6" />
                 </div>
-                <span className="text-[11px] font-medium text-zinc-400">New</span>
+                <span className="text-[11px] font-medium text-text-secondary">New</span>
               </button>
             )}
 
@@ -976,12 +1001,12 @@ const Profile = () => {
               <button
                 key={hl._id}
                 onClick={() => hl.stories?.length > 0 && navigate("/story", { state: { stories: hl.stories } })}
-                className="flex w-[84px] shrink-0 flex-col items-center gap-2"
+                className="flex w-[84px] shrink-0 flex-col items-center gap-2 cursor-pointer"
               >
                 <div className="rounded-full bg-gradient-to-tr from-pink-500 via-rose-500 to-purple-600 p-[2px] shadow-lg shadow-rose-500/20">
-                  <img src={hl.coverImage?.url || dp} alt="" className="h-20 w-20 rounded-full border-2 border-black object-cover" />
+                  <img src={hl.coverImage?.url || dp} alt="" className="h-20 w-20 rounded-full border-2 border-surface object-cover" />
                 </div>
-                <span className="w-full truncate text-center text-[11px] font-medium text-zinc-300">{hl.title}</span>
+                <span className="w-full truncate text-center text-[11px] font-medium text-text">{hl.title}</span>
               </button>
             ))}
           </div>
@@ -989,18 +1014,18 @@ const Profile = () => {
         )}
 
         {(!isOwnProfile && profileData?.user?.accountType === "private" && !isFollowing) ? (
-          <section className="rounded-[2rem] border border-zinc-900 bg-zinc-950/70 p-8 text-center flex flex-col items-center justify-center min-h-[40vh] backdrop-blur-sm animate-fadeIn">
-            <div className="rounded-full border-2 border-zinc-800 bg-zinc-900/50 p-6 mb-4 shadow-xl">
+          <section className="rounded-[2rem] border border-border bg-surface/80 p-8 text-center flex flex-col items-center justify-center min-h-[40vh] backdrop-blur-sm animate-fadeIn">
+            <div className="rounded-full border-2 border-border bg-surface-hover p-6 mb-4 shadow-xl">
               <Lock className="h-10 w-10 text-rose-500 animate-pulse" />
             </div>
-            <h3 className="text-xl font-black text-white">This Account is Private</h3>
-            <p className="mt-2 max-w-sm text-sm text-zinc-400 leading-relaxed">
+            <h3 className="text-xl font-black text-text">This Account is Private</h3>
+            <p className="mt-2 max-w-sm text-sm text-text-secondary leading-relaxed">
               Follow this user to see their posts, reels, and other activity.
             </p>
           </section>
         ) : (
           <>
-            <section className="sticky top-[68px] z-30 rounded-3xl border border-zinc-900 bg-black/90 px-2 py-2 backdrop-blur-xl shadow-lg">
+            <section className="sticky top-[68px] z-30 rounded-3xl border border-border bg-bg/90 px-2 py-2 backdrop-blur-xl shadow-lg">
               <div className="grid grid-cols-4 gap-2">
                 {PROFILE_TABS.map((tab) => {
                   const Icon = tab.icon;
@@ -1009,41 +1034,41 @@ const Profile = () => {
                       key={tab.id}
                       type="button"
                       onClick={() => setPostType(tab.id)}
-                      className={`inline-flex flex-col items-center justify-center gap-1 rounded-2xl border px-2 py-3 text-xs font-bold transition ${
+                      className={`inline-flex flex-col items-center justify-center gap-1 rounded-2xl border px-2 py-3 text-xs font-bold transition cursor-pointer ${
                         postType === tab.id
-                          ? "border-rose-500/40 bg-rose-500/10 text-white"
-                          : "border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:border-zinc-700 hover:text-white"
+                          ? "border-rose-500/40 bg-rose-500/10 text-rose-500"
+                          : "border-border bg-surface text-text-secondary hover:border-border-strong hover:text-text"
                       }`}
                     >
                       <Icon className="h-4 w-4" />
                       <span>{tab.label}</span>
-                      <span className="text-[10px] text-zinc-500">{tabCounts[tab.id] || 0}</span>
+                      <span className="text-[10px] opacity-70">{tabCounts[tab.id] || 0}</span>
                     </button>
                   );
                 })}
               </div>
             </section>
 
-            <section className="rounded-[2rem] border border-zinc-900 bg-zinc-950/70 p-4 sm:p-5">
+            <section className="rounded-[2rem] border border-border bg-surface/80 p-4 sm:p-5">
               {(loading || (postType === "saved" && loadingSaved && activeFeed.length === 0)) ? (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                     {Array.from({ length: 8 }).map((_, idx) => (
-                      <div key={idx} className="aspect-square animate-pulse rounded-2xl bg-zinc-800/80" />
+                      <div key={idx} className="aspect-square animate-pulse rounded-2xl bg-surface-hover" />
                     ))}
                   </div>
                 </div>
               ) : activeFeed.length === 0 ? (
                 <div className="flex min-h-[40vh] flex-col items-center justify-center text-center">
-                  <div className="rounded-full border border-zinc-800 bg-zinc-900 p-4">
-                    {postType === "reels" ? <Play className="h-7 w-7 text-rose-400" /> : <Grid className="h-7 w-7 text-rose-400" />}
+                  <div className="rounded-full border border-border bg-surface p-4">
+                    {postType === "reels" ? <Play className="h-7 w-7 text-rose-500" /> : <Grid className="h-7 w-7 text-rose-500" />}
                   </div>
-                  <h3 className="mt-4 text-lg font-bold text-white">{feedEmptyState.title}</h3>
-                  <p className="mt-2 max-w-sm text-sm leading-6 text-zinc-400">{feedEmptyState.copy}</p>
+                  <h3 className="mt-4 text-lg font-bold text-text">{feedEmptyState.title}</h3>
+                  <p className="mt-2 max-w-sm text-sm leading-6 text-text-secondary">{feedEmptyState.copy}</p>
                   {isOwnProfile && postType === "posts" && (
                     <button
                       onClick={() => navigate("/upload")}
-                      className="mt-5 rounded-full bg-white px-4 py-2 text-xs font-bold text-black transition hover:bg-zinc-200"
+                      className="mt-5 rounded-full bg-text px-4 py-2 text-xs font-bold text-bg transition hover:opacity-90 cursor-pointer"
                     >
                       Create post
                     </button>

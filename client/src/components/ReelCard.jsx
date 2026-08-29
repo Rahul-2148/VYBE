@@ -523,43 +523,48 @@ export const ReelCard = ({
   useEffect(() => {
     let isCancelled = false;
 
+    const videoEl = videoRef.current;
+    const audioEl = audioRef.current;
+
     if (isActive) {
       dwellStartRef.current = Date.now();
-      endedTriggeredRef.current = false;
-      if (videoRef.current) {
-        videoRef.current.muted = isMuted;
-        const playPromise = videoRef.current.play();
+      if (videoEl) {
+        videoEl.muted = isMuted;
+        videoEl.playbackRate = 1.0;
+        const playPromise = videoEl.play();
         if (playPromise !== undefined) {
           playPromise
             .then(() => {
               if (!isCancelled) {
-                setIsPlaying(true);
-                incrementView();
+                setIsPlaying((prev) => (!prev ? true : prev));
+                setHasLoadedOnce(true);
               }
             })
             .catch(() => {
               if (!isCancelled) {
-                setIsPlaying(false);
+                setIsPlaying((prev) => (prev ? false : prev));
               }
             });
         }
       }
 
-      if (attachedAudioUrl && audioRef.current) {
-        audioRef.current.muted = isMuted;
-        audioRef.current.currentTime = videoRef.current?.currentTime || 0;
-        audioRef.current.play().catch(() => null);
+      if (attachedAudioUrl && audioEl) {
+        audioEl.muted = isMuted;
+        audioEl.currentTime = videoEl?.currentTime || 0;
+        audioEl.play().catch(() => null);
       }
     } else {
-      if (videoRef.current) {
-        videoRef.current.pause();
+      if (videoEl) {
+        videoEl.pause();
       }
-      if (audioRef.current) {
-        audioRef.current.pause();
+      if (audioEl) {
+        audioEl.pause();
       }
-      setIsPlaying(false);
-      setIsFastForwarding(false);
-      setIs2XLocked(false);
+      const resetTimer = setTimeout(() => {
+        setIsPlaying(false);
+        setIsFastForwarding(false);
+        setIs2XLocked(false);
+      }, 0);
 
       if (dwellStartRef.current && currentItem?._id) {
         const dwellMs = Date.now() - dwellStartRef.current;
@@ -576,15 +581,26 @@ export const ReelCard = ({
           }).catch(() => null);
         }
       }
+
+      return () => {
+        isCancelled = true;
+        clearTimeout(resetTimer);
+        if (videoEl) {
+          videoEl.pause();
+        }
+        if (audioEl) {
+          audioEl.pause();
+        }
+      };
     }
 
     return () => {
       isCancelled = true;
-      if (videoRef.current) {
-        videoRef.current.pause();
+      if (videoEl) {
+        videoEl.pause();
       }
-      if (audioRef.current) {
-        audioRef.current.pause();
+      if (audioEl) {
+        audioEl.pause();
       }
       if (dwellStartRef.current && currentItem?._id) {
         const dwellMs = Date.now() - dwellStartRef.current;

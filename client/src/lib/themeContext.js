@@ -10,6 +10,7 @@ export function useTheme() {
     resolvedTheme: resolved,
     setTheme: context.setTheme || (() => {}),
     toggleTheme: context.toggleTheme || (() => {}),
+    toggleThemeWithTransition: context.toggleThemeWithTransition || context.toggleTheme || (() => {}),
     isDark: resolved === "dark",
     isLight: resolved === "light",
   };

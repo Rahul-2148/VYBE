@@ -52,6 +52,24 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
   const [activeSpeaker, setActiveSpeaker] = useState(null);
   const [connectionQuality, setConnectionQuality] = useState("good");
   const [isMediaReady, setIsMediaReady] = useState(false);
+  const [facingMode, setFacingMode] = useState("user"); // "user" (front selfie) | "environment" (rear back)
+
+  const resolvedUserId = (currentUserId || userData?.user?._id || userData?._id)?.toString() || "";
+  const initialOptionsRef = useRef(initialOptions);
+  useEffect(() => {
+    initialOptionsRef.current = initialOptions;
+  }, [initialOptions]);
+
+  const isMutedRef = useRef(isMuted);
+  const isVideoOffRef = useRef(isVideoOff);
+  const videoFilterRef = useRef(videoFilter);
+  const toggleScreenShareRef = useRef(null);
+
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+    isVideoOffRef.current = isVideoOff;
+    videoFilterRef.current = videoFilter;
+  });
 
   const socketRef = useRef(null);
   const localStreamRef = useRef(null);
@@ -99,8 +117,21 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
   }, [selectedAudioInput, selectedVideo, selectedAudioOutput]);
 
   useEffect(() => {
-    refreshDevices();
-  }, [refreshDevices]);
+    let active = true;
+    enumerateDevices().then(({ audioInputs, videoInputs, audioOutputs }) => {
+      if (!active) return;
+      setAudioInputDevices(audioInputs);
+      setVideoDevices(videoInputs);
+      setAudioOutputDevices(audioOutputs);
+      if (audioInputs.length > 0 && !selectedAudioInput) setSelectedAudioInput(audioInputs[0].deviceId);
+      if (videoInputs.length > 0 && !selectedVideo) setSelectedVideo(videoInputs[0].deviceId);
+      if (audioOutputs.length > 0 && !selectedAudioOutput) setSelectedAudioOutput(audioOutputs[0].deviceId);
+    }).catch((e) => console.warn("[MeetWebRTC] Enumerate devices notice:", e));
+
+    return () => {
+      active = false;
+    };
+  }, [selectedAudioInput, selectedVideo, selectedAudioOutput]);
 
   // Helper: Close a single peer connection safely
   const closePeerConnection = useCallback((socketId) => {
@@ -395,11 +426,11 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
           }
         }
 
-        if (initialOptions.isMuted) {
+        if (initialOptionsRef.current.isMuted) {
           stream.getAudioTracks().forEach((t) => (t.enabled = false));
         }
 
-        if (initialOptions.isVideoOff) {
+        if (initialOptionsRef.current.isVideoOff) {
           stream.getVideoTracks().forEach((t) => (t.enabled = false));
         }
 
@@ -410,14 +441,14 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
         try {
           const processor = new VideoBackgroundProcessor();
           videoProcessorRef.current = processor;
-          const processed = await processor.initialize(stream);
-          if (initialOptions.videoFilter && initialOptions.videoFilter !== "none") {
-            processor.setEffect(initialOptions.videoFilter, initialOptions.customBackgroundUrl);
+          await processor.initialize(stream);
+          if (initialOptionsRef.current.videoFilter && initialOptionsRef.current.videoFilter !== "none") {
+            processor.setEffect(initialOptionsRef.current.videoFilter, initialOptionsRef.current.customBackgroundUrl);
           }
           const pTrack = processor.getProcessedVideoTrack();
           if (pTrack) {
             activeVideoTrack = pTrack;
-            if (initialOptions.isVideoOff) {
+            if (initialOptionsRef.current.isVideoOff) {
               pTrack.enabled = false;
             }
           }
@@ -436,8 +467,8 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
 
         // Voice activity detector for active speaker indicator
         vadCleanupRef.current = createVoiceActivityDetector(stream, (volume) => {
-          if (volume > 25 && !isMuted) {
-            setActiveSpeaker(currentUserId || "me");
+          if (volume > 25 && !isMutedRef.current) {
+            setActiveSpeaker(resolvedUserId || "me");
           }
         });
 
@@ -447,15 +478,15 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
           userName: rawUserName,
           name: rawName,
           profilePicture: myProfileAvatar,
-          isMuted: Boolean(initialOptions.isMuted),
-          isVideoOff: Boolean(initialOptions.isVideoOff),
-          videoFilter: initialOptions.videoFilter || "none",
+          isMuted: Boolean(initialOptionsRef.current.isMuted),
+          isVideoOff: Boolean(initialOptionsRef.current.isVideoOff),
+          videoFilter: initialOptionsRef.current.videoFilter || "none",
         });
 
-        if (initialOptions.isMuted) {
+        if (initialOptionsRef.current.isMuted) {
           socket?.emit("meeting:action", { meetingId, action: "mute", isMuted: true });
         }
-        if (initialOptions.isVideoOff) {
+        if (initialOptionsRef.current.isVideoOff) {
           socket?.emit("meeting:action", { meetingId, action: "video-off", isVideoOff: true });
         }
       } catch (err) {
@@ -508,7 +539,7 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
       }
     }, 3000);
 
-    const myResolvedId = (currentUserId || userData?.user?._id || userData?._id)?.toString();
+    const myResolvedId = resolvedUserId;
 
     // Socket Event: Room Members list received
     const handleRoomMembers = ({ members }) => {
@@ -648,7 +679,7 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
 
     // Socket Event: Action Broadcast (mute, video, screen share, hand raise, reaction, filter)
     const handleActionBroadcast = (data) => {
-      const { socketId, action, streamId, isHandRaised: peerHandRaised, isScreenSharing: peerScreen, videoFilter: peerFilter, isMuted: peerMuted, isVideoOff: peerVideoOff, raisedAt } = data;
+      const { socketId, action, streamId: _streamId, isHandRaised: peerHandRaised, isScreenSharing: peerScreen, videoFilter: peerFilter, isMuted: peerMuted, isVideoOff: peerVideoOff, raisedAt } = data;
       if (!socketId) return;
 
       if (action === "hand" || peerHandRaised) {
@@ -746,9 +777,9 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
         userName: rawUserName,
         name: rawName,
         profilePicture: myProfileAvatar,
-        isMuted,
-        isVideoOff,
-        videoFilter,
+        isMuted: isMutedRef.current,
+        isVideoOff: isVideoOffRef.current,
+        videoFilter: videoFilterRef.current,
       });
     };
 
@@ -784,7 +815,7 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
     };
   }, [
     meetingId,
-    currentUserId,
+    resolvedUserId,
     rawUserName,
     rawName,
     myProfileAvatar,
@@ -903,7 +934,7 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
 
         const screenVideoTrack = stream.getVideoTracks()[0];
         screenVideoTrack.onended = () => {
-          toggleScreenShare();
+          toggleScreenShareRef.current?.();
         };
 
         Object.keys(peerConnections.current).forEach((sid) => {
@@ -929,6 +960,10 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
       }
     }
   }, [isScreenSharing, meetingId]);
+
+  useEffect(() => {
+    toggleScreenShareRef.current = toggleScreenShare;
+  }, [toggleScreenShare]);
 
   // Media Controls: Raise / Lower Hand
   const toggleHand = useCallback(() => {
@@ -969,6 +1004,114 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
     [meetingId, isVideoOff]
   );
 
+  // Media Controls: Mobile Flip Camera (Front Selfie <-> Rear Back Environment)
+  const flipCamera = useCallback(async () => {
+    if (isVideoOff) return;
+    try {
+      const nextFacingMode = facingMode === "user" ? "environment" : "user";
+      const constraints = {
+        video: {
+          facingMode: { ideal: nextFacingMode },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      };
+
+      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      if (!newVideoTrack) return;
+
+      // Stop previous raw video track
+      if (rawStreamRef.current) {
+        const oldTrack = rawStreamRef.current.getVideoTracks()[0];
+        if (oldTrack) oldTrack.stop();
+      }
+
+      rawStreamRef.current = new MediaStream([
+        ...(rawStreamRef.current ? rawStreamRef.current.getAudioTracks() : []),
+        newVideoTrack,
+      ]);
+
+      if (localStreamRef.current) {
+        const oldLocalVideoTrack = localStreamRef.current.getVideoTracks()[0];
+        if (oldLocalVideoTrack) {
+          localStreamRef.current.removeTrack(oldLocalVideoTrack);
+          oldLocalVideoTrack.stop();
+        }
+        localStreamRef.current.addTrack(newVideoTrack);
+      }
+
+      setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+      setFacingMode(nextFacingMode);
+
+      // Seamlessly replace camera track across all active peer connections
+      Object.keys(peerConnections.current).forEach((sid) => {
+        const sender = cameraSendersRef.current[sid];
+        if (sender) {
+          sender.replaceTrack(newVideoTrack).catch((err) => {
+            console.warn("[MeetWebRTC] replaceTrack error during flip:", err?.message);
+          });
+        }
+      });
+
+      snackbar.info(`Switched to ${nextFacingMode === "user" ? "Front" : "Back"} camera 🔄`);
+    } catch (err) {
+      console.warn("[MeetWebRTC] Failed to flip camera:", err?.message);
+      snackbar.warning("Unable to switch camera on this device.");
+    }
+  }, [facingMode, isVideoOff]);
+
+  // Screen WakeLock API (Prevents mobile screen from dimming or locking during active meeting)
+  useEffect(() => {
+    let wakeLock = null;
+    const requestWakeLock = async () => {
+      try {
+        if ("wakeLock" in navigator && isMediaReady) {
+          wakeLock = await navigator.wakeLock.request("screen");
+        }
+      } catch (err) {
+        console.warn("[MeetWebRTC] Screen WakeLock unavailable:", err?.message);
+      }
+    };
+    requestWakeLock();
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        requestWakeLock();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      if (wakeLock) {
+        wakeLock.release().catch(() => null);
+      }
+    };
+  }, [isMediaReady]);
+
+  // Mobile Background Tab Video Saver (Keep audio active, throttle camera encoding)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!localStreamRef.current) return;
+      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (!videoTrack) return;
+
+      if (document.hidden) {
+        if (videoTrack.enabled && !isVideoOff) {
+          videoTrack.enabled = false;
+        }
+      } else {
+        if (!isVideoOff) {
+          videoTrack.enabled = true;
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [isVideoOff]);
+
   return {
     localStream,
     screenStream,
@@ -981,6 +1124,8 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
     activeSpeaker,
     connectionQuality,
     videoFilter,
+    facingMode,
+    isFrontCamera: facingMode === "user",
     isMediaReady,
     audioInputDevices,
     videoDevices,
@@ -993,6 +1138,7 @@ export const useMeetWebRTC = (meetingId, currentUserId, initialOptions = {}) => 
     setSelectedAudioOutput,
     toggleMute,
     toggleVideo,
+    flipCamera,
     toggleScreenShare,
     toggleHand,
     changeVideoFilter,

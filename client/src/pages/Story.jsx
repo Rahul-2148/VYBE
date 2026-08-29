@@ -18,36 +18,29 @@ const Story = () => {
   });
 
   useEffect(() => {
-    // If state has highlight/story data, we are ready
-    if (state?.stories && state.stories.length > 0) {
-      setLoading(false);
-      return;
-    }
-    if (feed && feed.length > 0) {
-      setLoading(false);
+    // If state has highlight/story data or feed is present, nothing to fetch
+    if ((state?.stories && state.stories.length > 0) || (feed && feed.length > 0)) {
       return;
     }
 
     let isMounted = true;
     // If Redux feed is empty, fetch feed from API
-    if (!feed || feed.length === 0) {
-      api
-        .get("/story/feed")
-        .then((res) => {
-          if (!isMounted) return;
-          if (res.data?.success && res.data.feed?.length > 0) {
-            dispatch(setStoryFeed(res.data.feed));
-          } else {
-            navigate("/");
-          }
-        })
-        .catch(() => {
-          if (isMounted) navigate("/");
-        })
-        .finally(() => {
-          if (isMounted) setLoading(false);
-        });
-    }
+    api
+      .get("/story/feed")
+      .then((res) => {
+        if (!isMounted) return;
+        if (res.data?.success && res.data.feed?.length > 0) {
+          dispatch(setStoryFeed(res.data.feed));
+        } else {
+          navigate("/");
+        }
+      })
+      .catch(() => {
+        if (isMounted) navigate("/");
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false);
+      });
 
     return () => {
       isMounted = false;

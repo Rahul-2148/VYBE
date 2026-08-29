@@ -61,10 +61,13 @@ export const Upload = () => {
 
   useEffect(() => {
     const qType = new URLSearchParams(location.search).get("type") || location.state?.type;
-    if (qType && qType !== uploadType) {
-      setUploadType(qType);
+    if (qType) {
+      const timer = setTimeout(() => {
+        setUploadType((prev) => (prev !== qType ? qType : prev));
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [location.search, location.state, uploadType]);
+  }, [location.search, location.state]);
 
   // Post Carousel & Reel Queue State
   const [items, setItems] = useState([]);

@@ -138,6 +138,8 @@ export const MeetRoom = () => {
       setSelectedAudioOutput={rtc.setSelectedAudioOutput}
       onToggleMute={rtc.toggleMute}
       onToggleVideo={rtc.toggleVideo}
+      onFlipCamera={rtc.flipCamera}
+      isFrontCamera={rtc.isFrontCamera}
       onToggleScreenShare={rtc.toggleScreenShare}
       onToggleHand={rtc.toggleHand}
       onMinimize={minimizeMeeting}

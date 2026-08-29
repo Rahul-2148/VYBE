@@ -21,6 +21,7 @@ import {
   Check,
   Shapes,
   Shield,
+  SwitchCamera,
 } from "lucide-react";
 import { triggerHaptic, microAudio } from "../../lib/interactiveEffects";
 import { snackbar } from "../../lib/snackbar";
@@ -94,6 +95,8 @@ export const MeetControls = ({
   onToggleCaptions,
   onToggleMute,
   onToggleVideo,
+  onFlipCamera,
+  isFrontCamera = true,
   onToggleScreenShare,
   onToggleHand,
   onEndCall,
@@ -138,7 +141,7 @@ export const MeetControls = ({
   };
 
   return (
-    <div className="w-full bg-[#1e1f20] border-t border-zinc-700/80 px-3 sm:px-6 py-2.5 flex items-center justify-between z-30 select-none font-sans transition-all duration-300">
+    <div className="w-full bg-[#1e1f20] border-t border-zinc-700/80 px-3 sm:px-6 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] flex items-center justify-between z-30 select-none font-sans transition-all duration-300">
       {/* 1. Left: Meeting Info / Title */}
       <div className="hidden md:flex items-center gap-3 min-w-0">
         <h2 className="text-sm font-semibold text-white truncate max-w-[200px] xl:max-w-[280px]">
@@ -152,7 +155,7 @@ export const MeetControls = ({
         <button
           type="button"
           onClick={() => {
-            triggerHaptic("light");
+            triggerHaptic("medium");
             onToggleMute();
           }}
           className={`p-3 rounded-full transition-all duration-200 cursor-pointer ${
@@ -165,11 +168,11 @@ export const MeetControls = ({
           {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
         </button>
 
-        {/* Video Camera Toggle */}
+        {/* Camera Toggle */}
         <button
           type="button"
           onClick={() => {
-            triggerHaptic("light");
+            triggerHaptic("medium");
             onToggleVideo();
           }}
           className={`p-3 rounded-full transition-all duration-200 cursor-pointer ${
@@ -180,6 +183,24 @@ export const MeetControls = ({
           title={isVideoOff ? "Turn on camera" : "Turn off camera"}
         >
           {isVideoOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+        </button>
+
+        {/* Mobile Flip Camera Button (Front / Rear switch) */}
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic("medium");
+            onFlipCamera?.();
+          }}
+          disabled={isVideoOff}
+          className={`flex sm:hidden p-3 rounded-full transition-all duration-200 cursor-pointer ${
+            isVideoOff
+              ? "opacity-40 cursor-not-allowed bg-[#3c4043] text-zinc-500"
+              : "bg-[#3c4043] hover:bg-[#474a4d] active:scale-90 text-white"
+          }`}
+          title="Switch Camera (Front / Back)"
+        >
+          <SwitchCamera className="w-5 h-5" />
         </button>
 
         {/* Live Closed Captions (CC) Toggle */}

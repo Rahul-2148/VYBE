@@ -11,6 +11,7 @@ import {
   HelpCircle,
   Vote,
   Share2,
+  Flame,
   X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";

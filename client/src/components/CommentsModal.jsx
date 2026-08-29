@@ -49,7 +49,10 @@ export const CommentsModal = ({
 
   useEffect(() => {
     if (externalExpanded !== undefined) {
-      setIsExpanded(Boolean(externalExpanded));
+      const timer = setTimeout(() => {
+        setIsExpanded(Boolean(externalExpanded));
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [externalExpanded]);
 

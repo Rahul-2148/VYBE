@@ -236,11 +236,10 @@ const LeftHome = () => {
   ];
 
   return (
-    <aside className="w-[72px] xl:w-[245px] h-full border-r border-border bg-bg text-text hidden md:flex flex-col justify-between p-3 xl:py-4 xl:px-3 z-40 select-none overflow-hidden shrink-0">
-      {/* Top Logo & Navigation */}
-      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto hide-scrollbar space-y-4 xl:space-y-5 pr-0.5 pb-4">
-        {/* Logo & Quick Header Actions */}
-        <div className="flex items-center justify-between px-2 pt-1">
+    <aside className="w-[72px] xl:w-[245px] h-full border-r border-border bg-bg text-text hidden md:flex flex-col justify-between p-3 xl:py-3 xl:px-3 z-40 select-none overflow-hidden shrink-0">
+      {/* Permanent Fixed Header (Logo & Quick Actions) */}
+      <div className="shrink-0 pb-2.5 border-b border-border/40">
+        <div className="flex items-center justify-between px-1.5 pt-0.5">
           <div 
             onClick={() => {
               triggerHaptic("light");
@@ -302,9 +301,11 @@ const LeftHome = () => {
             </button>
           </div>
         </div>
+      </div>
 
-        {/* Nav Links List */}
-        <nav className="space-y-1">
+      {/* Middle Scrollable Nav Links */}
+      <div className="flex-1 min-h-0 overflow-y-auto hide-scrollbar py-2 pr-0.5">
+        <nav className="space-y-0.5">
           {navItems.map((item, idx) => {
             const Icon = item.icon;
             const isProfileItem = item.isProfile && location.pathname.startsWith("/profile");
@@ -322,7 +323,7 @@ const LeftHome = () => {
                     if (item.action) item.action();
                     else if (item.path) navigate(item.path);
                   }}
-                  className={`w-full flex items-center gap-4 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 cursor-pointer interactive-tap ${
+                  className={`w-full flex items-center gap-4 px-3 py-2 rounded-xl text-sm font-semibold transition-colors duration-150 cursor-pointer interactive-tap ${
                     isActive
                       ? "bg-surface text-text font-bold shadow-sm"
                       : "text-text-secondary hover:text-text hover:bg-surface/80"
@@ -331,7 +332,7 @@ const LeftHome = () => {
                   <div className="relative shrink-0 flex items-center justify-center">
                     {item.isProfile ? (
                       <div
-                        className={`w-6 h-6 rounded-full overflow-hidden transition-all duration-200 shrink-0 ${
+                        className={`w-6 h-6 rounded-full overflow-hidden transition-colors duration-150 shrink-0 ${
                           isActive
                             ? "ring-2 ring-text ring-offset-2 ring-offset-bg scale-110 shadow-sm"
                             : "border border-border/80 group-hover:border-text group-hover:scale-105"
@@ -347,7 +348,7 @@ const LeftHome = () => {
                         />
                       </div>
                     ) : (
-                      <Icon className={`w-6 h-6 transition-transform duration-200 group-hover:scale-110 ${
+                      <Icon className={`w-6 h-6 transition-transform duration-150 group-hover:scale-110 ${
                         isActive ? "text-text scale-105" : "text-text-secondary group-hover:text-text"
                       }`} />
                     )}
@@ -367,7 +368,7 @@ const LeftHome = () => {
                 </button>
 
                 {/* Right-side Hover Tooltip (Shown on Icon-Only Collapsed View) */}
-                <div className="xl:hidden opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-4 transition-all duration-200 absolute left-full top-1/2 -translate-y-1/2 ml-2 px-3 py-1.5 bg-surface border border-border text-text text-xs font-semibold rounded-lg shadow-2xl pointer-events-none whitespace-nowrap z-50 flex items-center gap-1.5">
+                <div className="xl:hidden opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-4 transition-all duration-150 absolute left-full top-1/2 -translate-y-1/2 ml-2 px-3 py-1.5 bg-surface border border-border text-text text-xs font-semibold rounded-lg shadow-2xl pointer-events-none whitespace-nowrap z-50 flex items-center gap-1.5">
                   <span>{item.label}</span>
                   {item.hasDot && (
                     <span className="w-1.5 h-1.5 rounded-full bg-[#ff3040] animate-ping" />
@@ -379,25 +380,25 @@ const LeftHome = () => {
         </nav>
       </div>
 
-      {/* Bottom Profile & Theme Controls */}
-      <div className="pt-4 border-t border-border space-y-1">
+      {/* Bottom Profile & Theme Controls (Compact & Refined) */}
+      <div className="shrink-0 pt-2 border-t border-border space-y-0.5">
         {/* Theme Toggle */}
         <div className="relative group">
           <button
-            onClick={themeCtx.toggleTheme}
-            className="w-full flex items-center gap-4 px-3 py-2.5 rounded-xl text-xs font-semibold text-text-secondary hover:text-text hover:bg-surface/60 transition cursor-pointer"
+            onClick={(e) => themeCtx.toggleThemeWithTransition(e)}
+            className="w-full flex items-center gap-4 px-3 py-2 rounded-xl text-xs font-semibold text-text-secondary hover:text-text hover:bg-surface/60 transition-colors duration-150 cursor-pointer"
             title={themeCtx.resolvedTheme === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
           >
             {themeCtx.resolvedTheme === 'dark' ? (
-              <Moon className="w-5 h-5 text-blue-400 group-hover:scale-110 transition-transform" />
+              <Moon className="w-4.5 h-4.5 text-blue-400 group-hover:scale-110 transition-transform" />
             ) : (
-              <Sun className="w-5 h-5 text-amber-400 group-hover:scale-110 transition-transform" />
+              <Sun className="w-4.5 h-4.5 text-amber-400 group-hover:scale-110 transition-transform" />
             )}
             <span className="hidden xl:inline">
               {themeCtx.resolvedTheme === 'dark' ? 'Dark Mode' : 'Light Mode'}
             </span>
           </button>
-          <div className="xl:hidden opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-4 transition-all duration-200 absolute left-full top-1/2 -translate-y-1/2 ml-2 px-3 py-1.5 bg-surface border border-border text-text text-xs font-semibold rounded-lg shadow-2xl pointer-events-none whitespace-nowrap z-50">
+          <div className="xl:hidden opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-4 transition-all duration-150 absolute left-full top-1/2 -translate-y-1/2 ml-2 px-3 py-1.5 bg-surface border border-border text-text text-xs font-semibold rounded-lg shadow-2xl pointer-events-none whitespace-nowrap z-50">
             {themeCtx.resolvedTheme === 'dark' ? 'Dark Mode' : 'Light Mode'}
           </div>
         </div>
@@ -405,13 +406,13 @@ const LeftHome = () => {
         <div className="relative group">
           <button
             onClick={handleLogOut}
-            className="w-full flex items-center gap-4 px-3 py-2.5 rounded-xl text-xs font-semibold text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
+            className="w-full flex items-center gap-4 px-3 py-2 rounded-xl text-xs font-semibold text-rose-500 hover:bg-rose-500/10 transition-colors duration-150 cursor-pointer"
             title="Log Out"
           >
-            <LogOut className="w-5 h-5 group-hover:scale-110 transition-transform" />
+            <LogOut className="w-4.5 h-4.5 group-hover:scale-110 transition-transform" />
             <span className="hidden xl:inline">Log Out</span>
           </button>
-          <div className="xl:hidden opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-4 transition-all duration-200 absolute left-full top-1/2 -translate-y-1/2 ml-2 px-3 py-1.5 bg-surface border border-border text-rose-400 text-xs font-semibold rounded-lg shadow-2xl pointer-events-none whitespace-nowrap z-50">
+          <div className="xl:hidden opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-4 transition-all duration-150 absolute left-full top-1/2 -translate-y-1/2 ml-2 px-3 py-1.5 bg-surface border border-border text-rose-400 text-xs font-semibold rounded-lg shadow-2xl pointer-events-none whitespace-nowrap z-50">
             Log Out
           </div>
         </div>

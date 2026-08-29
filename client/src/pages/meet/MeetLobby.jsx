@@ -97,13 +97,20 @@ export const MeetLobby = ({
 
   // Initial stream setup & device enumeration
   useEffect(() => {
-    initPreview();
-    enumerateDevices().then(({ audioInputs, videoInputs }) => {
-      setAudioInputs(audioInputs);
-      setVideoInputs(videoInputs);
-    });
+    let active = true;
+    const start = async () => {
+      await initPreview();
+      try {
+        const { audioInputs, videoInputs } = await enumerateDevices();
+        if (!active) return;
+        setAudioInputs(audioInputs);
+        setVideoInputs(videoInputs);
+      } catch {}
+    };
+    start();
 
     return () => {
+      active = false;
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((t) => t.stop());
       }

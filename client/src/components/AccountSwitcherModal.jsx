@@ -2,10 +2,11 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { snackbar } from "../lib/snackbar";
-import { X, Check, Plus, LogIn, UserPlus, Loader2, Trash2 } from "lucide-react";
+import { X, Check, Plus, LogIn, UserPlus, Loader2, Trash2, Sun, Moon } from "lucide-react";
 import dp from "../assets/dp3.png";
 import api from "../lib/axios";
 import { setUserData } from "../redux/features/userSlice";
+import { useTheme } from "../lib/themeContext";
 import {
   getLinkedAccounts,
   removeLinkedAccount,
@@ -23,6 +24,8 @@ const AccountSwitcherModal = ({ isOpen, onClose }) => {
   const [accounts, setAccounts] = useState(() => getLinkedAccounts());
   const [switching, setSwitching] = useState(null); // userId being switched to
   const [removingId, setRemovingId] = useState(null);
+
+  const themeCtx = useTheme();
 
   // Load linked accounts when modal opens
   useEffect(() => {
@@ -146,12 +149,34 @@ const AccountSwitcherModal = ({ isOpen, onClose }) => {
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-border">
             <h2 className="text-base font-bold text-text">Switch Account</h2>
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-full hover:bg-hover-overlay text-text-secondary hover:text-text transition cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            
+            <div className="flex items-center gap-2">
+              {/* Pro-UX Quick Theme Toggle with Circular Ripple Animation */}
+              <button
+                onClick={(e) => themeCtx?.toggleThemeWithTransition?.(e)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-hover hover:bg-surface-active border border-border text-text text-xs font-semibold transition-all duration-200 cursor-pointer active:scale-95 shadow-sm"
+                title={`Switch to ${themeCtx?.resolvedTheme === "dark" ? "Light" : "Dark"} Mode`}
+              >
+                {themeCtx?.resolvedTheme === "dark" ? (
+                  <>
+                    <Sun className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Light</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Dark</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-full hover:bg-hover-overlay text-text-secondary hover:text-text transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {/* Drag handle for mobile */}

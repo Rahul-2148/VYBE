@@ -609,15 +609,16 @@ const VybeCallSessionWrapper = ({
   }, [rtc.peers]);
 
   // Flip Camera
+  const { videoDevices, selectedVideo, setSelectedVideo } = rtc;
   const handleFlipCamera = useCallback(() => {
-    if (rtc.videoDevices && rtc.videoDevices.length > 1) {
-      const currentIndex = rtc.videoDevices.findIndex(
-        (d) => d.deviceId === rtc.selectedVideo
+    if (videoDevices && videoDevices.length > 1) {
+      const currentIndex = videoDevices.findIndex(
+        (d) => d.deviceId === selectedVideo
       );
-      const nextIndex = (currentIndex + 1) % rtc.videoDevices.length;
-      rtc.setSelectedVideo(rtc.videoDevices[nextIndex].deviceId);
+      const nextIndex = (currentIndex + 1) % videoDevices.length;
+      setSelectedVideo(videoDevices[nextIndex].deviceId);
     }
-  }, [rtc.videoDevices, rtc.selectedVideo, rtc.setSelectedVideo]);
+  }, [videoDevices, selectedVideo, setSelectedVideo]);
 
   return (
     <VybeCallOverlay

@@ -13,6 +13,7 @@ export default defineConfig({
     port: 5173,
     strictPort: false,
     host: true,
+    allowedHosts: true,
     hmr: {
       overlay: true,
     },

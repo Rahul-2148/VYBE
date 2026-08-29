@@ -22,11 +22,16 @@ export const initializeSocket = (userId) => {
   }
 
   const defaultHost =
-    typeof window !== "undefined" && window.location.hostname && window.location.hostname !== "localhost"
-      ? `http://${window.location.hostname}:8000`
-      : "http://localhost:8000";
+    typeof window !== "undefined" &&
+    window.location.hostname &&
+    window.location.hostname !== "localhost" &&
+    window.location.hostname !== "127.0.0.1"
+      ? (/^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname)
+          ? `http://${window.location.hostname}:8000`
+          : (import.meta.env.VITE_SOCKET_URL || "http://localhost:8000"))
+      : (import.meta.env.VITE_SOCKET_URL || "http://localhost:8000");
 
-  const socketURL = import.meta.env.VITE_SOCKET_URL || defaultHost;
+  const socketURL = defaultHost;
   const socketPath = import.meta.env.VITE_SOCKET_PATH || "/socket.io";
   const transports = (import.meta.env.VITE_SOCKET_TRANSPORTS || "websocket,polling")
     .split(",")

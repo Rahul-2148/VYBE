@@ -67,9 +67,48 @@ export const StoryCard = () => {
   const { userData } = useSelector((state) => state.user);
   const { feed: reduxFeed } = useSelector((state) => state.story);
 
-  const [feed, setFeed] = useState([]);
-  const [currentUserIndex, setCurrentUserIndex] = useState(0);
-  const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
+  const [feed, setFeed] = useState(() => {
+    if (location.state?.stories && location.state.stories.length > 0) {
+      const storiesList = location.state.stories;
+      return [
+        {
+          author: storiesList[0]?.author || { userName: "Highlight" },
+          stories: storiesList,
+          isCurrentUser: storiesList[0]?.author?._id === userData?.user?._id,
+        },
+      ];
+    }
+    if (reduxFeed && reduxFeed.length > 0) {
+      return reduxFeed;
+    }
+    return [];
+  });
+
+  const [currentUserIndex, setCurrentUserIndex] = useState(() => {
+    if (location.state?.stories && location.state.stories.length > 0) return 0;
+    if (reduxFeed && reduxFeed.length > 0) {
+      const initialUserIdx = location.state?.initialUserIndex ?? 0;
+      return Math.min(Math.max(0, initialUserIdx), reduxFeed.length - 1);
+    }
+    return 0;
+  });
+
+  const [currentStoryIndex, setCurrentStoryIndex] = useState(() => {
+    if (location.state?.stories && location.state.stories.length > 0) return 0;
+    if (reduxFeed && reduxFeed.length > 0) {
+      const initialUserIdx = location.state?.initialUserIndex ?? 0;
+      const startUserIdx = Math.min(Math.max(0, initialUserIdx), reduxFeed.length - 1);
+      const group = reduxFeed[startUserIdx];
+      if (group?.stories?.length) {
+        const currentUserId = userData?.user?._id;
+        const idx = group.stories.findIndex(
+          (s) => !s.viewers?.some((v) => (v?._id?.toString() || v?.toString()) === currentUserId?.toString())
+        );
+        return idx === -1 ? 0 : idx;
+      }
+    }
+    return 0;
+  });
 
   const [progress, setProgress] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
@@ -89,7 +128,12 @@ export const StoryCard = () => {
 
   // Floating Emoji particles
   const [floatingEmojis, setFloatingEmojis] = useState([]);
-  const [initialized, setInitialized] = useState(false);
+  const [initialized, setInitialized] = useState(() => {
+    return Boolean(
+      (location.state?.stories && location.state.stories.length > 0) ||
+      (reduxFeed && reduxFeed.length > 0)
+    );
+  });
   const imgRef = useRef(null);
 
   const intervalRef = useRef(null);
@@ -114,31 +158,22 @@ export const StoryCard = () => {
     return idx === -1 ? 0 : idx;
   }, [userData?.user?._id]);
 
-  // Populate Feed
+  // Populate Feed if loaded asynchronously
   useEffect(() => {
-    if (location.state?.stories && location.state.stories.length > 0) {
-      const storiesList = location.state.stories;
-      setFeed([
-        {
-          author: storiesList[0]?.author || { userName: "Highlight" },
-          stories: storiesList,
-          isCurrentUser: storiesList[0]?.author?._id === userData?.user?._id,
-        },
-      ]);
-      setCurrentUserIndex(0);
-      setCurrentStoryIndex(0);
-      setInitialized(true);
-    } else if (reduxFeed && reduxFeed.length > 0) {
-      const initialUserIdx = location.state?.initialUserIndex ?? 0;
-      const startUserIdx = Math.min(Math.max(0, initialUserIdx), reduxFeed.length - 1);
-      setFeed(reduxFeed);
-      setCurrentUserIndex(startUserIdx);
-      if (reduxFeed[startUserIdx]) {
-        setCurrentStoryIndex(getFirstUnseenIndex(reduxFeed[startUserIdx]));
-      }
-      setInitialized(true);
+    if (!initialized && reduxFeed && reduxFeed.length > 0) {
+      const timer = setTimeout(() => {
+        const initialUserIdx = location.state?.initialUserIndex ?? 0;
+        const startUserIdx = Math.min(Math.max(0, initialUserIdx), reduxFeed.length - 1);
+        setFeed(reduxFeed);
+        setCurrentUserIndex(startUserIdx);
+        if (reduxFeed[startUserIdx]) {
+          setCurrentStoryIndex(getFirstUnseenIndex(reduxFeed[startUserIdx]));
+        }
+        setInitialized(true);
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [location.state?.stories, location.state?.initialUserIndex, reduxFeed, userData, getFirstUnseenIndex]);
+  }, [initialized, reduxFeed, location.state?.initialUserIndex, getFirstUnseenIndex]);
 
   const activeGroup = feed[currentUserIndex] || null;
   const storiesList = activeGroup?.stories || [];

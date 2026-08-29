@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
-import { ArrowLeft, Search, Pin, MessageSquare, Users, Send, Edit, X, Archive, Bell, BellOff, Trash2, Volume2, VolumeX, SlidersHorizontal, CheckCircle, MessageCircleReply, Star, UserCheck, UserPlus, Flag, Minimize2 } from "lucide-react";
+import { ArrowLeft, Search, Pin, MessageSquare, Users, Send, Edit, X, Archive, Bell, BellOff, Trash2, Volume2, VolumeX, SlidersHorizontal, CheckCircle, MessageCircleReply, Star, UserCheck, UserPlus, Flag, Minimize2, Video } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
 import ChatListItem from "../components/ChatListItem";
@@ -406,6 +406,13 @@ export const Messages = () => {
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => navigate("/meet")}
+              className="p-2 text-text-secondary hover:text-blue-500 rounded-xl hover:bg-surface-hover transition cursor-pointer"
+              title="New Video Meeting"
+            >
+              <Video className="w-5 h-5" />
+            </button>
             <button
               onClick={() => {
                 dispatch(minimizeToFloatingDock(null));

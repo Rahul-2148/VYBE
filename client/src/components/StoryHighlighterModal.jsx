@@ -12,29 +12,28 @@ export const StoryHighlighterModal = ({ isOpen, onClose, onSuccess, story }) => 
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (story?._id) {
-      setSelectedStoryIds((prev) => (prev.includes(story._id) ? prev : [...prev, story._id]));
-    }
-  }, [story]);
-
-  useEffect(() => {
     if (!isOpen) return;
 
+    let isMounted = true;
     const fetchArchive = async () => {
       try {
-        setLoading(true);
+        if (isMounted) setLoading(true);
         const res = await api.get("/story/archive");
-        if (res.data.success) {
+        if (isMounted && res.data.success) {
           setArchivedStories(res.data.stories);
         }
       } catch {
-        snackbar.error("Failed to load archived stories.");
+        if (isMounted) snackbar.error("Failed to load archived stories.");
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
 
     fetchArchive();
+
+    return () => {
+      isMounted = false;
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;

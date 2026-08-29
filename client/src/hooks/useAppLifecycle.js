@@ -19,8 +19,12 @@ export const useAppLifecycle = () => {
   const dispatch = useDispatch();
   const { userData } = useSelector((state) => state.user);
   const userId = userData?._id || userData?.user?._id;
-  const lastActiveRef = useRef(Date.now());
+  const lastActiveRef = useRef(0);
   const isRefreshingRef = useRef(false);
+
+  useEffect(() => {
+    lastActiveRef.current = Date.now();
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof document === "undefined") return;

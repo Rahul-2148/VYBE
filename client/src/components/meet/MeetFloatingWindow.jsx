@@ -278,6 +278,24 @@ export const MeetFloatingWindow = () => {
 
   return (
     <>
+      {/* Ambient Top In-Meeting Quick Return Banner (Google Meet / iOS Call Bar) */}
+      <div
+        onClick={() => {
+          triggerHaptic("medium");
+          expandMeeting();
+        }}
+        className="fixed top-2.5 left-1/2 -translate-x-1/2 z-[99990] flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-emerald-950/90 border border-emerald-500/50 text-emerald-200 text-xs font-bold backdrop-blur-xl shadow-xl cursor-pointer hover:bg-emerald-900/90 active:scale-95 transition-all select-none animate-in fade-in slide-in-from-top-2 duration-200"
+        title="Tap to return to full meeting view"
+      >
+        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
+        <span className="truncate max-w-[140px] sm:max-w-[220px]">
+          {activeMeeting.roomTitle || "Live Meeting"}
+        </span>
+        <span className="text-emerald-400 text-[10px] uppercase font-black tracking-wider bg-emerald-500/20 border border-emerald-500/30 px-1.5 py-0.5 rounded-md shrink-0">
+          Return
+        </span>
+      </div>
+
       {/* Background Remote Audio Players — ensures call audio stays uninterrupted across routes */}
       {peerList.map((p) =>
         p.stream ? (

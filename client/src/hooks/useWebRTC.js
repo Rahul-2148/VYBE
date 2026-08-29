@@ -43,6 +43,8 @@ export const useWebRTC = (room, currentUserId, type = "video", initialOptions = 
     userData?.profilePicture ||
     "";
 
+  const resolvedUserId = (currentUserId || userData?.user?._id || userData?._id)?.toString() || "";
+
   const [localStream, setLocalStream] = useState(null);
   const [screenStream, setScreenStream] = useState(null);
   // peers: { [socketId]: { userId, stream (camera+mic), screenStream (display), muted, videoOff, screenSharing, screenStreamId, videoFilter, handRaised } }
@@ -65,6 +67,11 @@ export const useWebRTC = (room, currentUserId, type = "video", initialOptions = 
   const [activeSpeaker, setActiveSpeaker] = useState(null);
   const [isMediaReady, setIsMediaReady] = useState(false);
   const [connectionQuality, setConnectionQuality] = useState("good"); // "good", "reconnecting", "poor"
+
+  const initialOptionsRef = useRef(initialOptions);
+  useEffect(() => {
+    initialOptionsRef.current = initialOptions;
+  }, [initialOptions]);
 
   // Refs for WebRTC & Audio Context (Persistent lifecycle)
   const socketRef = useRef(null);
@@ -253,7 +260,7 @@ export const useWebRTC = (room, currentUserId, type = "video", initialOptions = 
     return () => {
       cancelled = true;
     };
-  }, [setupAudioAnalysis, enumerateDevices, isAudioOnly, initialOptions.isMuted, initialOptions.isVideoOff, initialOptions.selectedAudioInput, initialOptions.selectedVideo]);
+  }, [setupAudioAnalysis, enumerateDevices, isAudioOnly, selectedAudioInput, selectedVideo, initialOptions.isMuted, initialOptions.isVideoOff, initialOptions.selectedAudioInput, initialOptions.selectedVideo]);
 
   // ========== Create Multi-Track Peer Connection ==========
   const createPeerConnection = useCallback((remoteSocketId, remoteUserId, metadata = {}) => {
@@ -344,9 +351,9 @@ export const useWebRTC = (room, currentUserId, type = "video", initialOptions = 
       if (event.candidate) {
         socketRef.current?.emit("call:signal", {
           toSocketId: remoteSocketId,
-          fromUserId: currentUserId,
+          fromUserId: resolvedUserId,
           fromMetadata: {
-            userId: currentUserId,
+            userId: resolvedUserId,
             userName: rawUserName,
             name: rawName,
             profilePicture: myProfileAvatar,
@@ -461,9 +468,9 @@ export const useWebRTC = (room, currentUserId, type = "video", initialOptions = 
         await pc.setLocalDescription({ type: offer.type, sdp: tunedSdp });
         socketRef.current?.emit("call:signal", {
           toSocketId: remoteSocketId,
-          fromUserId: currentUserId,
+          fromUserId: resolvedUserId,
           fromMetadata: {
-            userId: currentUserId,
+            userId: resolvedUserId,
             userName: rawUserName,
             name: rawName,
             profilePicture: myProfileAvatar,
@@ -492,7 +499,7 @@ export const useWebRTC = (room, currentUserId, type = "video", initialOptions = 
     }));
 
     return pc;
-  }, [rawUserName, rawName, myProfileAvatar, currentUserId]);
+  }, [rawUserName, rawName, myProfileAvatar, resolvedUserId]);
 
   // ========== STEP 3: Socket Signaling Binding ==========
   useEffect(() => {
@@ -506,7 +513,7 @@ export const useWebRTC = (room, currentUserId, type = "video", initialOptions = 
     socketRef.current = socket;
     cleanedUpRef.current = false;
 
-    const myResolvedId = (currentUserId || userData?.user?._id || userData?._id)?.toString();
+    const myResolvedId = resolvedUserId;
 
     // Room members discovery
     const handleRoomMembers = ({ members }) => {
@@ -609,9 +616,9 @@ export const useWebRTC = (room, currentUserId, type = "video", initialOptions = 
 
           socket.emit("call:signal", {
             toSocketId: fromSocketId,
-            fromUserId: currentUserId,
+            fromUserId: resolvedUserId,
             fromMetadata: {
-              userId: currentUserId,
+              userId: resolvedUserId,
               userName: rawUserName,
               name: rawName,
               profilePicture: myProfileAvatar,
@@ -733,7 +740,7 @@ export const useWebRTC = (room, currentUserId, type = "video", initialOptions = 
         }
 
         if (action === "lower-hand" && data.targetUserId) {
-          if (data.targetUserId.toString() === currentUserId?.toString()) {
+          if (data.targetUserId.toString() === resolvedUserId) {
             setIsHandRaised(false);
             setHandRaisedAt(null);
             snackbar.info("Your hand was lowered by the host ✋");
@@ -784,7 +791,7 @@ export const useWebRTC = (room, currentUserId, type = "video", initialOptions = 
           socket.emit("call:action", { room, action: "mute", value: true });
           snackbar.warning("You have been muted by the host 🔇");
         }
-      } else if (action === "mute-user" && targetUserId?.toString() === currentUserId?.toString()) {
+      } else if (action === "mute-user" && targetUserId?.toString() === resolvedUserId) {
         if (localStreamRef.current) {
           const audioTrack = localStreamRef.current.getAudioTracks()[0];
           if (audioTrack) audioTrack.enabled = false;
@@ -804,19 +811,19 @@ export const useWebRTC = (room, currentUserId, type = "video", initialOptions = 
 
     socket.emit("call:join-room", {
       room,
-      userId: currentUserId,
+      userId: resolvedUserId,
       userName: rawUserName,
       name: rawName,
       profilePicture: myProfileAvatar,
-      isMuted: Boolean(initialOptions.isMuted),
-      videoOff: Boolean(initialOptions.isVideoOff || isAudioOnly),
-      videoFilter: initialOptions.videoFilter || "none",
+      isMuted: Boolean(initialOptionsRef.current.isMuted),
+      videoOff: Boolean(initialOptionsRef.current.isVideoOff || isAudioOnly),
+      videoFilter: initialOptionsRef.current.videoFilter || "none",
     });
 
-    if (initialOptions.isMuted) {
+    if (initialOptionsRef.current.isMuted) {
       socket.emit("call:action", { room, action: "mute", value: true });
     }
-    if (initialOptions.isVideoOff || isAudioOnly) {
+    if (initialOptionsRef.current.isVideoOff || isAudioOnly) {
       socket.emit("call:action", { room, action: "video", value: true });
     }
 
@@ -867,7 +874,7 @@ export const useWebRTC = (room, currentUserId, type = "video", initialOptions = 
       setIsScreenSharing(false);
       setIsMediaReady(false);
     };
-  }, [isMediaReady, room, createPeerConnection, currentUserId, myProfileAvatar, rawName, rawUserName, initialOptions.isMuted, initialOptions.isVideoOff, initialOptions.videoFilter, isAudioOnly]);
+  }, [isMediaReady, room, createPeerConnection, resolvedUserId, myProfileAvatar, rawName, rawUserName, isAudioOnly]);
 
   // ========== Device switching ==========
   const _switchDevice = useCallback(async (audioId, videoId) => {

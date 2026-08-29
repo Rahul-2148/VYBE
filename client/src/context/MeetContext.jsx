@@ -54,7 +54,7 @@ export const MeetProvider = ({ children }) => {
     if (activeMeeting?.meetingId) {
       navigate(`/meet/${activeMeeting.meetingId}`);
     }
-  }, [activeMeeting?.meetingId, navigate]);
+  }, [activeMeeting, navigate]);
 
   const leaveMeeting = useCallback(() => {
     triggerHaptic("heavy");
@@ -68,14 +68,12 @@ export const MeetProvider = ({ children }) => {
 
   // Auto-sync isMinimized with route: when on meet page, expand; when browsing other routes with active meeting, minimize
   useEffect(() => {
-    if (activeMeeting?.meetingId) {
-      const isCurrentlyOnMeetPage = location.pathname === `/meet/${activeMeeting.meetingId}`;
-      if (isCurrentlyOnMeetPage) {
-        setIsMinimized(false);
-      } else {
-        setIsMinimized(true);
-      }
-    }
+    if (!activeMeeting?.meetingId) return;
+    const isCurrentlyOnMeetPage = location.pathname === `/meet/${activeMeeting.meetingId}`;
+    const timer = setTimeout(() => {
+      setIsMinimized(!isCurrentlyOnMeetPage);
+    }, 0);
+    return () => clearTimeout(timer);
   }, [location.pathname, activeMeeting?.meetingId]);
 
   const value = {

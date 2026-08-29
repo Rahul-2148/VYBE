@@ -16,6 +16,8 @@ export const FloatingReactions = ({ room }) => {
         emoji: data.emoji,
         userName: data.userName,
         x: Math.random() * 60 + 20, // random start horizontal position (20% to 80%)
+        driftX: Math.random() * 20 - 10,
+        rotate: (Math.random() - 0.5) * 40,
       };
 
       setReactions((prev) => [...prev.slice(-20), newReaction]);
@@ -41,9 +43,9 @@ export const FloatingReactions = ({ room }) => {
             animate={{
               opacity: [1, 1, 0.9, 0],
               y: "-10vh",
-              x: `${r.x + (Math.random() * 20 - 10)}vw`,
+              x: `${r.x + (r.driftX || 0)}vw`,
               scale: [0.6, 1.3, 1.1, 0.9],
-              rotate: (Math.random() - 0.5) * 40,
+              rotate: r.rotate || 0,
             }}
             transition={{ duration: 2.4, ease: "easeOut" }}
             className="absolute flex items-center gap-1.5 drop-shadow-2xl select-none"

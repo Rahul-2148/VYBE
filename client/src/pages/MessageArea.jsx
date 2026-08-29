@@ -412,30 +412,32 @@ export const MessageArea = () => {
   }, []);
 
   const isGroup = Boolean(selectedChatUser?.user?.isGroup || selectedChatUser?.isGroup);
-  const rawOtherUser = isGroup ? null : (selectedChatUser?.user || selectedChatUser?.participant || selectedChatUser);
-  const otherUser = useMemo(() => {
+  const otherUser = (() => {
     if (isGroup) return null;
-    if (rawOtherUser && rawOtherUser._id && rawOtherUser._id !== selectedChatUser?.conversationId && rawOtherUser._id !== currentUserId) {
-      return rawOtherUser;
+    const rawOther = selectedChatUser?.user || selectedChatUser?.participant || selectedChatUser;
+    if (rawOther && rawOther._id && rawOther._id !== selectedChatUser?.conversationId && rawOther._id !== currentUserId) {
+      return rawOther;
     }
     const match = selectedChatUser?.participants?.find(
       (p) => (p?._id || p)?.toString() !== currentUserId?.toString()
     );
     if (match) return match;
-    return rawOtherUser;
-  }, [isGroup, rawOtherUser, selectedChatUser, currentUserId]);
+    return rawOther;
+  })();
 
   const otherUserIdStr = (otherUser?._id || otherUser?.id || otherUser)?.toString();
   const isOtherUserOnline = !isGroup && otherUserIdStr && (Boolean(otherUser?.isOnline) || onlineUsers.includes(otherUserIdStr));
   const otherUserLastSeen = otherUserIdStr ? (lastSeenMap[otherUserIdStr] || otherUser?.lastSeen) : otherUser?.lastSeen;
 
+  const conversationId = selectedChatUser?.conversationId;
+
   const fetchMessages = useCallback(async (pageNo = 1, prepend = false) => {
-    if (!selectedChatUser?.conversationId) return;
+    if (!conversationId) return;
     try {
       if (pageNo === 1) setLoadingMessages(true);
       if (pageNo > 1) setLoadingMore(true);
 
-      let url = `/message/${selectedChatUser.conversationId}?limit=30`;
+      let url = `/message/${conversationId}?limit=30`;
       if (prepend && messagesRef.current.length > 0) {
         const oldestMsg = messagesRef.current[0];
         url += `&before=${encodeURIComponent(oldestMsg.createdAt)}`;
@@ -459,25 +461,25 @@ export const MessageArea = () => {
       setLoadingMore(false);
       setLoadingMessages(false);
     }
-  }, [selectedChatUser?.conversationId, dispatch]);
+  }, [conversationId, dispatch]);
 
   const markConversationSeen = useCallback(async () => {
     try {
-      if (!selectedChatUser?.conversationId) return;
-      await api.post(`/message/seen/${selectedChatUser.conversationId}`);
+      if (!conversationId) return;
+      await api.post(`/message/seen/${conversationId}`);
     } catch (e) {
       console.warn("MessageArea: markConversationSeen failed", e);
     }
-  }, [selectedChatUser?.conversationId]);
+  }, [conversationId]);
 
   useEffect(() => {
-    if (!selectedChatUser?.conversationId) return;
+    if (!conversationId) return;
     (async () => {
       await fetchMessages(1);
       scrollToBottom("auto");
       await markConversationSeen();
     })();
-  }, [selectedChatUser?.conversationId, fetchMessages, markConversationSeen, scrollToBottom]);
+  }, [conversationId, fetchMessages, markConversationSeen, scrollToBottom]);
 
   // WebRTC call listener
   useEffect(() => {
