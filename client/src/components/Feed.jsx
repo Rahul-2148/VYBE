@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from "react";
+import React, { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import logo from "../assets/logo.png";
 import { FaRegHeart } from "react-icons/fa";
 import StoryDp from "./StoryDp";
@@ -10,6 +10,7 @@ import SponsoredPost from "./SponsoredPost";
 import FeedFilterBar from "./FeedFilterBar";
 import CloseFriendsModal from "./CloseFriendsModal";
 import RenderErrorBoundary from "./RenderErrorBoundary";
+import PullToRefresh from "./PullToRefresh";
 import { MessageCircle, Loader2, Sparkles, Users, Star, Compass, UserPlus, Plus, Bell, Video } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../lib/axios";
@@ -146,9 +147,26 @@ const Feed = () => {
     }
   }, [targetPostId, posts]);
 
-  return (
-    <div ref={feedRef} className="w-full lg:w-[48%] xl:w-[44%] h-full bg-bg text-text border-x border-border/80 relative overflow-y-auto hide-scrollbar flex flex-col items-center shrink-0 pt-4 lg:pt-8">
+  const handleRefreshFeed = useCallback(async () => {
+    try {
+      await Promise.all([
+        _refetchFeed(),
+        api.get("/story/following-story").catch(() => {}),
+        api.get("/live/active").then((res) => {
+          if (res.data?.success) setActiveLives(res.data.lives || []);
+        }).catch(() => {}),
+      ]);
+    } catch (e) {
+      console.warn("Feed pull refresh:", e);
+    }
+  }, [_refetchFeed]);
 
+  return (
+    <PullToRefresh
+      onRefresh={handleRefreshFeed}
+      isRefreshing={isFeedFetching}
+      className="w-full lg:w-[48%] xl:w-[44%] h-full bg-bg text-text border-x border-border/80 hide-scrollbar flex flex-col items-center shrink-0 pt-4 lg:pt-8"
+    >
       {/* Mobile Top Header (Exact App Layout) */}
       <div className="w-full h-14 flex items-center justify-between px-3 lg:hidden border-b border-border/80 sticky top-0 z-50 bg-bg/95 backdrop-blur-md select-none">
         {/* Left: Create (+) */}
@@ -343,7 +361,7 @@ const Feed = () => {
 
       {/* Navigation Bar (Mobile / Tablet bottom dock) */}
       <Navbar />
-    </div>
+    </PullToRefresh>
   );
 };
 

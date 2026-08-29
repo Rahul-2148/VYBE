@@ -7,6 +7,7 @@ import ReelCard from "../components/ReelCard";
 import ReelPreloader from "../components/ReelPreloader";
 import LeftHome from "../components/LeftHome";
 import RenderErrorBoundary from "../components/RenderErrorBoundary";
+import PullToRefresh from "../components/PullToRefresh";
 import api from "../lib/axios";
 import { useGetAllReelsQuery } from "../redux/api/apiSlice";
 import { setReelData } from "../redux/features/reelSlice";
@@ -22,7 +23,7 @@ export const Reels = () => {
   const reelMode = "for-you";
   
   // RTK Query with instant cache & stale-while-revalidate
-  const { data: reelsResponse, isLoading: loadingReels, isFetching: isReelsFetching } = useGetAllReelsQuery(reelMode, {
+  const { data: reelsResponse, isLoading: loadingReels, isFetching: isReelsFetching, refetch: refetchReels } = useGetAllReelsQuery(reelMode, {
     refetchOnMountOrArgChange: true,
   });
 
@@ -58,6 +59,14 @@ export const Reels = () => {
       dispatch(setReelData(reelsResponse.reels));
     }
   }, [reelsResponse, reelMode, dispatch]);
+
+  const handleRefreshReels = useCallback(async () => {
+    try {
+      await refetchReels();
+    } catch (e) {
+      console.warn("Reels refresh failed:", e);
+    }
+  }, [refetchReels]);
 
   const loading = (loadingReels || isReelsFetching) && reelData.length === 0;
 
@@ -257,11 +266,14 @@ export const Reels = () => {
             </div>
           )}
 
-          {/* Scrollable Container with Snap */}
+          {/* Scrollable Container with Snap & Instagram-Style Rubber-Band Pull-to-Refresh */}
           {reelData && reelData.length > 0 && (
-            <div
+            <PullToRefresh
               ref={containerRef}
               onScroll={handleScroll}
+              onRefresh={handleRefreshReels}
+              isRefreshing={isReelsFetching}
+              indicatorTop={64}
               className="h-[100dvh] w-full flex flex-col items-center overflow-y-scroll snap-y snap-mandatory scrollbar-none"
             >
               {reelData.map((reel, index) => (
@@ -278,7 +290,7 @@ export const Reels = () => {
                   </RenderErrorBoundary>
                 </div>
               ))}
-            </div>
+            </PullToRefresh>
           )}
         </div>
       </div>
