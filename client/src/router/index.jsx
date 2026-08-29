@@ -124,6 +124,10 @@ const router = createBrowserRouter([
             element: lazyPage(() => import("../pages/Profile")),
           },
           {
+            path: "/profile",
+            element: lazyPage(() => import("../pages/Profile")),
+          },
+          {
             path: "/edit-profile",
             element: lazyPage(() => import("../pages/EditProfile")),
           },

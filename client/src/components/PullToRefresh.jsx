@@ -37,6 +37,7 @@ export const PullToRefresh = forwardRef(function PullToRefresh(
   const startYRef = useRef(0);
   const startXRef = useRef(0);
   const isPullingRef = useRef(false);
+  const isMouseDownRef = useRef(false);
   const isHorizontalScrollRef = useRef(false);
 
   // Sync external isRefreshing state change
@@ -51,16 +52,15 @@ export const PullToRefresh = forwardRef(function PullToRefresh(
     prevIsRefreshingRef.current = isRefreshing;
   }, [isRefreshing]);
 
-  const handleTouchStart = useCallback(
-    (e) => {
+  const onStart = useCallback(
+    (clientY, clientX) => {
       if (disabled || refreshing) return;
       const container = containerRef.current;
       if (!container) return;
 
-      // Only allow pull-down if container is scrolled all the way to top
       if (container.scrollTop <= 0) {
-        startYRef.current = e.touches[0].clientY;
-        startXRef.current = e.touches[0].clientX;
+        startYRef.current = clientY;
+        startXRef.current = clientX;
         isPullingRef.current = false;
         setIsPulling(false);
         isHorizontalScrollRef.current = false;
@@ -69,8 +69,8 @@ export const PullToRefresh = forwardRef(function PullToRefresh(
     [disabled, refreshing]
   );
 
-  const handleTouchMove = useCallback(
-    (e) => {
+  const onMove = useCallback(
+    (clientY, clientX, e) => {
       if (disabled || refreshing || startYRef.current === 0) return;
       const container = containerRef.current;
       if (!container || container.scrollTop > 0) {
@@ -82,12 +82,10 @@ export const PullToRefresh = forwardRef(function PullToRefresh(
         return;
       }
 
-      const currentY = e.touches[0].clientY;
-      const currentX = e.touches[0].clientX;
-      const deltaY = currentY - startYRef.current;
-      const deltaX = currentX - startXRef.current;
+      const deltaY = clientY - startYRef.current;
+      const deltaX = clientX - startXRef.current;
 
-      // Detect horizontal swipe (e.g. story tray or swipe back) to not hijack
+      // Detect horizontal swipe (e.g. story tray or swipe back)
       if (!isPullingRef.current && Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 12) {
         isHorizontalScrollRef.current = true;
         return;
@@ -96,8 +94,7 @@ export const PullToRefresh = forwardRef(function PullToRefresh(
       if (isHorizontalScrollRef.current) return;
 
       if (deltaY > 0 && container.scrollTop <= 0) {
-        // Prevent native overscroll / pull behavior if pulling down
-        if (e.cancelable && deltaY > 6) {
+        if (e?.cancelable && deltaY > 6) {
           e.preventDefault();
         }
 
@@ -123,17 +120,19 @@ export const PullToRefresh = forwardRef(function PullToRefresh(
     [disabled, refreshing, maxPull, threshold, passedThreshold]
   );
 
-  const handleTouchEnd = useCallback(async () => {
+  const onEnd = useCallback(async () => {
     if (disabled || refreshing || !isPullingRef.current) {
       startYRef.current = 0;
       isPullingRef.current = false;
       setIsPulling(false);
+      isMouseDownRef.current = false;
       setPullDistance(0);
       return;
     }
 
     isPullingRef.current = false;
     setIsPulling(false);
+    isMouseDownRef.current = false;
     startYRef.current = 0;
 
     if (passedThreshold) {
@@ -157,6 +156,35 @@ export const PullToRefresh = forwardRef(function PullToRefresh(
     }
   }, [disabled, refreshing, passedThreshold, threshold, onRefresh]);
 
+  // Touch Handlers
+  const handleTouchStart = useCallback((e) => onStart(e.touches[0].clientY, e.touches[0].clientX), [onStart]);
+  const handleTouchMove = useCallback((e) => onMove(e.touches[0].clientY, e.touches[0].clientX, e), [onMove]);
+  const handleTouchEnd = useCallback(() => onEnd(), [onEnd]);
+
+  // Desktop Mouse Handlers
+  const handleMouseDown = useCallback(
+    (e) => {
+      if (e.button !== 0) return; // Left click only
+      isMouseDownRef.current = true;
+      onStart(e.clientY, e.clientX);
+    },
+    [onStart]
+  );
+
+  const handleMouseMove = useCallback(
+    (e) => {
+      if (!isMouseDownRef.current) return;
+      onMove(e.clientY, e.clientX, e);
+    },
+    [onMove]
+  );
+
+  const handleMouseUp = useCallback(() => {
+    if (!isMouseDownRef.current) return;
+    isMouseDownRef.current = false;
+    onEnd();
+  }, [onEnd]);
+
   const progress = Math.min(1, pullDistance / threshold);
   const strokeDash = 56.5; // circumference for r=9
   const strokeOffset = strokeDash * (1 - progress);
@@ -169,8 +197,12 @@ export const PullToRefresh = forwardRef(function PullToRefresh(
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
       style={style}
-      className={`relative overflow-y-auto ${className}`}
+      className={`relative overflow-y-auto select-none ${className}`}
       {...restProps}
     >
       {/* Instagram-Style Floating Pull Indicator */}
@@ -216,6 +248,17 @@ export const PullToRefresh = forwardRef(function PullToRefresh(
                 strokeLinecap="round"
                 opacity={Math.max(0.25, progress)}
               />
+              {/* Instagram Arrow Head */}
+              {progress > 0.15 && (
+                <path
+                  d="M12 3 L15 6 M12 3 L9 6"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={Math.max(0.3, progress)}
+                />
+              )}
             </svg>
           )}
         </div>
@@ -224,7 +267,7 @@ export const PullToRefresh = forwardRef(function PullToRefresh(
       {/* Rubber-band translated content wrapper */}
       <div
         style={{
-          transform: `translateY(${pullDistance > 0 ? pullDistance * 0.36 : 0}px)`,
+          transform: `translateY(${pullDistance > 0 || refreshing ? (refreshing ? 46 : pullDistance * 0.36) : 0}px)`,
           transition: isPulling
             ? "none"
             : "transform 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275)",

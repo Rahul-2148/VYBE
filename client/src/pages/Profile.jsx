@@ -343,20 +343,22 @@ const Profile = () => {
     }
   };
 
+  const effectiveUserName = userName || userData?.user?.userName || userData?.userName;
+
   useEffect(() => {
     return () => {
       if (profileAudioRef.current) {
         profileAudioRef.current.pause();
       }
     };
-  }, [userName]);
+  }, [effectiveUserName]);
 
   // RTK Query with instant cache & stale-while-revalidate
-  const { data: fetchedProfile, refetch: refetchProfile } = useGetUserFullProfileQuery(userName, {
-    skip: !userName,
+  const { data: fetchedProfile, refetch: refetchProfile } = useGetUserFullProfileQuery(effectiveUserName, {
+    skip: !effectiveUserName,
   });
-  const { data: fetchedHighlights } = useGetUserHighlightsQuery(userName, {
-    skip: !userName,
+  const { data: fetchedHighlights } = useGetUserHighlightsQuery(effectiveUserName, {
+    skip: !effectiveUserName,
   });
 
   useEffect(() => {
@@ -382,7 +384,7 @@ const Profile = () => {
 
   useEffect(() => {
     window.scrollTo(0, 0);
-  }, [userName]);
+  }, [effectiveUserName]);
 
   const handleLogOut = async () => {
     try {

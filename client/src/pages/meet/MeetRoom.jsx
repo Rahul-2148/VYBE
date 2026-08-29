@@ -67,7 +67,7 @@ export const MeetRoom = () => {
 
   if (isLoading && !activeMeeting) {
     return (
-      <div className="w-screen h-screen bg-[#202124] flex flex-col items-center justify-center gap-3 text-white">
+      <div className="w-screen min-h-[100dvh] h-[100dvh] bg-[#202124] flex flex-col items-center justify-center gap-3 text-white">
         <div className="w-8 h-8 border-3 border-rose-500 border-t-transparent rounded-full animate-spin" />
         <span className="text-xs text-zinc-400 font-medium">Connecting to meeting...</span>
       </div>
@@ -76,7 +76,7 @@ export const MeetRoom = () => {
 
   if ((error || !meeting) && !activeMeeting) {
     return (
-      <div className="w-screen h-screen bg-[#202124] flex flex-col items-center justify-center p-6 text-center text-white space-y-4">
+      <div className="w-screen min-h-[100dvh] h-[100dvh] bg-[#202124] flex flex-col items-center justify-center p-6 text-center text-white space-y-4">
         <div className="w-16 h-16 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center text-2xl font-black">
           !
         </div>
@@ -96,7 +96,7 @@ export const MeetRoom = () => {
   const isCurrentlyInThisMeeting = activeMeeting?.meetingId === meetingId;
   if (!isCurrentlyInThisMeeting) {
     return (
-      <div className="w-screen h-screen bg-[#202124] flex items-center justify-center overflow-y-auto">
+      <div className="w-screen min-h-[100dvh] h-[100dvh] bg-[#202124] flex items-center justify-center overflow-y-auto hide-scrollbar">
         <MeetLobby
           meeting={meeting}
           meetingId={meetingId}

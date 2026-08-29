@@ -8,6 +8,7 @@ import {
   Calendar,
   Keyboard,
   ArrowRight,
+  ArrowLeft,
   Copy,
   Check,
   Clock,
@@ -150,23 +151,14 @@ export const MeetHome = () => {
     e?.preventDefault();
     if (!meetingCode.trim()) return;
 
+    let targetCode = meetingCode.trim();
+    if (targetCode.includes("/meet/")) {
+      const parts = targetCode.split("/meet/");
+      targetCode = parts[parts.length - 1].split("?")[0].replace("/", "");
+    }
+
     triggerHaptic("medium");
-    let cleanCode = meetingCode.trim();
-
-    // If user pasted a full URL e.g. "https://vybe.app/meet/abc-defg-hij"
-    if (cleanCode.includes("/meet/")) {
-      const parts = cleanCode.split("/meet/");
-      cleanCode = parts[parts.length - 1];
-    }
-
-    cleanCode = cleanCode.replace(/[^a-zA-Z0-9-]/g, "").toLowerCase();
-
-    if (cleanCode.length < 3) {
-      snackbar.error("Please enter a valid meeting code");
-      return;
-    }
-
-    navigate(`/meet/${cleanCode}`);
+    navigate(`/meet/${targetCode}`);
   };
 
   const handleCopyLink = async (text) => {
@@ -182,20 +174,29 @@ export const MeetHome = () => {
   };
 
   return (
-    <div className="flex h-screen w-screen bg-bg text-text overflow-hidden select-none">
-      {/* Left Sidebar */}
+    <div className="flex min-h-[100dvh] h-[100dvh] w-screen bg-bg text-text overflow-hidden select-none">
+      {/* Left Sidebar (Desktop) */}
       <LeftHome />
 
       {/* Main Container */}
-      <div className="flex-1 flex flex-col h-full overflow-y-auto hide-scrollbar">
-        {/* Top Minimal Nav */}
-        <div className="h-16 border-b border-border/70 px-6 flex items-center justify-between shrink-0 bg-bg/80 backdrop-blur-md sticky top-0 z-30">
+      <div className="flex-1 flex flex-col h-full overflow-y-auto hide-scrollbar pb-32 md:pb-12">
+        {/* Top Nav (Mobile Back Button + Brand Header) */}
+        <div className="h-14 sm:h-16 border-b border-border/70 px-4 sm:px-6 flex items-center justify-between shrink-0 bg-bg/90 backdrop-blur-md sticky top-0 z-30">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-rose-600 flex items-center justify-center text-white shadow-lg shadow-rose-500/20">
+            {/* Mobile Back Button */}
+            <button
+              onClick={() => navigate(-1)}
+              className="p-1.5 -ml-1 rounded-xl text-text hover:bg-surface-hover active:scale-95 transition cursor-pointer lg:hidden"
+              title="Go back"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-rose-600 flex items-center justify-center text-white shadow-lg shadow-rose-500/20 shrink-0">
               <Video className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-base font-black tracking-tight text-text flex items-center gap-2">
+              <h1 className="text-sm sm:text-base font-black tracking-tight text-text flex items-center gap-2">
                 <span>VYBE Meet</span>
                 <span className="text-[10px] bg-rose-500/10 text-rose-500 font-bold px-2 py-0.5 rounded-full border border-rose-500/20">
                   PRO
@@ -203,27 +204,35 @@ export const MeetHome = () => {
               </h1>
             </div>
           </div>
+
+          <button
+            onClick={() => navigate("/explore")}
+            className="hidden sm:flex items-center gap-1.5 text-xs font-semibold text-text-muted hover:text-text px-3 py-1.5 rounded-xl hover:bg-surface transition cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-rose-500" />
+            <span>Discover</span>
+          </button>
         </div>
 
         {/* Hero Section */}
-        <div className="p-6 md:p-12 max-w-5xl mx-auto w-full space-y-12">
-          <div className="flex flex-col lg:flex-row items-center justify-between gap-8 md:gap-12 pt-4">
-            <div className="flex-1 space-y-5 text-center lg:text-left">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface border border-border text-xs font-bold text-text-secondary shadow-xs">
-                <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                <span>Enterprise-Grade Encrypted Video Calling</span>
+        <div className="p-4 sm:p-6 md:p-12 max-w-5xl mx-auto w-full space-y-8 sm:space-y-12">
+          <div className="flex flex-col lg:flex-row items-center justify-between gap-6 sm:gap-8 md:gap-12 pt-2 sm:pt-4">
+            <div className="flex-1 space-y-4 sm:space-y-5 text-center lg:text-left w-full">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface border border-border text-[11px] sm:text-xs font-bold text-text-secondary shadow-xs">
+                <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span>Enterprise Encrypted Video Calling</span>
               </div>
 
-              <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-text tracking-tight leading-tight">
+              <h2 className="text-2xl sm:text-4xl md:text-5xl font-black text-text tracking-tight leading-tight">
                 Premium video meetings. Now on <span className="bg-gradient-to-r from-pink-500 to-rose-600 bg-clip-text text-transparent">VYBE</span>.
               </h2>
 
-              <p className="text-sm md:text-base text-text-muted leading-relaxed max-w-xl">
+              <p className="text-xs sm:text-sm md:text-base text-text-muted leading-relaxed max-w-xl mx-auto lg:mx-0">
                 Connect, collaborate, and share with ultra-crisp HD video, studio audio, screen sharing, real-time reactions, and interactive whiteboards.
               </p>
 
               {/* Action Buttons: New Meeting & Code Input */}
-              <div className="flex flex-col sm:flex-row items-center gap-3.5 pt-2 justify-center lg:justify-start">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-2 justify-center lg:justify-start w-full">
                 {/* New Meeting Dropdown */}
                 <div className="relative w-full sm:w-auto" ref={menuRef}>
                   <button
@@ -232,19 +241,19 @@ export const MeetHome = () => {
                       setShowNewMeetingMenu(!showNewMeetingMenu);
                     }}
                     disabled={isCreating}
-                    className="w-full sm:w-auto flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 text-white font-bold text-sm shadow-xl shadow-rose-500/25 transition transform active:scale-95 cursor-pointer disabled:opacity-50"
+                    className="w-full sm:w-auto flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 text-white font-bold text-xs sm:text-sm shadow-xl shadow-rose-500/25 transition transform active:scale-95 cursor-pointer disabled:opacity-50"
                   >
-                    <Plus className="w-5 h-5" />
+                    <Plus className="w-5 h-5 shrink-0" />
                     <span>New Meeting</span>
                   </button>
 
                   {showNewMeetingMenu && (
-                    <div className="absolute top-14 left-0 w-64 bg-surface border border-border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="absolute top-14 left-0 right-0 sm:right-auto sm:w-64 bg-surface border border-border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in zoom-in-95 duration-150">
                       <button
                         onClick={handleStartInstantMeeting}
                         className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl hover:bg-surface-hover text-left text-xs font-semibold text-text transition cursor-pointer"
                       >
-                        <Video className="w-4 h-4 text-rose-500" />
+                        <Video className="w-4 h-4 text-rose-500 shrink-0" />
                         <span>Start an instant meeting</span>
                       </button>
 
@@ -252,7 +261,7 @@ export const MeetHome = () => {
                         onClick={handleCreateMeetingForLater}
                         className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl hover:bg-surface-hover text-left text-xs font-semibold text-text transition cursor-pointer"
                       >
-                        <Link2 className="w-4 h-4 text-blue-500" />
+                        <Link2 className="w-4 h-4 text-blue-500 shrink-0" />
                         <span>Create a meeting for later</span>
                       </button>
                     </div>
@@ -274,7 +283,7 @@ export const MeetHome = () => {
                   <button
                     type="submit"
                     disabled={!meetingCode.trim()}
-                    className="px-5 py-3.5 rounded-2xl bg-surface hover:bg-surface-hover disabled:opacity-40 text-text font-bold text-xs border border-border transition cursor-pointer active:scale-95"
+                    className="px-5 py-3.5 rounded-2xl bg-surface hover:bg-surface-hover disabled:opacity-40 text-text font-bold text-xs border border-border transition cursor-pointer active:scale-95 shrink-0"
                   >
                     Join
                   </button>
@@ -283,13 +292,13 @@ export const MeetHome = () => {
             </div>
 
             {/* Visual Graphic Banner */}
-            <div className="w-full lg:w-96 aspect-4/3 rounded-3xl overflow-hidden bg-gradient-to-br from-pink-500/10 via-purple-500/10 to-blue-500/10 border border-border/80 p-6 flex flex-col justify-between shadow-2xl relative">
+            <div className="w-full lg:w-96 rounded-3xl overflow-hidden bg-gradient-to-br from-pink-500/10 via-purple-500/10 to-blue-500/10 border border-border/80 p-5 sm:p-6 flex flex-col justify-between shadow-2xl relative gap-4">
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-rose-500 font-bold text-xs">
                   <Sparkles className="w-4 h-4" />
                   <span>Vybe Meet Features</span>
                 </div>
-                <h3 className="text-lg font-black text-text">Ultra-Fast Realtime Collaboration</h3>
+                <h3 className="text-base sm:text-lg font-black text-text">Ultra-Fast Realtime Collaboration</h3>
                 <p className="text-xs text-text-muted leading-relaxed">
                   Screen share with crystal clarity, collaborate on interactive whiteboards, and send animated emoji reactions.
                 </p>
@@ -297,12 +306,12 @@ export const MeetHome = () => {
 
               <div className="grid grid-cols-2 gap-2 pt-4 border-t border-border/60">
                 <div className="p-2.5 rounded-xl bg-surface/80 border border-border/60 text-xs font-bold text-text flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  <span>HD Screen Share</span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                  <span className="truncate">HD Screen Share</span>
                 </div>
                 <div className="p-2.5 rounded-xl bg-surface/80 border border-border/60 text-xs font-bold text-text flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-rose-500" />
-                  <span>In-Call Chat & Files</span>
+                  <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                  <span className="truncate">In-Call Chat & Files</span>
                 </div>
               </div>
             </div>
@@ -311,7 +320,7 @@ export const MeetHome = () => {
           {/* Recent Meetings Section */}
           <div className="space-y-4 pt-6 border-t border-border/80">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-text flex items-center gap-2">
+              <h3 className="text-sm sm:text-base font-bold text-text flex items-center gap-2">
                 <Clock className="w-4 h-4 text-text-muted" />
                 <span>Recent Meetings</span>
               </h3>
@@ -331,7 +340,7 @@ export const MeetHome = () => {
             {isLoadingHistory ? (
               <div className="p-8 text-center text-xs text-text-muted">Loading meetings...</div>
             ) : recentMeetings.length === 0 ? (
-              <div className="p-8 text-center rounded-2xl bg-surface border border-border/60 text-text-muted space-y-1.5">
+              <div className="p-6 sm:p-8 text-center rounded-2xl bg-surface border border-border/60 text-text-muted space-y-1.5">
                 <p className="text-xs font-semibold text-text">No recent meetings</p>
                 <p className="text-[11px]">When you create or join meetings on Vybe, they will appear here.</p>
               </div>

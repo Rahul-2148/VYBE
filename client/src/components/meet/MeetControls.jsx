@@ -141,7 +141,7 @@ export const MeetControls = ({
   };
 
   return (
-    <div className="w-full bg-[#1e1f20] border-t border-zinc-700/80 px-3 sm:px-6 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] flex items-center justify-between z-30 select-none font-sans transition-all duration-300">
+    <div className="w-full bg-[#1e1f20] border-t border-zinc-700/80 px-2 sm:px-6 py-2 sm:py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] flex items-center justify-between z-30 select-none font-sans transition-all duration-300 gap-1">
       {/* 1. Left: Meeting Info / Title */}
       <div className="hidden md:flex items-center gap-3 min-w-0">
         <h2 className="text-sm font-semibold text-white truncate max-w-[200px] xl:max-w-[280px]">
@@ -150,7 +150,7 @@ export const MeetControls = ({
       </div>
 
       {/* 2. Center: Core Communication Action Buttons */}
-      <div className="flex items-center gap-1.5 sm:gap-2.5 mx-auto md:mx-0">
+      <div className="flex items-center gap-1 sm:gap-2 mx-auto md:mx-0">
         {/* Microphone Toggle */}
         <button
           type="button"
@@ -158,14 +158,14 @@ export const MeetControls = ({
             triggerHaptic("medium");
             onToggleMute();
           }}
-          className={`p-3 rounded-full transition-all duration-200 cursor-pointer ${
+          className={`p-2.5 sm:p-3 rounded-full transition-all duration-200 cursor-pointer shrink-0 ${
             isMuted
               ? "bg-rose-600 hover:bg-rose-500 text-white"
               : "bg-[#3c4043] hover:bg-[#474a4d] text-white"
           }`}
           title={isMuted ? "Turn on microphone" : "Turn off microphone"}
         >
-          {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+          {isMuted ? <MicOff className="w-4.5 h-4.5 sm:w-5 sm:h-5" /> : <Mic className="w-4.5 h-4.5 sm:w-5 sm:h-5" />}
         </button>
 
         {/* Camera Toggle */}
@@ -175,14 +175,14 @@ export const MeetControls = ({
             triggerHaptic("medium");
             onToggleVideo();
           }}
-          className={`p-3 rounded-full transition-all duration-200 cursor-pointer ${
+          className={`p-2.5 sm:p-3 rounded-full transition-all duration-200 cursor-pointer shrink-0 ${
             isVideoOff
               ? "bg-rose-600 hover:bg-rose-500 text-white"
               : "bg-[#3c4043] hover:bg-[#474a4d] text-white"
           }`}
           title={isVideoOff ? "Turn on camera" : "Turn off camera"}
         >
-          {isVideoOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+          {isVideoOff ? <VideoOff className="w-4.5 h-4.5 sm:w-5 sm:h-5" /> : <Video className="w-4.5 h-4.5 sm:w-5 sm:h-5" />}
         </button>
 
         {/* Mobile Flip Camera Button (Front / Rear switch) */}
@@ -193,14 +193,14 @@ export const MeetControls = ({
             onFlipCamera?.();
           }}
           disabled={isVideoOff}
-          className={`flex sm:hidden p-3 rounded-full transition-all duration-200 cursor-pointer ${
+          className={`flex sm:hidden p-2.5 sm:p-3 rounded-full transition-all duration-200 cursor-pointer shrink-0 ${
             isVideoOff
               ? "opacity-40 cursor-not-allowed bg-[#3c4043] text-zinc-500"
               : "bg-[#3c4043] hover:bg-[#474a4d] active:scale-90 text-white"
           }`}
           title="Switch Camera (Front / Back)"
         >
-          <SwitchCamera className="w-5 h-5" />
+          <SwitchCamera className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
         </button>
 
         {/* Live Closed Captions (CC) Toggle */}
@@ -210,14 +210,14 @@ export const MeetControls = ({
             triggerHaptic("medium");
             onToggleCaptions?.();
           }}
-          className={`p-3 rounded-full transition-all duration-200 cursor-pointer ${
+          className={`hidden xs:flex p-2.5 sm:p-3 rounded-full transition-all duration-200 cursor-pointer shrink-0 ${
             isCaptionsOn
               ? "bg-blue-600 hover:bg-blue-500 text-white ring-2 ring-blue-400/50 shadow-md shadow-blue-600/30"
               : "bg-[#3c4043] hover:bg-[#474a4d] text-white"
           }`}
           title={isCaptionsOn ? "Turn off captions (c)" : "Turn on captions (c)"}
         >
-          <GoogleMeetCCIcon className="w-5 h-5" active={isCaptionsOn} />
+          <GoogleMeetCCIcon className="w-4.5 h-4.5 sm:w-5 sm:h-5" active={isCaptionsOn} />
         </button>
 
         {/* Screen Share Toggle */}
@@ -227,7 +227,7 @@ export const MeetControls = ({
             triggerHaptic("medium");
             onToggleScreenShare();
           }}
-          className={`hidden sm:flex p-3 rounded-full transition-all duration-200 cursor-pointer ${
+          className={`hidden sm:flex p-2.5 sm:p-3 rounded-full transition-all duration-200 cursor-pointer shrink-0 ${
             isScreenSharing
               ? "bg-blue-600 hover:bg-blue-500 text-white ring-2 ring-blue-400/50"
               : "bg-[#3c4043] hover:bg-[#474a4d] text-white"
@@ -244,32 +244,32 @@ export const MeetControls = ({
             triggerHaptic("light");
             onToggleHand();
           }}
-          className={`p-3 rounded-full transition-all duration-200 cursor-pointer ${
+          className={`p-2.5 sm:p-3 rounded-full transition-all duration-200 cursor-pointer shrink-0 ${
             isHandRaised
               ? "bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold"
               : "bg-[#3c4043] hover:bg-[#474a4d] text-white"
           }`}
           title={isHandRaised ? "Lower hand" : "Raise hand"}
         >
-          <GoogleMeetHandIcon className="w-5 h-5" isRaised={isHandRaised} />
+          <GoogleMeetHandIcon className="w-4.5 h-4.5 sm:w-5 sm:h-5" isRaised={isHandRaised} />
         </button>
 
         {/* Emoji Reactions Trigger & Flyout */}
-        <div className="relative" ref={reactionRef}>
+        <div className="relative shrink-0" ref={reactionRef}>
           <button
             type="button"
             onClick={() => {
               triggerHaptic("light");
               setShowReactions(!showReactions);
             }}
-            className={`p-3 rounded-full transition-all duration-200 cursor-pointer ${
+            className={`p-2.5 sm:p-3 rounded-full transition-all duration-200 cursor-pointer ${
               showReactions
                 ? "bg-blue-600 text-white"
                 : "bg-[#3c4043] hover:bg-[#474a4d] text-white"
             }`}
             title="Send a reaction"
           >
-            <Smile className="w-5 h-5" />
+            <Smile className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
           </button>
 
           {showReactions && (
@@ -286,7 +286,7 @@ export const MeetControls = ({
         </div>
 
         {/* More Options Menu (Layout, Fullscreen, Settings) */}
-        <div className="relative" ref={moreMenuRef}>
+        <div className="relative shrink-0" ref={moreMenuRef}>
           <button
             type="button"
             data-testid="meet-more-options-btn"
@@ -295,12 +295,12 @@ export const MeetControls = ({
               triggerHaptic("light");
               setShowMoreMenu((prev) => !prev);
             }}
-            className={`p-3 rounded-full transition cursor-pointer ${
+            className={`p-2.5 sm:p-3 rounded-full transition cursor-pointer ${
               showMoreMenu ? "bg-blue-600 text-white" : "bg-[#3c4043] hover:bg-[#474a4d] text-white"
             }`}
             title="More options"
           >
-            <MoreVertical className="w-5 h-5" />
+            <MoreVertical className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
           </button>
 
           {showMoreMenu && (
@@ -380,16 +380,16 @@ export const MeetControls = ({
             triggerHaptic("heavy");
             onEndCall();
           }}
-          className="px-5 py-3 rounded-full bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold transition shadow-lg shadow-rose-600/30 flex items-center gap-2 cursor-pointer ml-1 sm:ml-2"
+          className="px-3.5 sm:px-5 py-2.5 sm:py-3 rounded-full bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold transition shadow-lg shadow-rose-600/30 flex items-center gap-1.5 sm:gap-2 cursor-pointer ml-0.5 sm:ml-2 shrink-0"
           title="Leave call"
         >
-          <PhoneOff className="w-5 h-5" />
+          <PhoneOff className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
           <span className="hidden sm:inline text-xs">Leave</span>
         </button>
       </div>
 
       {/* 3. Right: Workspace Drawers Toggles (Gemini, Info, People, Chat, Activities) */}
-      <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+      <div className="flex items-center gap-0.5 sm:gap-1.5 shrink-0">
         {/* Ask Gemini in Meet */}
         <button
           type="button"
@@ -398,7 +398,7 @@ export const MeetControls = ({
             triggerHaptic("medium");
             onToggleSidebar(activeSidebar === "gemini" ? null : "gemini");
           }}
-          className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-full transition cursor-pointer font-bold text-xs ${
+          className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-full transition cursor-pointer font-bold text-xs ${
             activeSidebar === "gemini"
               ? "bg-gradient-to-tr from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-600/30"
               : "bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30"

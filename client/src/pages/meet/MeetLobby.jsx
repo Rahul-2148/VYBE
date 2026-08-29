@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Mic,
   MicOff,
@@ -11,6 +12,7 @@ import {
   ShieldCheck,
   ChevronDown,
   Volume2,
+  ArrowLeft,
 } from "lucide-react";
 import { snackbar } from "../../lib/snackbar";
 import { triggerHaptic } from "../../lib/interactiveEffects";
@@ -29,6 +31,7 @@ export const MeetLobby = ({
   currentUser,
   onJoinMeeting,
 }) => {
+  const navigate = useNavigate();
   const [localStream, setLocalStream] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
@@ -182,9 +185,26 @@ export const MeetLobby = ({
   const activeParticipants = meeting?.participants?.filter((p) => p.status === "joined") || [];
 
   return (
-    <div className="w-full h-full flex flex-col lg:flex-row items-center justify-center gap-8 md:gap-12 p-4 md:p-8 max-w-6xl mx-auto select-none">
-      {/* LEFT: Live Video Preview Tile with Camera/Mic Controls */}
-      <div className="w-full max-w-lg flex flex-col items-center gap-4">
+    <div className="w-full min-h-full flex flex-col items-center justify-start lg:justify-center p-4 sm:p-6 md:p-8 max-w-6xl mx-auto select-none pb-20 md:pb-8">
+      {/* Top Mobile Nav Bar */}
+      <div className="w-full flex items-center justify-between mb-4 lg:mb-6">
+        <button
+          onClick={() => navigate("/meet")}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-xs font-bold text-zinc-200 border border-zinc-700/80 transition active:scale-95 cursor-pointer"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Back to Meet</span>
+        </button>
+
+        <div className="flex items-center gap-1.5 text-xs text-zinc-400 font-medium">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span>Lobby Ready</span>
+        </div>
+      </div>
+
+      <div className="w-full flex flex-col lg:flex-row items-center lg:items-start justify-center gap-8 md:gap-12">
+        {/* LEFT: Live Video Preview Tile with Camera/Mic Controls */}
+        <div className="w-full max-w-lg flex flex-col items-center gap-4">
         <div className="relative w-full aspect-video bg-[#121212] rounded-3xl overflow-hidden border-2 border-zinc-700 shadow-2xl flex items-center justify-center">
           {/* Always keep video mounted so srcObject is retained */}
           <video
@@ -412,13 +432,14 @@ export const MeetLobby = ({
               💻 Present Now
             </button>
 
-            <button
-              onClick={() => handleJoin("companion")}
-              className="flex-1 py-2.5 px-3 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white border border-zinc-700 transition cursor-pointer text-center"
-              title="Join audio-muted for secondary display"
-            >
-              📱 Use Companion Mode
-            </button>
+              <button
+                onClick={() => handleJoin("companion")}
+                className="flex-1 py-2.5 px-3 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white border border-zinc-700 transition cursor-pointer text-center"
+                title="Join audio-muted for secondary display"
+              >
+                📱 Use Companion Mode
+              </button>
+            </div>
           </div>
         </div>
       </div>

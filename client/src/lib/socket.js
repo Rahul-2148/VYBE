@@ -1,5 +1,6 @@
 // src/lib/socket.js - Socket.IO Client Configuration
 import { io } from "socket.io-client";
+import { snackbar } from "./snackbar";
 
 let socket = null;
 
@@ -88,6 +89,12 @@ export const initializeSocket = (userId) => {
 
   socket.on("error", (error) => {
     console.error("❌ Socket error:", error);
+  });
+
+  socket.on("system-announcement-received", (data) => {
+    const title = data?.announcement?.title || data?.title || "System Announcement";
+    const msg = data?.announcement?.message || data?.message || "";
+    snackbar.info(`📢 ${title}: ${msg}`);
   });
 
   return socket;
