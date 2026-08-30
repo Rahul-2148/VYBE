@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon server.js",
+    "dev:fast": "node --watch server.js",
     "start": "node server.js",
     "create-admin": "node scripts/createSuperAdmin.js",
     "build": "node scripts/check-all.js",
