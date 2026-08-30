@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Repeat, X, Upload, Check } from "lucide-react";
 import { snackbar } from "../lib/snackbar";
@@ -10,6 +11,16 @@ export const RemixReelModal = ({ isOpen, onClose, originalReel, onSuccess }) => 
   const [videoPreview, setVideoPreview] = useState(null);
   const [caption, setCaption] = useState("");
   const [loading, setLoading] = useState(false);
+  // Body scroll lock
+  useEffect(() => {
+    if (isOpen) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [isOpen]);
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -52,7 +63,9 @@ export const RemixReelModal = ({ isOpen, onClose, originalReel, onSuccess }) => 
     }
   };
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <AnimatePresence>
       {isOpen && currentOriginal && (
         <motion.div
@@ -152,7 +165,8 @@ export const RemixReelModal = ({ isOpen, onClose, originalReel, onSuccess }) => 
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 };
 

@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
@@ -24,7 +25,16 @@ export const AIInfoModal = ({
 }) => {
   const [showGuidelines, setShowGuidelines] = useState(false);
 
-  if (!isOpen) return null;
+  // Body scroll lock
+  useEffect(() => {
+    if (isOpen) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [isOpen]);
 
   const handleClose = () => {
     triggerHaptic("light");
@@ -37,25 +47,28 @@ export const AIInfoModal = ({
     ? moment(aiLabel.disclosedAt).format("MMM D, YYYY")
     : null;
 
-  return (
-    <AnimatePresence>
-      <div
-        key="ai-info-modal-wrapper"
-        onClick={(e) => e.stopPropagation()}
-        className="fixed inset-0 z-[5500] flex items-end sm:items-center justify-center font-sans select-none"
-      >
-        {/* Backdrop */}
-        <motion.div
-          key="ai-info-backdrop"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={handleClose}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md transition-opacity"
-        />
+  if (typeof document === "undefined") return null;
 
-        {/* Sheet / Modal Container */}
-        <motion.div
+  return createPortal(
+    <AnimatePresence>
+      {isOpen && (
+        <div
+          key="ai-info-modal-wrapper"
+          onClick={(e) => e.stopPropagation()}
+          className="fixed inset-0 z-[5500] flex items-end justify-center font-sans select-none"
+        >
+          {/* Backdrop */}
+          <motion.div
+            key="ai-info-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={handleClose}
+            className="fixed inset-0 bg-black/80 backdrop-blur-md transition-opacity"
+          />
+
+          {/* Sheet / Modal Container */}
+          <motion.div
           key="ai-info-sheet"
           initial={{ y: "100%", opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
@@ -66,16 +79,17 @@ export const AIInfoModal = ({
           dragElastic={{ top: 0, bottom: 0.4 }}
           dragSnapToOrigin
           onDragEnd={(e, info) => {
-            if (info.offset.y > 80 || info.velocity.y > 400) {
+            if (info.offset.y > 60 || info.velocity.y > 300) {
               handleClose();
             }
           }}
-          className="relative z-10 w-full sm:max-w-md bg-surface border border-border/80 rounded-t-[32px] sm:rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+          className="relative z-10 w-full max-w-lg md:max-w-xl bg-surface/98 backdrop-blur-2xl border-t border-x border-border rounded-t-[28px] md:rounded-t-[32px] rounded-b-none shadow-[0_-12px_45px_rgba(0,0,0,0.85)] overflow-hidden max-h-[85vh] flex flex-col"
         >
-          {/* Mobile Drag Indicator */}
-          <div className="w-full flex justify-center pt-3 pb-1 sm:hidden">
-            <div className="w-12 h-1.5 bg-border-strong rounded-full" />
-          </div>
+          {/* Top Drag Notch Handle */}
+          <div
+            className="w-10 h-1 bg-border-strong rounded-full opacity-60 mx-auto mt-2.5 mb-1 cursor-pointer hover:opacity-100 transition shrink-0"
+            onClick={handleClose}
+          />
 
           {/* Header */}
           <div className="px-5 pt-3.5 pb-3 flex items-center justify-between border-b border-border/60">
@@ -237,8 +251,10 @@ export const AIInfoModal = ({
             </button>
           </div>
         </motion.div>
-      </div>
-    </AnimatePresence>
+        </div>
+      )}
+    </AnimatePresence>,
+    document.body
   );
 };
 

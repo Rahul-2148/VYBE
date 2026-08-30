@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X, MapPin, Type, MessageSquare, Eye, EyeOff, Sparkles, Save, Loader2, ImageIcon, Bot, Layers } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { snackbar } from "../lib/snackbar";
@@ -30,76 +31,108 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
   const [saving, setSaving] = useState(false);
   const [showAltText, setShowAltText] = useState(false);
 
+  // Sync state when post changes
+  const [prevPostId, setPrevPostId] = useState(post?._id);
+  if (post?._id !== prevPostId) {
+    setPrevPostId(post?._id);
+    setCaption(post?.caption || "");
+    setLocation(post?.location || "");
+    setAltText(post?.altText || "");
+    setAllowComments(post?.allowComments !== false);
+    setLikesHidden(post?.likesHidden || false);
+    setIsAIGenerated(post?.aiLabel?.isAIGenerated || false);
+    setAiTool(post?.aiLabel?.tool || "");
+    setAiContentType(post?.aiLabel?.contentType || "image");
+  }
+
+  // Body scroll lock
   useEffect(() => {
-    if (post) {
-      const timer = setTimeout(() => {
-        setCaption(post.caption || "");
-        setLocation(post.location || "");
-        setAltText(post.altText || "");
-        setAllowComments(post.allowComments !== false);
-        setLikesHidden(post.likesHidden || false);
-        setIsAIGenerated(post.aiLabel?.isAIGenerated || false);
-        setAiTool(post.aiLabel?.tool || "");
-        setAiContentType(post.aiLabel?.contentType || "image");
-      }, 0);
-      return () => clearTimeout(timer);
+    if (isOpen) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
     }
-  }, [post]);
+  }, [isOpen]);
 
   const handleSave = async () => {
+    if (!post?._id) return;
     try {
       setSaving(true);
-      const res = await api.patch(`/post/edit/${post._id}`, {
-        caption,
-        location,
-        altText,
+      triggerHaptic("medium");
+
+      const payload = {
+        caption: caption.trim(),
+        location: location.trim(),
+        altText: altText.trim(),
         allowComments,
         likesHidden,
         aiLabel: {
           isAIGenerated,
-          tool: isAIGenerated ? aiTool : "",
-          contentType: isAIGenerated ? aiContentType : "image",
+          tool: isAIGenerated ? aiTool.trim() : "",
+          contentType: isAIGenerated ? aiContentType : "none",
+          disclosedAt: isAIGenerated ? (post.aiLabel?.disclosedAt || new Date().toISOString()) : null,
         },
-      });
+      };
 
-      if (res.data.success) {
-        snackbar.success("Post updated!");
-        onPostUpdated?.(res.data.post);
+      const res = await api.put(`/post/edit/${post._id}`, payload);
+      if (res.data?.success) {
+        snackbar.success("Post updated successfully! ✨");
+        if (onPostUpdated) onPostUpdated(res.data.post);
         onClose();
       }
     } catch (err) {
-      snackbar.error(err.response?.data?.message || "Failed to update post.");
+      snackbar.error(err.response?.data?.message || "Failed to update post");
     } finally {
       setSaving(false);
     }
   };
-
-  if (!isOpen) return null;
 
   const thumbnailUrl =
     post?.mediaType === "carousel"
       ? post?.carouselMedia?.[0]?.url
       : post?.media?.url;
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
-        onClick={onClose}
-      >
+      {isOpen && (
         <motion.div
-          initial={{ scale: 0.95, opacity: 0, y: 20 }}
-          animate={{ scale: 1, opacity: 1, y: 0 }}
-          exit={{ scale: 0.95, opacity: 0, y: 20 }}
-          transition={{ type: "spring", stiffness: 300, damping: 30 }}
-          className="bg-bg border border-border rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col"
-          onClick={(e) => e.stopPropagation()}
+          key="edit-post-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-md flex items-end justify-center p-0 select-none"
+          onClick={onClose}
         >
+          <motion.div
+            key="edit-post-sheet"
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ type: "spring", damping: 28, stiffness: 300 }}
+            drag="y"
+            dragConstraints={{ top: 0 }}
+            dragElastic={{ top: 0, bottom: 0.4 }}
+            dragSnapToOrigin
+            onDragEnd={(e, info) => {
+              if (info.offset.y > 60 || info.velocity.y > 300) {
+                onClose();
+              }
+            }}
+            className="bg-surface/98 backdrop-blur-2xl border-t border-x border-border rounded-t-[28px] md:rounded-t-[32px] rounded-b-none shadow-[0_-12px_45px_rgba(0,0,0,0.85)] w-full max-w-lg md:max-w-xl max-h-[88vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+          {/* Top Drag Handle Notch */}
+          <div
+            className="w-10 h-1 bg-border-strong rounded-full opacity-60 mx-auto mt-2.5 mb-1 cursor-pointer hover:opacity-100 transition shrink-0"
+            onClick={onClose}
+          />
+
           {/* Header */}
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border shrink-0">
             <button
               onClick={onClose}
               className="p-1.5 text-text-secondary hover:text-text rounded-full hover:bg-surface transition cursor-pointer"
@@ -362,6 +395,7 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
           </div>
         </motion.div>
       </motion.div>
+      )}
 
       {/* AI Transparency Disclosure Modal Preview */}
       <AIInfoModal
@@ -374,7 +408,8 @@ const EditPostModal = ({ post, isOpen, onClose, onPostUpdated }) => {
         }}
         authorName="You"
       />
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 };
 

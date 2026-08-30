@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -45,16 +46,34 @@ export const CommentsModal = ({
   const { postData } = useSelector((state) => state.post);
   const { reelData } = useSelector((state) => state.reel);
 
-  const [isExpanded, setIsExpanded] = useState(Boolean(externalExpanded));
+  const [internalExpanded, setInternalExpanded] = useState(Boolean(externalExpanded));
+  const isExpanded = externalExpanded !== undefined ? Boolean(externalExpanded) : internalExpanded;
+  const setIsExpanded = (val) => {
+    setInternalExpanded(val);
+    onExpandChange?.(val);
+  };
 
+  // Lock body scroll when modal is open
   useEffect(() => {
-    if (externalExpanded !== undefined) {
-      const timer = setTimeout(() => {
-        setIsExpanded(Boolean(externalExpanded));
-      }, 0);
-      return () => clearTimeout(timer);
+    if (isOpen) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
     }
-  }, [externalExpanded]);
+  }, [isOpen]);
+
+  // Keyboard accessibility: Close on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape" && isOpen) {
+        onClose?.();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
   const [activeTab, setActiveTab] = useState("comments"); // "comments" | "likes"
   const [likers, setLikers] = useState([]);
@@ -75,24 +94,22 @@ export const CommentsModal = ({
 
   const isPost = Boolean(post);
   const activeEntity = isPost
-    ? postData?.find((p) => p._id === post?._id) || post
-    : reelData?.find((r) => r._id === reel?._id) || reel;
+    ? postData?.find((p) => (p?._id || p)?.toString() === (post?._id || post)?.toString()) || post
+    : reelData?.find((r) => (r?._id || r)?.toString() === (reel?._id || reel)?.toString()) || reel;
 
   const entityId = activeEntity?._id;
   const isAuthor = (activeEntity?.author?._id || activeEntity?.author)?.toString() === currentUserId;
 
+  const entityComments = activeEntity?.comments || (isPost ? post?.comments : reel?.comments) || [];
+  const [prevEntityId, setPrevEntityId] = useState(entityId);
   // Local comments state with 0ms instant optimistic updates
-  const [localComments, setLocalComments] = useState(
-    activeEntity?.comments || (isPost ? post?.comments : reel?.comments) || []
-  );
+  const [localComments, setLocalComments] = useState(entityComments);
 
-  useEffect(() => {
-    const list = activeEntity?.comments || (isPost ? post?.comments : reel?.comments);
-    if (list && Array.isArray(list)) {
-      const timer = setTimeout(() => setLocalComments(list), 0);
-      return () => clearTimeout(timer);
-    }
-  }, [activeEntity?.comments, post?.comments, reel?.comments, isPost]);
+  // Sync comments state when entity changes
+  if (entityId !== prevEntityId) {
+    setPrevEntityId(entityId);
+    setLocalComments(entityComments);
+  }
 
   // Fetch fresh populated comments directly from server when modal opens
   useEffect(() => {
@@ -136,7 +153,7 @@ export const CommentsModal = ({
   // Compute total comments count (top-level + all nested replies)
   const totalCommentsCount = useMemo(() => {
     let count = 0;
-    const list = localComments && localComments.length > 0 ? localComments : activeEntity?.comments || [];
+    const list = Array.isArray(localComments) ? localComments : (activeEntity?.comments || []);
     list.forEach((c) => {
       count += 1;
       if (c.replies && Array.isArray(c.replies)) {
@@ -149,7 +166,8 @@ export const CommentsModal = ({
   // Smart Prioritized Comments Sorting (Pinned -> Creator -> Followed Friends -> Most Liked -> Chronological)
   const sortedComments = useMemo(() => {
     const authorUserId = (activeEntity?.author?._id || activeEntity?.author)?.toString();
-    return [...localComments].sort((a, b) => {
+    const list = Array.isArray(localComments) ? localComments : [];
+    return [...list].sort((a, b) => {
       // 1. Pinned comments first
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
@@ -559,7 +577,9 @@ export const CommentsModal = ({
     }
   };
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
         <motion.div
@@ -577,8 +597,12 @@ export const CommentsModal = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.22 }}
-          className={`fixed inset-0 z-[1100] flex items-end justify-center transition-colors duration-300 ${
-            isExpanded ? "bg-black/80 backdrop-blur-md" : "bg-black/20"
+          className={`fixed inset-0 z-[1200] flex items-end justify-center transition-colors duration-300 ${
+            isExpanded
+              ? "bg-black/80 backdrop-blur-md"
+              : reel
+              ? "bg-black/20 md:bg-black/40"
+              : "bg-black/60 backdrop-blur-sm"
           }`}
         >
           <motion.div
@@ -593,10 +617,10 @@ export const CommentsModal = ({
             transition={{ type: "spring", damping: 28, stiffness: 300 }}
             drag="y"
             dragConstraints={{ top: 0 }}
-            dragElastic={{ top: 0.1, bottom: 0.3 }}
+            dragElastic={{ top: 0.12, bottom: 0.35 }}
             onDragEnd={(e, info) => {
               // Drag up to expand to full screen
-              if (info.offset.y < -40 || info.velocity.y < -250) {
+              if (info.offset.y < -35 || info.velocity.y < -200) {
                 if (!isExpanded) {
                   setIsExpanded(true);
                   onExpandChange?.(true);
@@ -604,7 +628,7 @@ export const CommentsModal = ({
                 }
               }
               // Drag down to collapse or close
-              else if (info.offset.y > 60 || info.velocity.y > 300) {
+              else if (info.offset.y > 45 || info.velocity.y > 220) {
                 if (isExpanded) {
                   setIsExpanded(false);
                   onExpandChange?.(false);
@@ -615,7 +639,7 @@ export const CommentsModal = ({
                 }
               }
             }}
-            className={`relative w-full max-w-lg md:max-w-xl bg-surface/98 backdrop-blur-2xl border-t border-x border-border rounded-t-[28px] shadow-[0_-12px_45px_rgba(0,0,0,0.45)] dark:shadow-[0_-12px_45px_rgba(0,0,0,0.85)] overflow-hidden flex flex-col transition-all duration-300 ease-out text-text ${
+            className={`relative w-full max-w-lg md:max-w-xl bg-surface/98 backdrop-blur-2xl border-t border-x border-border rounded-t-[28px] shadow-[0_-12px_45px_rgba(0,0,0,0.5)] dark:shadow-[0_-12px_45px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col transition-all duration-300 ease-out text-text ${
               isExpanded
                 ? "h-[94dvh] md:h-[90dvh]"
                 : "h-[58dvh] md:h-[56dvh] max-h-[580px]"
@@ -665,7 +689,13 @@ export const CommentsModal = ({
                 >
                   <GoHeartFill className="w-4 h-4 text-rose-500" />
                   <span>
-                    Likes ({Math.max(likers.length, activeEntity?.likes?.length || 0, (isPost ? post?.likes?.length : reel?.likes?.length) || 0)})
+                    Likes ({
+                      likers.length > 0
+                        ? likers.length
+                        : (isPost
+                            ? (activeEntity?.likes?.length ?? post?.likes?.length ?? 0)
+                            : (activeEntity?.likes?.length ?? reel?.likes?.length ?? 0))
+                    })
                   </span>
                 </button>
               </div>
@@ -732,10 +762,10 @@ export const CommentsModal = ({
               ) : (
                 filteredLikers.map((userItem, idx) => {
                   const u = userItem?.user || userItem;
-                  const isMe = u?._id?.toString() === currentUserId;
+                  const isMe = (u?._id || u)?.toString() === currentUserId;
                   return (
                     <div
-                      key={u?._id || `liker_${idx}`}
+                      key={(u?._id || u)?.toString() || `liker_${idx}`}
                       className="flex items-center justify-between py-2 border-b border-border-subtle last:border-0 hover:bg-surface-hover px-2 rounded-xl transition"
                     >
                       <div
@@ -768,8 +798,8 @@ export const CommentsModal = ({
                         </div>
                       </div>
 
-                      {!isMe && u?._id && (
-                        <FollowButton targetUserId={u._id} />
+                      {!isMe && (u?._id || u) && (
+                        <FollowButton targetUserId={u._id || u} />
                       )}
                     </div>
                   );
@@ -788,7 +818,7 @@ export const CommentsModal = ({
                   <p className="text-xs text-text-muted">Start the conversation.</p>
                 </div>
               ) : (
-                sortedComments.map((comment) => {
+                sortedComments.map((comment, commentIdx) => {
                   const commentAuthorId = (comment.author?._id || comment.author)?.toString();
                   const isCommentOwner = commentAuthorId === currentUserId;
                   const isEditing = editingCommentId === comment._id;
@@ -802,7 +832,7 @@ export const CommentsModal = ({
                   const isExpanded = Boolean(expandedReplies[comment._id]);
 
                   return (
-                    <div key={comment._id} className="pt-3.5 first:pt-0 space-y-2 group">
+                    <div key={(comment._id || comment.clientCommentId)?.toString() || `comment_${commentIdx}`} className="pt-3.5 first:pt-0 space-y-2 group">
                       {/* Top-Level Comment Row */}
                       <div
                         onDoubleClick={(e) => {
@@ -1021,7 +1051,7 @@ export const CommentsModal = ({
                           {/* Expanded Replies List */}
                           {isExpanded && (
                             <div className="space-y-3 pt-2.5 border-l-2 border-border pl-3 ml-2 mt-1">
-                              {replies.map((reply) => {
+                              {replies.map((reply, rIdx) => {
                                 const replyAuthorId = (reply.author?._id || reply.author)?.toString();
                                 const isReplyOwner = replyAuthorId === currentUserId;
                                 const replyLikes = reply.likes || [];
@@ -1032,7 +1062,7 @@ export const CommentsModal = ({
 
                                 return (
                                   <div
-                                    key={reply._id}
+                                    key={(reply._id || reply.clientReplyId)?.toString() || `reply_${rIdx}`}
                                     onDoubleClick={(e) => {
                                       e.stopPropagation();
                                       if (!isReplyLiked) {
@@ -1081,7 +1111,10 @@ export const CommentsModal = ({
                                           </span>
                                         )}
                                         {(() => {
-                                          const rawMsg = reply.message.replace(new RegExp(`^@${reply.replyingTo}\\s*`, "i"), "");
+                                          const prefix = reply.replyingTo ? `@${reply.replyingTo}` : "";
+                                          const rawMsg = prefix && reply.message?.startsWith(prefix)
+                                            ? reply.message.slice(prefix.length).trimStart()
+                                            : reply.message || "";
                                           const isLong = rawMsg.length > 100;
                                           const isExpanded = expandedComments[reply._id];
                                           if (!isLong || isExpanded) {
@@ -1267,7 +1300,8 @@ export const CommentsModal = ({
         </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 };
 

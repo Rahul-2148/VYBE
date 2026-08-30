@@ -1229,7 +1229,9 @@ export const ReelCard = ({
         onPointerLeave={handlePointerUp}
         onPointerCancel={handlePointerUp}
         onMouseEnter={() => setIsHovered(true)}
-        className="w-full md:w-[330px] lg:w-[360px] xl:w-[390px] h-[100dvh] md:h-full flex items-center justify-center border-0 md:border md:border-white/10 md:rounded-md relative overflow-hidden bg-black select-none cursor-pointer group/card md:shadow-[0_8px_30px_rgba(0,0,0,0.5)] shrink-0"
+        className={`w-full md:w-[330px] lg:w-[360px] xl:w-[390px] h-[100dvh] md:h-full flex ${
+          isAnyModalOpen ? "items-start justify-center pt-2 md:pt-3" : "items-center justify-center"
+        } border-0 md:border md:border-white/10 md:rounded-md relative overflow-hidden bg-black select-none cursor-pointer group/card md:shadow-[0_8px_30px_rgba(0,0,0,0.5)] shrink-0 transition-all duration-300`}
       >
       {/* 2X SPEED INSTAGRAM MICRO-PILL (ACTIVE WHILE HOLDING) */}
       {isFastForwarding && !is2XLocked && (
@@ -1389,7 +1391,7 @@ export const ReelCard = ({
           isAnyModalOpen
             ? commentsExpanded
               ? "opacity-0 pointer-events-none scale-75 -translate-y-8 h-[20vh]"
-              : "h-[38dvh] md:h-[42dvh] max-h-[380px] rounded-3xl scale-[0.92] md:scale-[0.96] -translate-y-1 md:-translate-y-3 shadow-[0_20px_50px_rgba(0,0,0,0.85)] z-20 cursor-pointer border border-white/15 ring-1 ring-white/10"
+              : "h-[36dvh] md:h-[40dvh] max-h-[360px] rounded-2xl md:rounded-3xl scale-[0.96] shadow-[0_16px_40px_rgba(0,0,0,0.85)] z-20 cursor-pointer border border-white/20 ring-1 ring-white/10"
             : "h-full scale-100 translate-y-0 z-0"
         }`}
       >

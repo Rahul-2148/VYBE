@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Search, Check, Send, Link2, Share2, PlusCircle, CheckCircle2, Users, Loader2 } from "lucide-react";
 import { FaWhatsapp } from "react-icons/fa";
@@ -11,6 +12,7 @@ import VerifiedBadge from "./VerifiedBadge";
 
 export const ShareSheet = ({ open, onClose, entity, entityType = "post", following = [] }) => {
   const navigate = useNavigate();
+
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [selectedConversations, setSelectedConversations] = useState([]);
@@ -22,15 +24,22 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
   const [sending, setSending] = useState(false);
   const [sentSuccess, setSentSuccess] = useState(false);
 
+  // Body scroll lock
+  useEffect(() => {
+    if (open) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [open]);
+
   // Debounced Global User Search
   useEffect(() => {
     const query = searchQuery.trim();
     if (!query) {
-      const timer = setTimeout(() => {
-        setGlobalSearchResults([]);
-        setIsSearchingGlobal(false);
-      }, 0);
-      return () => clearTimeout(timer);
+      return;
     }
 
     const timer = setTimeout(async () => {
@@ -289,7 +298,9 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
     });
   };
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -298,8 +309,8 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.22 }}
-          className="fixed inset-0 z-[600] bg-black/60 backdrop-blur-[2px] flex items-end justify-center p-0 select-none"
+          transition={{ duration: 0.2 }}
+          className="fixed inset-0 z-[1200] flex items-end justify-center p-0 bg-black/75 backdrop-blur-md select-none"
         >
           <motion.div
             key="share-sheet-content"
@@ -312,12 +323,12 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
             dragElastic={{ top: 0, bottom: 0.4 }}
             dragSnapToOrigin
             onDragEnd={(e, info) => {
-              if (info.offset.y > 80 || info.velocity.y > 400) {
+              if (info.offset.y > 70 || info.velocity.y > 350) {
                 onClose();
               }
             }}
             onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-lg md:max-w-xl bg-surface/98 backdrop-blur-2xl border-t border-x border-border rounded-t-[28px] md:rounded-t-[32px] rounded-b-none shadow-[0_-12px_45px_rgba(0,0,0,0.85)] p-5 text-text h-[64vh] md:h-[62vh] max-h-[620px] flex flex-col justify-between overflow-hidden"
+            className="relative w-full max-w-lg md:max-w-xl bg-surface/98 backdrop-blur-2xl border-t border-x border-border rounded-t-[28px] md:rounded-t-[32px] rounded-b-none shadow-[0_-12px_45px_rgba(0,0,0,0.85)] p-5 text-text h-[65vh] max-h-[620px] flex flex-col justify-between overflow-hidden"
           >
           {/* Header Bar */}
           <div className="flex flex-col items-center gap-2 shrink-0">
@@ -542,7 +553,8 @@ export const ShareSheet = ({ open, onClose, entity, entityType = "post", followi
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 };
 

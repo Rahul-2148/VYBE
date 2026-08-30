@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   Smartphone,
@@ -58,6 +59,16 @@ export const ReelOptionsModal = ({
   onToggleComments,
   commentsDisabled,
 }) => {
+  // Body scroll lock
+  useEffect(() => {
+    if (isOpen) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [isOpen]);
   const [activeSubView, setActiveSubView] = useState("main"); // "main" | "speed" | "qr" | "why" | "report"
   const [reportReason, setReportReason] = useState("");
   const [reportDetails, setReportDetails] = useState("");
@@ -129,9 +140,9 @@ export const ReelOptionsModal = ({
     { id: "other", label: "Other issue" },
   ];
 
-  const speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+  if (typeof document === "undefined") return null;
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {isOpen && reel && (
         <motion.div
@@ -711,7 +722,8 @@ export const ReelOptionsModal = ({
           />
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 };
 

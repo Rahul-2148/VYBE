@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Repeat, X, MessageSquareQuote, Video, Send, Check, Loader2, Sparkles } from "lucide-react";
 import { snackbar } from "../lib/snackbar";
@@ -18,6 +19,17 @@ export const ReelReshareModal = ({
   const [showThoughtsInput, setShowThoughtsInput] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isReshared, setIsReshared] = useState(false);
+
+  // Body scroll lock
+  useEffect(() => {
+    if (isOpen) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [isOpen]);
 
   const handleInstantReshare = async () => {
     try {
@@ -45,7 +57,9 @@ export const ReelReshareModal = ({
     }
   };
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <AnimatePresence>
       {isOpen && reel && (
         <motion.div
@@ -273,7 +287,8 @@ export const ReelReshareModal = ({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 };
 
