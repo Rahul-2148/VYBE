@@ -606,7 +606,7 @@ const Profile = () => {
         </div>
       </div>
 
-      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-5 pb-24 sm:px-6 lg:px-8">
+      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-5 pb-32 md:pb-12 sm:px-6 lg:px-8">
         {loading ? (
           <SectionSkeleton />
         ) : (

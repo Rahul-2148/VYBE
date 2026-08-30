@@ -508,7 +508,7 @@ export const Messages = () => {
         </div>
 
         {/* Conversations Scroll List */}
-        <div className="flex-1 overflow-y-auto hide-scrollbar">
+        <div className="flex-1 overflow-y-auto hide-scrollbar pb-20 md:pb-4">
           {/* Archived chats toggle */}
           {archivedCount > 0 && !showArchived && activeTab === "primary" && (
             <button

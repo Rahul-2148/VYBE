@@ -191,18 +191,25 @@ export function ThemeProvider({ children, defaultTheme = "system" }) {
       const w = window.innerWidth || (typeof document !== "undefined" && document.documentElement.clientWidth) || 390;
       const h = window.innerHeight || (typeof document !== "undefined" && document.documentElement.clientHeight) || 844;
 
-      const isTargetLight =
-        nextTheme === "light" || (nextTheme === "system" && getSystemTheme() === "light");
-
       let x, y;
-      if (isTargetLight) {
-        // DAY THEME (Light): Sweeps from Bottom-Left ➔ Top-Right
-        x = 0;
-        y = h;
+      if (event && typeof event.clientX === "number" && (event.clientX !== 0 || event.clientY !== 0)) {
+        x = event.clientX;
+        y = event.clientY;
+      } else if (event?.touches && event.touches[0]) {
+        x = event.touches[0].clientX;
+        y = event.touches[0].clientY;
+      } else if (event?.currentTarget && typeof event.currentTarget.getBoundingClientRect === "function") {
+        const rect = event.currentTarget.getBoundingClientRect();
+        x = rect.left + rect.width / 2;
+        y = rect.top + rect.height / 2;
+      } else if (event?.target && typeof event.target.getBoundingClientRect === "function") {
+        const rect = event.target.getBoundingClientRect();
+        x = rect.left + rect.width / 2;
+        y = rect.top + rect.height / 2;
       } else {
-        // NIGHT THEME (Dark): Sweeps from Top-Right ➔ Bottom-Left
-        x = w;
-        y = 0;
+        // Fallback: screen center
+        x = w / 2;
+        y = h / 2;
       }
 
       const endRadius = Math.hypot(

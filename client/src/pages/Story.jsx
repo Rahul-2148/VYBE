@@ -49,7 +49,7 @@ const Story = () => {
 
   if (loading) {
     return (
-      <div className="w-full h-screen bg-black flex flex-col items-center justify-center gap-3 text-white">
+      <div className="w-full h-[100dvh] bg-black flex flex-col items-center justify-center gap-3 text-white">
         <Loader2 className="w-8 h-8 animate-spin text-rose-500" />
         <p className="text-xs text-zinc-400 font-medium">Loading stories...</p>
       </div>
@@ -57,8 +57,12 @@ const Story = () => {
   }
 
   return (
-    <div className="w-full h-[100vh] bg-black flex justify-center items-center overflow-hidden select-none">
-      <StoryCard />
+    <div className="w-full h-[100dvh] bg-black flex justify-center items-center overflow-hidden select-none">
+      <StoryCard
+        feed={state?.stories || feed}
+        initialIndex={state?.initialIndex || 0}
+        onClose={() => navigate("/")}
+      />
     </div>
   );
 };

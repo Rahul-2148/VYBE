@@ -1520,7 +1520,7 @@ export const ReelCard = ({
       )}
 
       {/* PROGRESS BAR */}
-      <div className="absolute bottom-0 left-0 w-full h-1 bg-surface z-50">
+      <div className="absolute bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:bottom-0 left-0 w-full h-1 bg-surface z-40">
         <div className="h-full bg-rose-500 transition-all duration-150 ease-linear" style={{ width: `${progress}%` }} />
       </div>
 
@@ -1531,7 +1531,7 @@ export const ReelCard = ({
           onPointerDown={(e) => e.stopPropagation()}
           onTouchStart={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
-          className="flex md:hidden w-full absolute bottom-0 inset-x-0 px-3.5 pb-4 pt-12 flex justify-between items-end z-40 bg-gradient-to-t from-black/95 via-black/50 to-transparent pointer-events-none"
+          className="flex md:hidden w-full absolute bottom-0 inset-x-0 px-3.5 pb-[calc(4.25rem+env(safe-area-inset-bottom))] pt-12 flex justify-between items-end z-30 bg-gradient-to-t from-black/95 via-black/50 to-transparent pointer-events-none"
         >
           <div
             data-interactive="true"

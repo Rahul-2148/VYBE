@@ -192,7 +192,7 @@ export const NotificationsPage = () => {
   const earlierNotifs = notifications.filter((n) => !moment(n.createdAt).isSame(moment(), "day"));
 
   return (
-    <div className="min-h-screen bg-bg text-text p-4 md:p-8 max-w-3xl mx-auto space-y-6 select-none">
+    <div className="min-h-screen bg-bg text-text p-4 md:p-8 pb-28 md:pb-8 max-w-3xl mx-auto space-y-6 select-none">
       <div className="flex items-center justify-between border-b border-border pb-4">
         <div className="flex items-center gap-4">
           <button 

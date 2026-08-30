@@ -335,7 +335,7 @@ export const Explore = () => {
       </div>
 
       {/* Content Area */}
-      <div className="max-w-6xl mx-auto px-1 sm:px-2 pb-20 md:pb-8">
+      <div className="max-w-6xl mx-auto px-1 sm:px-2 pb-32 md:pb-8">
         {/* LIVE NOW DISCOVERY REEL */}
         {activeLives.length > 0 && (
           <div className="my-3 p-3 bg-gradient-to-r from-rose-950/40 via-purple-950/30 to-pink-950/40 border border-rose-500/30 rounded-3xl space-y-2.5 shadow-lg">

@@ -6,6 +6,7 @@ import { useNavigate, useLocation, useSearchParams, useParams } from "react-rout
 import ReelCard from "../components/ReelCard";
 import ReelPreloader from "../components/ReelPreloader";
 import LeftHome from "../components/LeftHome";
+import Navbar from "../components/Navbar";
 import RenderErrorBoundary from "../components/RenderErrorBoundary";
 import PullToRefresh from "../components/PullToRefresh";
 import api from "../lib/axios";
@@ -292,6 +293,9 @@ export const Reels = () => {
               ))}
             </PullToRefresh>
           )}
+
+          {/* Mobile Bottom Navigation Bar */}
+          <Navbar />
         </div>
       </div>
     </div>

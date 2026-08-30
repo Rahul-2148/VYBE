@@ -162,13 +162,14 @@ const Feed = () => {
   }, [_refetchFeed]);
 
   return (
-    <PullToRefresh
-      onRefresh={handleRefreshFeed}
-      isRefreshing={isFeedFetching}
-      className="w-full lg:w-[48%] xl:w-[44%] h-full bg-bg text-text border-x border-border/80 hide-scrollbar flex flex-col items-center shrink-0 pt-4 lg:pt-8"
-    >
-      {/* Mobile Top Header (Exact App Layout) */}
-      <div className="w-full h-14 flex items-center justify-between px-3 lg:hidden border-b border-border/80 sticky top-0 z-50 bg-bg/95 backdrop-blur-md select-none">
+    <div className="relative w-full lg:w-[48%] xl:w-[44%] h-full bg-bg text-text border-x border-border/80 flex flex-col items-center shrink-0 overflow-hidden">
+      <PullToRefresh
+        onRefresh={handleRefreshFeed}
+        isRefreshing={isFeedFetching}
+        className="w-full h-full hide-scrollbar flex flex-col items-center pt-4 lg:pt-8 pb-20 md:pb-6 overflow-y-auto"
+      >
+        {/* Mobile Top Header (Exact App Layout) */}
+        <div className="w-full h-14 flex items-center justify-between px-3 lg:hidden border-b border-border/80 sticky top-0 z-40 bg-bg/95 backdrop-blur-md select-none shrink-0">
         {/* Left: Create (+) */}
         <button
           onClick={() => navigate("/upload")}
@@ -358,10 +359,11 @@ const Feed = () => {
           onClose={() => setShowCloseFriendsModal(false)}
         />
       )}
+      </PullToRefresh>
 
       {/* Navigation Bar (Mobile / Tablet bottom dock) */}
       <Navbar />
-    </PullToRefresh>
+    </div>
   );
 };
 
