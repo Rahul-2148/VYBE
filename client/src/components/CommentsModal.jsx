@@ -601,7 +601,7 @@ export const CommentsModal = ({
             isExpanded
               ? "bg-black/80 backdrop-blur-md"
               : reel
-              ? "bg-black/20 md:bg-black/40"
+              ? "bg-transparent md:bg-black/40"
               : "bg-black/60 backdrop-blur-sm"
           }`}
         >
@@ -642,7 +642,9 @@ export const CommentsModal = ({
             className={`relative w-full max-w-lg md:max-w-xl bg-surface/98 backdrop-blur-2xl border-t border-x border-border rounded-t-[28px] shadow-[0_-12px_45px_rgba(0,0,0,0.5)] dark:shadow-[0_-12px_45px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col transition-all duration-300 ease-out text-text ${
               isExpanded
                 ? "h-[94dvh] md:h-[90dvh]"
-                : "h-[58dvh] md:h-[56dvh] max-h-[580px]"
+                : reel
+                ? "h-[60dvh] md:h-[56dvh] max-h-[600px]"
+                : "h-[64dvh] md:h-[60dvh] max-h-[640px]"
             }`}
           >
             {/* Instagram Top Drag Notch / Swipe Handle */}
@@ -731,7 +733,7 @@ export const CommentsModal = ({
 
           {/* Modal Body: Comments Tab vs Likes Tab */}
           {activeTab === "likes" ? (
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar">
+            <div className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-3 hide-scrollbar">
               {/* Likers Search */}
               <div className="relative mb-2">
                 <Search className="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2" />
@@ -807,7 +809,7 @@ export const CommentsModal = ({
               )}
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 divide-y divide-border-subtle hide-scrollbar">
+            <div className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-4 divide-y divide-border-subtle hide-scrollbar">
               {/* Comments List */}
               {sortedComments.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-20 text-text-secondary text-center gap-2.5">

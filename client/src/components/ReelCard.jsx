@@ -21,6 +21,7 @@ import {
   Smartphone,
   Loader2,
   MapPin,
+  Maximize2,
 } from "lucide-react";
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -32,7 +33,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { ClipLoader } from "react-spinners";
 import dp from "../assets/dp3.png";
-import { setReelData } from "../redux/features/reelSlice";
+import { setReelData, setReelsMuted, setIsModalOpen } from "../redux/features/reelSlice";
 import { setUserData } from "../redux/features/userSlice";
 import FollowButton from "./FollowButton";
 import ShareSheet from "./ShareSheet";
@@ -64,6 +65,7 @@ export const ReelCard = ({
   const { userData } = useSelector((state) => state.user);
   const reelState = useSelector((state) => state.reel);
   const reelData = reelState?.reelData || [];
+  const isMuted = useSelector((state) => state.reel?.isMuted ?? false);
 
   const containerRef = useRef(null);
   const videoRef = useRef(null);
@@ -74,9 +76,6 @@ export const ReelCard = ({
   const pressTimerRef = useRef(null);
   const hasFastForwardedRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(true);
-  const [isMuted, setIsMuted] = useState(() => {
-    return window.__vybe_reels_muted !== undefined ? window.__vybe_reels_muted : true;
-  });
   const [showVolumeAnim, setShowVolumeAnim] = useState(false);
 
   // Attached Audio Track URL
@@ -240,6 +239,17 @@ export const ReelCard = ({
     showDeleteModal ||
     showAIInfoModal
   );
+
+  useEffect(() => {
+    if (isActive) {
+      dispatch(setIsModalOpen(isAnyModalOpen));
+    }
+    return () => {
+      if (isActive && isAnyModalOpen) {
+        dispatch(setIsModalOpen(false));
+      }
+    };
+  }, [isAnyModalOpen, isActive, dispatch]);
 
   const handleCloseAllModals = () => {
     setShowComments(false);
@@ -506,18 +516,25 @@ export const ReelCard = ({
   };
 
   const toggleMute = useCallback((e) => {
-    if (e) e.stopPropagation();
-    setIsMuted((prev) => {
-      const nextMuted = !prev;
-      window.__vybe_reels_muted = nextMuted;
-      if (videoRef.current) videoRef.current.muted = nextMuted;
-      if (audioRef.current) audioRef.current.muted = nextMuted;
-      return nextMuted;
-    });
+    if (e) e.stopPropagation?.();
+    const nextMuted = !isMuted;
+    dispatch(setReelsMuted(nextMuted));
+    if (videoRef.current) videoRef.current.muted = nextMuted;
+    if (audioRef.current) audioRef.current.muted = nextMuted;
     triggerHaptic("light");
     setShowVolumeAnim(true);
     setTimeout(() => setShowVolumeAnim(false), 650);
-  }, []);
+  }, [dispatch, isMuted]);
+
+  // Sync muted property whenever global isMuted changes
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = isMuted;
+    }
+    if (audioRef.current) {
+      audioRef.current.muted = isMuted;
+    }
+  }, [isMuted]);
 
   // Video Playing / Muting / Audio attachment Effects & Behavioral Dwell Tracking
   useEffect(() => {
@@ -952,8 +969,8 @@ export const ReelCard = ({
       // Set a timer to check if single, double, or triple tap
       tapTimerRef.current = setTimeout(() => {
         if (tapCountRef.current === 1) {
-          // Single Tap -> Toggle Play / Pause
-          handleTogglePlayPause();
+          // Single Tap -> Toggle Sound Mute / Unmute (Instagram style)
+          toggleMute();
         } else if (tapCountRef.current === 2) {
           // Double Tap -> Force Like & Burst Heart
           forceDoubleTapLike();
@@ -1049,7 +1066,14 @@ export const ReelCard = ({
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      if (
+        isAnyModalOpen ||
+        e.target.tagName === "INPUT" ||
+        e.target.tagName === "TEXTAREA" ||
+        e.target.isContentEditable
+      ) {
+        return;
+      }
 
       if (e.code === "Space") {
         e.preventDefault();
@@ -1075,7 +1099,7 @@ export const ReelCard = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPlaying, showComments, showViewers, showShare, onNext, onPrev, isMuted, toggleMute]);
+  }, [isPlaying, isAnyModalOpen, onNext, onPrev, isMuted, toggleMute]);
 
   if (!currentItem || !currentItem._id) return null;
 
@@ -1230,7 +1254,7 @@ export const ReelCard = ({
         onPointerCancel={handlePointerUp}
         onMouseEnter={() => setIsHovered(true)}
         className={`w-full md:w-[330px] lg:w-[360px] xl:w-[390px] h-[100dvh] md:h-full flex ${
-          isAnyModalOpen ? "items-start justify-center pt-2 md:pt-3" : "items-center justify-center"
+          isAnyModalOpen ? "flex-col justify-start items-center" : "items-center justify-center"
         } border-0 md:border md:border-white/10 md:rounded-md relative overflow-hidden bg-black select-none cursor-pointer group/card md:shadow-[0_8px_30px_rgba(0,0,0,0.5)] shrink-0 transition-all duration-300`}
       >
       {/* 2X SPEED INSTAGRAM MICRO-PILL (ACTIVE WHILE HOLDING) */}
@@ -1379,7 +1403,7 @@ export const ReelCard = ({
         </div>
       </div>
 
-      {/* VIDEO PLAYER WITH SMOOTH DRAWER TRANSITION & GESTURES (INSTAGRAM REEL SHRINK TO TOP) */}
+      {/* VIDEO PLAYER (MAINTAINS 9:16 PROPORTIONS - PURE INSTAGRAM BEHAVIOR) */}
       <div
         onClick={(e) => {
           if (isAnyModalOpen) {
@@ -1387,49 +1411,75 @@ export const ReelCard = ({
             handleCloseAllModals();
           }
         }}
-        className={`w-full transition-all duration-300 ease-out flex items-center justify-center relative overflow-hidden ${
+        className={`w-full flex items-center justify-center transition-all duration-300 ease-out ${
           isAnyModalOpen
             ? commentsExpanded
-              ? "opacity-0 pointer-events-none scale-75 -translate-y-8 h-[20vh]"
-              : "h-[36dvh] md:h-[40dvh] max-h-[360px] rounded-2xl md:rounded-3xl scale-[0.96] shadow-[0_16px_40px_rgba(0,0,0,0.85)] z-20 cursor-pointer border border-white/20 ring-1 ring-white/10"
-            : "h-full scale-100 translate-y-0 z-0"
+              ? "opacity-0 pointer-events-none h-0"
+              : "h-[38dvh] md:h-[42dvh] pt-2 pb-1 px-2 z-30 cursor-pointer"
+            : "h-full p-0 z-0"
         }`}
       >
-        <video
-          onPlay={handlePlay}
-          onPause={handlePause}
-          ref={videoRef}
-          preload={isActive ? "auto" : "metadata"}
-          muted={isMuted}
-          onEnded={(e) => {
-            if (autoScroll && onNext) {
-              if (!endedTriggeredRef.current) {
-                endedTriggeredRef.current = true;
-                onNext();
-              }
-            } else {
-              e.target.currentTime = 0;
-              if (isActive) {
-                e.target.play().catch(() => null);
-              }
-            }
-          }}
-          playsInline
-          src={getOptimizedMediaUrl(currentItem?.media?.url, "video")}
-          className={`w-full h-full object-cover select-none pointer-events-none transition-all duration-300 ${
-            isFastForwarding ? "brightness-110" : ""
+        <div
+          className={`relative transition-all duration-300 ease-out overflow-hidden flex items-center justify-center ${
+            isAnyModalOpen
+              ? "h-full aspect-[9/16] rounded-2xl md:rounded-3xl shadow-[0_16px_40px_rgba(0,0,0,0.9)] ring-1 ring-white/20 bg-black"
+              : "w-full h-full rounded-none"
           }`}
-          onTimeUpdate={handleTimeUpdate}
-        />
+        >
+          <video
+            onPlay={handlePlay}
+            onPause={handlePause}
+            ref={videoRef}
+            preload={isActive ? "auto" : "metadata"}
+            muted={isMuted}
+            onEnded={(e) => {
+              if (autoScroll && onNext) {
+                if (!endedTriggeredRef.current) {
+                  endedTriggeredRef.current = true;
+                  onNext();
+                }
+              } else {
+                e.target.currentTime = 0;
+                if (isActive) {
+                  e.target.play().catch(() => null);
+                }
+              }
+            }}
+            playsInline
+            src={getOptimizedMediaUrl(currentItem?.media?.url, "video")}
+            className={`w-full h-full object-cover select-none pointer-events-none transition-all duration-300 ${
+              isFastForwarding ? "brightness-110" : ""
+            }`}
+            onTimeUpdate={handleTimeUpdate}
+          />
 
-        {/* TAP TO EXPAND BADGE WHEN ANY MODAL OPEN */}
-        {isAnyModalOpen && (
-          <div className="absolute inset-0 bg-black/10 hover:bg-black/25 transition-colors flex items-center justify-center pointer-events-auto">
-            <span className="text-[11px] font-bold text-white/90 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full shadow-lg pointer-events-none">
-              Tap video to expand ✕
-            </span>
-          </div>
-        )}
+          {/* Mini creator header & expand icon when in split view */}
+          {isAnyModalOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18 }}
+              className="absolute top-2.5 inset-x-2.5 flex items-center justify-between pointer-events-none z-30"
+            >
+              <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-2 py-1 rounded-full border border-white/15 shadow-md">
+                <img
+                  src={currentItem?.author?.profileImage?.url || dp}
+                  alt=""
+                  className="w-4 h-4 rounded-full object-cover"
+                />
+                <span className="text-[10px] font-bold text-white max-w-[90px] truncate">
+                  @{currentItem?.author?.userName}
+                </span>
+                {currentItem?.author?.isVerified && <VerifiedBadge size="xs" />}
+              </div>
+
+              <div className="bg-black/60 backdrop-blur-md p-1.5 rounded-full border border-white/15 text-white/90 shadow-md">
+                <Maximize2 className="w-3 h-3" />
+              </div>
+            </motion.div>
+          )}
+        </div>
       </div>
 
       {/* SYNCHRONIZED AUDIO TRACK (Background / Music) */}
@@ -1478,14 +1528,14 @@ export const ReelCard = ({
         )}
       </AnimatePresence>
 
-      {/* CONTROLS (CC SUBTITLES & VOLUME) */}
+      {/* DESKTOP CONTROLS (CC SUBTITLES & VOLUME - TOP RIGHT OF VIDEO CARD) */}
       {!isFastForwarding && (
         <div
           data-interactive="true"
           onPointerDown={(e) => e.stopPropagation()}
           onTouchStart={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
-          className="absolute top-4 right-4 md:top-auto md:bottom-4 z-[100] flex items-center gap-2 pointer-events-auto"
+          className="hidden md:flex absolute top-4 right-4 z-[100] items-center gap-2 pointer-events-auto"
         >
           {/* Quick 1-Tap CC Toggle Button */}
           <button
@@ -1511,7 +1561,7 @@ export const ReelCard = ({
             onTouchStart={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
-              toggleMute();
+              toggleMute(e);
             }}
             className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-white hover:bg-black/80 active:scale-90 transition-all flex items-center justify-center cursor-pointer shadow-lg"
             title={isMuted ? "Unmute" : "Mute"}
@@ -1522,18 +1572,22 @@ export const ReelCard = ({
       )}
 
       {/* PROGRESS BAR */}
-      <div className="absolute bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:bottom-0 left-0 w-full h-1 bg-surface z-40">
+      <div className={`absolute bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:bottom-0 left-0 w-full h-1 bg-surface z-40 transition-opacity duration-200 ${
+        isAnyModalOpen ? "opacity-0 pointer-events-none" : "opacity-100"
+      }`}>
         <div className="h-full bg-rose-500 transition-all duration-150 ease-linear" style={{ width: `${progress}%` }} />
       </div>
 
       {/* MOBILE-ONLY BOTTOM INFO OVERLAY (INSIDE VIDEO CARD) */}
-      {!isFastForwarding && !isAnyModalOpen && (
+      {!isFastForwarding && (
         <div
           data-interactive="true"
           onPointerDown={(e) => e.stopPropagation()}
           onTouchStart={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
-          className="flex md:hidden w-full absolute bottom-0 inset-x-0 px-3.5 pb-[calc(4.25rem+env(safe-area-inset-bottom))] pt-12 flex justify-between items-end z-30 bg-gradient-to-t from-black/95 via-black/50 to-transparent pointer-events-none"
+          className={`flex md:hidden w-full absolute bottom-0 inset-x-0 px-3.5 pb-[calc(4.25rem+env(safe-area-inset-bottom))] pt-12 flex justify-between items-end z-30 bg-gradient-to-t from-black/95 via-black/50 to-transparent pointer-events-none transition-opacity duration-200 ${
+            isAnyModalOpen ? "opacity-0 pointer-events-none" : "opacity-100 pointer-events-auto"
+          }`}
         >
           <div
             data-interactive="true"
@@ -1747,6 +1801,56 @@ export const ReelCard = ({
             onClick={(e) => e.stopPropagation()}
             className="flex md:hidden flex-col items-center gap-2.5 text-white pointer-events-auto pb-1"
           >
+            {/* Audio Mute / Unmute Button (Instagram Mobile Ergonomics - Right at Thumb) */}
+            <div
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              className="flex flex-col items-center mb-0.5"
+            >
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleMute(e);
+                }}
+                className="w-8 h-8 rounded-full bg-black/50 backdrop-blur-md border border-white/20 text-white flex items-center justify-center cursor-pointer active:scale-75 transition-transform shadow-md"
+                title={isMuted ? "Unmute sound" : "Mute sound"}
+              >
+                {isMuted ? (
+                  <VolumeX className="w-4 h-4 text-white/90" />
+                ) : (
+                  <Volume2 className="w-4 h-4 text-white" />
+                )}
+              </button>
+            </div>
+
+            {/* Quick 1-Tap CC Toggle Button (Mobile) */}
+            <div
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              className="flex flex-col items-center mb-0.5"
+            >
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleCaptions();
+                }}
+                className={`w-8 h-6 rounded-full border text-[10px] font-black transition-all flex items-center justify-center cursor-pointer shadow-md active:scale-75 ${
+                  showCaptions
+                    ? "bg-white text-black border-white shadow-white/20"
+                    : "bg-black/50 backdrop-blur-md border-white/20 text-white/80"
+                }`}
+                title={showCaptions ? "Turn off subtitles (CC)" : "Turn on subtitles (CC)"}
+              >
+                <span>CC</span>
+              </button>
+            </div>
+
             {/* Like */}
             <div
               onPointerDown={(e) => e.stopPropagation()}

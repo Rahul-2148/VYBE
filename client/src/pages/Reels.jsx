@@ -145,10 +145,13 @@ export const Reels = () => {
     });
   }, [reelData?.length]);
 
+  const isModalOpen = useSelector((state) => state.reel?.isModalOpen);
+
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (
+        isModalOpen ||
         document.activeElement?.tagName === "INPUT" ||
         document.activeElement?.tagName === "TEXTAREA"
       ) {
@@ -164,7 +167,7 @@ export const Reels = () => {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentIndex, reelData, handleNext, handlePrev]);
+  }, [currentIndex, reelData, handleNext, handlePrev, isModalOpen]);
 
   return (
     <div className="w-full h-[100dvh] bg-bg text-text overflow-hidden flex relative select-none">
@@ -274,8 +277,13 @@ export const Reels = () => {
               onScroll={handleScroll}
               onRefresh={handleRefreshReels}
               isRefreshing={isReelsFetching}
+              disabled={isModalOpen || isReelsFetching}
               indicatorTop={64}
-              className="h-[100dvh] w-full flex flex-col items-center overflow-y-scroll snap-y snap-mandatory scrollbar-none"
+              className={`h-[100dvh] w-full flex flex-col items-center scrollbar-none ${
+                isModalOpen
+                  ? "overflow-y-hidden"
+                  : "overflow-y-scroll snap-y snap-mandatory"
+              }`}
             >
               {reelData.map((reel, index) => (
                 <div key={reel._id || index} className="h-[100dvh] w-full flex items-center justify-center snap-start snap-always shrink-0 py-0 md:py-4">
