@@ -9,29 +9,27 @@ import {
   Volume2,
   VolumeX,
   Sparkles,
-  MessageCircle,
-  X,
   Play,
   Pause,
   Zap,
-  BadgeCheck,
   Trash2,
   MoreVertical,
   MoreHorizontal,
-  Smartphone,
   Loader2,
   MapPin,
   Maximize2,
+  Lock,
+  Unlock,
+  ChevronDown,
+  FastForward,
 } from "lucide-react";
 
 import { motion, AnimatePresence } from "framer-motion";
 import { snackbar } from "../lib/snackbar";
 import { GoHeart, GoHeartFill } from "react-icons/go";
-import { IoSendSharp } from "react-icons/io5";
 import { MdOutlineComment } from "react-icons/md";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import { ClipLoader } from "react-spinners";
 import dp from "../assets/dp3.png";
 import { setReelData, setReelsMuted, setIsModalOpen } from "../redux/features/reelSlice";
 import { setUserData } from "../redux/features/userSlice";
@@ -125,7 +123,14 @@ export const ReelCard = ({
   const [isFastForwarding, setIsFastForwarding] = useState(false);
   const [is2XLocked, setIs2XLocked] = useState(false);
   const [isNearLockZone, setIsNearLockZone] = useState(false);
+  const [isNearUnlockZone, setIsNearUnlockZone] = useState(false);
+  const [speedSnackbar, setSpeedSnackbar] = useState(null); // { text, icon, key }
+  const speedSnackbarTimerRef = useRef(null);
   const touchStartYRef = useRef(null);
+  const touchStartXRef = useRef(null);
+  const hasMovedRef = useRef(false);
+  const unlockGestureActiveRef = useRef(false);
+  const mainCardRef = useRef(null);
 
   // Tap Gesture Counters (Single, Double, Triple Tap)
   const tapCountRef = useRef(0);
@@ -138,8 +143,6 @@ export const ReelCard = ({
   const [showRemixModal, setShowRemixModal] = useState(false);
   const [showViewers, setShowViewers] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showShareModal, setShowShareModal] = useState(false);
   const dwellStartRef = useRef(null);
   const [showAIInfoModal, setShowAIInfoModal] = useState(false);
   const [showLikersModal, setShowLikersModal] = useState(false);
@@ -150,24 +153,7 @@ export const ReelCard = ({
   const [scrubTime, setScrubTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
-  const [showCenterPlayIcon, setShowCenterPlayIcon] = useState(false);
   const [isCaptionExpanded, setIsCaptionExpanded] = useState(false);
-
-  const toggleCaptions = async () => {
-    const next = !showCaptions;
-    setShowCaptions(next);
-    triggerHaptic("light");
-    if (next && reelCaptions.length === 0 && currentItem?._id) {
-      try {
-        const res = await api.get(`/reel/transcript/${currentItem._id}`);
-        if (res.data?.success && res.data.captions) {
-          setReelCaptions(res.data.captions);
-        }
-      } catch {
-        // fallback
-      }
-    }
-  };
   const playFadeTimeoutRef = useRef(null);
   const seekBarRef = useRef(null);
   const viewersRef = useRef(null);
@@ -185,6 +171,7 @@ export const ReelCard = ({
 
   // Sync speed on new reel navigation
   useEffect(() => {
+    if (!currentItem?._id) return;
     let timer;
     if (typeof localStorage !== "undefined") {
       const applyAll = localStorage.getItem("vybe_reels_speed_apply_all") === "true";
@@ -386,15 +373,18 @@ export const ReelCard = ({
   const handleTogglePlayPause = () => {
     if (!videoRef.current) return;
     triggerHaptic("light");
+
+    // Show brief transient pulse animation on every toggle
+    setShowPlayPauseAnim(true);
+    if (playFadeTimeoutRef.current) clearTimeout(playFadeTimeoutRef.current);
+    playFadeTimeoutRef.current = setTimeout(() => {
+      setShowPlayPauseAnim(false);
+    }, 550);
+
     if (isPlaying) {
       videoRef.current.pause();
       if (audioRef.current) audioRef.current.pause();
       setIsPlaying(false);
-      setShowCenterPlayIcon(true);
-      if (playFadeTimeoutRef.current) clearTimeout(playFadeTimeoutRef.current);
-      playFadeTimeoutRef.current = setTimeout(() => {
-        setShowCenterPlayIcon(false);
-      }, 700);
     } else {
       videoRef.current.play().catch(() => null);
       if (audioRef.current && attachedAudioUrl) {
@@ -402,9 +392,6 @@ export const ReelCard = ({
         audioRef.current.play().catch(() => null);
       }
       setIsPlaying(true);
-      setShowCenterPlayIcon(false);
-      setShowPlayPauseAnim(true);
-      setTimeout(() => setShowPlayPauseAnim(false), 450);
     }
   };
 
@@ -421,15 +408,18 @@ export const ReelCard = ({
     }
   };
 
-  const handleSeekPointerDown = (e) => {
-    e.stopPropagation();
+  const handleSeekStart = (clientX) => {
     setIsScrubbing(true);
     triggerHaptic("selection");
-    const clientX = e.clientX ?? (e.touches ? e.touches[0].clientX : 0);
     handleSeek(clientX);
 
     const onPointerMove = (moveEvent) => {
-      const moveX = moveEvent.clientX ?? (moveEvent.touches ? moveEvent.touches[0].clientX : 0);
+      const moveX =
+        moveEvent.clientX !== undefined
+          ? moveEvent.clientX
+          : moveEvent.touches && moveEvent.touches[0]
+          ? moveEvent.touches[0].clientX
+          : 0;
       handleSeek(moveX);
     };
 
@@ -437,14 +427,18 @@ export const ReelCard = ({
       setIsScrubbing(false);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
       window.removeEventListener("touchmove", onPointerMove);
       window.removeEventListener("touchend", onPointerUp);
+      window.removeEventListener("touchcancel", onPointerUp);
     };
 
-    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
     window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("touchmove", onPointerMove);
+    window.addEventListener("pointercancel", onPointerUp);
+    window.addEventListener("touchmove", onPointerMove, { passive: true });
     window.addEventListener("touchend", onPointerUp);
+    window.addEventListener("touchcancel", onPointerUp);
   };
 
   const handleConfirmDeleteReel = async () => {
@@ -545,6 +539,7 @@ export const ReelCard = ({
 
     if (isActive) {
       dwellStartRef.current = Date.now();
+      incrementView();
       if (videoEl) {
         videoEl.muted = isMuted;
         videoEl.playbackRate = 1.0;
@@ -554,7 +549,6 @@ export const ReelCard = ({
             .then(() => {
               if (!isCancelled) {
                 setIsPlaying((prev) => (!prev ? true : prev));
-                setHasLoadedOnce(true);
               }
             })
             .catch(() => {
@@ -581,6 +575,9 @@ export const ReelCard = ({
         setIsPlaying(false);
         setIsFastForwarding(false);
         setIs2XLocked(false);
+        setIsNearLockZone(false);
+        setIsNearUnlockZone(false);
+        setSpeedSnackbar(null);
       }, 0);
 
       if (dwellStartRef.current && currentItem?._id) {
@@ -650,16 +647,6 @@ export const ReelCard = ({
     }
   }, [currentItem, userData, isSaved]);
 
-  useEffect(() => {
-    const rate = isFastForwarding || is2XLocked ? 2.0 : playbackSpeed;
-    if (videoRef.current) {
-      videoRef.current.playbackRate = rate;
-    }
-    if (audioRef.current) {
-      audioRef.current.playbackRate = rate;
-    }
-  }, [playbackSpeed, isFastForwarding, is2XLocked, isActive]);
-
   // Auto-Fetch Real-Time Timed Captions for Current Reel Audio
   useEffect(() => {
     if (isActive && showCaptions && currentItem?._id) {
@@ -686,6 +673,43 @@ export const ReelCard = ({
       window.removeEventListener("vybe_captions_change", handleGlobalCaptionsChange);
     };
   }, []);
+
+  // Non-passive touch listener to prevent feed scroll during 2X holding or slide-to-unlock gesture
+  useEffect(() => {
+    const el = mainCardRef.current;
+    if (!el) return;
+
+    let startY = 0;
+
+    const handleTouchStartNative = (e) => {
+      startY = e.touches[0]?.clientY || 0;
+    };
+
+    const handleTouchMoveNative = (e) => {
+      const currentY = e.touches[0]?.clientY || 0;
+      const deltaY = currentY - startY;
+
+      // While holding for 2X (fast forwarding), prevent page scroll so slide-down-to-lock works
+      if (isFastForwarding) {
+        if (e.cancelable) e.preventDefault();
+        return;
+      }
+
+      // While 2X is locked, only prevent page scroll if sliding DOWN to unlock (deltaY > 8)
+      // Allow swipe UP (deltaY < -8) so user can still scroll to next reel!
+      if (is2XLocked && deltaY > 8) {
+        if (e.cancelable) e.preventDefault();
+      }
+    };
+
+    el.addEventListener("touchstart", handleTouchStartNative, { passive: true });
+    el.addEventListener("touchmove", handleTouchMoveNative, { passive: false });
+
+    return () => {
+      el.removeEventListener("touchstart", handleTouchStartNative);
+      el.removeEventListener("touchmove", handleTouchMoveNative);
+    };
+  }, [isFastForwarding, is2XLocked]);
 
   const handleToggleCaptions = () => {
     setShowCaptions((prev) => {
@@ -939,7 +963,8 @@ export const ReelCard = ({
     }
   };
 
-  // Tap Gesture Handler: Single Tap (Play / Pause), Double Tap (Like), Triple Tap (Comments Modal)
+  // Tap Gesture Handler: Single Tap (Play/Pause), Double Tap (Like), Triple Tap (Comments Modal)
+  // Instagram 2026 behavior: Single tap = pause/resume, Double tap = like, Mute only via button
   const handleVideoTap = (e) => {
     if (isAnyModalOpen) return;
 
@@ -954,23 +979,23 @@ export const ReelCard = ({
       }
     }
 
-    // If 2X is currently locked, a single tap immediately unlocks and returns to 1X
-    if (is2XLocked) {
-      setIs2XLocked(false);
-      setIsFastForwarding(false);
-      if (videoRef.current) videoRef.current.playbackRate = playbackSpeed || 1.0;
-      if (audioRef.current) audioRef.current.playbackRate = playbackSpeed || 1.0;
+    // If long-press fast forward or a slide gesture was performed, do NOT register as tap
+    if (hasFastForwardedRef.current || hasMovedRef.current) {
+      hasFastForwardedRef.current = false;
+      hasMovedRef.current = false;
       return;
     }
 
+    // If 2X is currently locked, tap still toggles play/pause (does NOT unlock)
+    // Unlock only happens via slide-down gesture
     tapCountRef.current += 1;
 
     if (tapCountRef.current === 1) {
       // Set a timer to check if single, double, or triple tap
       tapTimerRef.current = setTimeout(() => {
         if (tapCountRef.current === 1) {
-          // Single Tap -> Toggle Sound Mute / Unmute (Instagram style)
-          toggleMute();
+          // Single Tap -> Toggle Play / Pause (Instagram 2026 behavior)
+          handleTogglePlayPause();
         } else if (tapCountRef.current === 2) {
           // Double Tap -> Force Like & Burst Heart
           forceDoubleTapLike();
@@ -983,7 +1008,16 @@ export const ReelCard = ({
     }
   };
 
-  // Touch & Pointer handlers for Long Press 2X Fast-Forwarding
+  // Instagram/Facebook-style transparent speed snackbar helper
+  const showSpeedSnackbar = useCallback((text, type = "speed") => {
+    if (speedSnackbarTimerRef.current) clearTimeout(speedSnackbarTimerRef.current);
+    setSpeedSnackbar({ text, type, key: Date.now() });
+    speedSnackbarTimerRef.current = setTimeout(() => {
+      setSpeedSnackbar(null);
+    }, 2200);
+  }, []);
+
+  // Touch & Pointer handlers for Long Press 2X Fast-Forwarding & Slide Down Lock/Unlock
   const handleTouchStart = (e) => {
     if (isAnyModalOpen) return;
 
@@ -998,23 +1032,80 @@ export const ReelCard = ({
       }
     }
 
-    touchStartYRef.current = e?.clientY || (e?.touches ? e.touches[0]?.clientY : null);
+    const clientY = e?.clientY ?? (e?.touches ? e.touches[0]?.clientY : null);
+    const clientX = e?.clientX ?? (e?.touches ? e.touches[0]?.clientX : null);
+    if (clientY === null) return;
+
+    touchStartYRef.current = clientY;
+    touchStartXRef.current = clientX;
+    hasFastForwardedRef.current = false;
+    hasMovedRef.current = false;
+    setIsNearLockZone(false);
+    setIsNearUnlockZone(false);
+
+    // If already locked, track for slide-down unlock gesture
+    if (is2XLocked) {
+      unlockGestureActiveRef.current = true;
+      return;
+    }
+
+    if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
     pressTimerRef.current = setTimeout(() => {
       hasFastForwardedRef.current = true;
       setIsFastForwarding(true);
       triggerHaptic("medium");
+      showSpeedSnackbar("Playing at 2× speed", "speed");
       if (videoRef.current) videoRef.current.playbackRate = 2.0;
       if (audioRef.current) audioRef.current.playbackRate = 2.0;
-    }, 450);
+      touchStartYRef.current = clientY;
+    }, 380);
   };
 
   const handlePointerDown = handleTouchStart;
 
   const handlePointerMove = (e) => {
-    if (isFastForwarding && touchStartYRef.current !== null) {
-      const clientY = e?.clientY || (e?.touches ? e.touches[0]?.clientY : touchStartYRef.current);
-      const deltaY = touchStartYRef.current - clientY;
-      setIsNearLockZone(deltaY > 60);
+    const clientY = e?.clientY ?? (e?.touches ? e.touches[0]?.clientY : null);
+    const clientX = e?.clientX ?? (e?.touches ? e.touches[0]?.clientX : null);
+    if (clientY === null || touchStartYRef.current === null) return;
+
+    const deltaY = clientY - touchStartYRef.current; // positive = finger moved DOWN
+    const deltaX = (clientX !== null && touchStartXRef.current !== null) ? clientX - touchStartXRef.current : 0;
+
+    // If moved significantly, mark hasMovedRef
+    if (Math.abs(deltaY) > 12 || Math.abs(deltaX) > 12) {
+      hasMovedRef.current = true;
+    }
+
+    // While neither fast forwarding nor locked, cancel long-press if user starts scrolling feed
+    if (!isFastForwarding && !is2XLocked) {
+      if (Math.abs(deltaY) > 10 || Math.abs(deltaX) > 10) {
+        if (pressTimerRef.current) {
+          clearTimeout(pressTimerRef.current);
+          pressTimerRef.current = null;
+        }
+      }
+      return;
+    }
+
+    // CASE A: User is holding for 2X (not yet locked) -> slide DOWN to lock
+    if (isFastForwarding && !is2XLocked) {
+      const nearLock = deltaY > 38;
+      if (nearLock !== isNearLockZone) {
+        triggerHaptic("selection");
+      }
+      setIsNearLockZone(nearLock);
+      setIsNearUnlockZone(false);
+      return;
+    }
+
+    // CASE B: 2X is currently locked -> slide DOWN to unlock
+    if (is2XLocked && unlockGestureActiveRef.current) {
+      const nearUnlock = deltaY > 38;
+      if (nearUnlock !== isNearUnlockZone) {
+        triggerHaptic("selection");
+      }
+      setIsNearUnlockZone(nearUnlock);
+      setIsNearLockZone(false);
     }
   };
 
@@ -1025,17 +1116,59 @@ export const ReelCard = ({
     }
 
     const wasFastForwarding = isFastForwarding;
+    const wasLocked = is2XLocked;
+    const wasNearLock = isNearLockZone;
+    const wasNearUnlock = isNearUnlockZone;
 
-    if (wasFastForwarding && is2XLocked) {
-      // Already locked in 2X speed -> leave running fast!
+    unlockGestureActiveRef.current = false;
+    setIsNearLockZone(false);
+    setIsNearUnlockZone(false);
+
+    // CASE 1: Currently locked → check if user slid down to unlock
+    if (wasLocked) {
+      if (wasNearUnlock) {
+        // Unlock! Return to normal speed
+        setIs2XLocked(false);
+        setIsFastForwarding(false);
+        hasFastForwardedRef.current = false;
+        hasMovedRef.current = true; // Prevents tap handler from toggling play/pause!
+        triggerHaptic("medium");
+        showSpeedSnackbar("Back to normal speed", "normal");
+        const normalRate = playbackSpeed || 1.0;
+        if (videoRef.current) videoRef.current.playbackRate = normalRate;
+        if (audioRef.current) audioRef.current.playbackRate = normalRate;
+      }
+      touchStartYRef.current = null;
+      touchStartXRef.current = null;
       return;
-    } else if (wasFastForwarding && !is2XLocked) {
-      // Released without locking -> instantly restore back to normal 1X speed!
+    }
+
+    // CASE 2: Was fast-forwarding (holding) → check if user slid DOWN to lock
+    if (wasFastForwarding && wasNearLock) {
+      // Lock 2x speed!
+      setIs2XLocked(true);
+      setIsFastForwarding(false);
+      hasMovedRef.current = true; // Prevents tap handler from toggling play/pause!
+      triggerHaptic("heavy");
+      showSpeedSnackbar("2× speed locked", "locked");
+      if (videoRef.current) videoRef.current.playbackRate = 2.0;
+      if (audioRef.current) audioRef.current.playbackRate = 2.0;
+      touchStartYRef.current = null;
+      touchStartXRef.current = null;
+      return;
+    }
+
+    // CASE 3: Was fast-forwarding but released without locking → back to normal
+    if (wasFastForwarding && !wasLocked) {
       setIsFastForwarding(false);
       setIs2XLocked(false);
-      if (videoRef.current) videoRef.current.playbackRate = playbackSpeed || 1.0;
-      if (audioRef.current) audioRef.current.playbackRate = playbackSpeed || 1.0;
+      const normalRate = playbackSpeed || 1.0;
+      if (videoRef.current) videoRef.current.playbackRate = normalRate;
+      if (audioRef.current) audioRef.current.playbackRate = normalRate;
     }
+
+    touchStartYRef.current = null;
+    touchStartXRef.current = null;
   };
 
   const handlePointerUp = handleTouchEnd;
@@ -1099,7 +1232,7 @@ export const ReelCard = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPlaying, isAnyModalOpen, onNext, onPrev, isMuted, toggleMute]);
+  }, [isAnyModalOpen, onNext, onPrev, toggleMute]);
 
   if (!currentItem || !currentItem._id) return null;
 
@@ -1246,6 +1379,7 @@ export const ReelCard = ({
 
       {/* 9:16 MAIN REEL VIDEO CARD (CENTERED ANCHOR) */}
       <div
+        ref={mainCardRef}
         onClick={handleVideoTap}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -1257,43 +1391,89 @@ export const ReelCard = ({
           isAnyModalOpen ? "flex-col justify-start items-center" : "items-center justify-center"
         } border-0 md:border md:border-white/10 md:rounded-md relative overflow-hidden bg-black select-none cursor-pointer group/card md:shadow-[0_8px_30px_rgba(0,0,0,0.5)] shrink-0 transition-all duration-300`}
       >
-      {/* 2X SPEED INSTAGRAM MICRO-PILL (ACTIVE WHILE HOLDING) */}
+      {/* INSTAGRAM/FACEBOOK-STYLE TRANSPARENT SPEED SNACKBAR */}
+      <AnimatePresence>
+        {speedSnackbar && (
+          <motion.div
+            key={speedSnackbar.key}
+            initial={{ opacity: 0, y: -16, scale: 0.92 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -12, scale: 0.95 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+            className="absolute top-5 left-1/2 -translate-x-1/2 z-[170] pointer-events-none"
+          >
+            <div className="px-4 py-2 rounded-full bg-black/75 backdrop-blur-2xl border border-white/15 shadow-[0_8px_32px_rgba(0,0,0,0.6)] flex items-center gap-2.5">
+              {speedSnackbar.type === "speed" && (
+                <FastForward className="w-3.5 h-3.5 text-white/90" />
+              )}
+              {speedSnackbar.type === "locked" && (
+                <Lock className="w-3.5 h-3.5 text-white/90" />
+              )}
+              {speedSnackbar.type === "normal" && (
+                <Play className="w-3.5 h-3.5 text-white/90 fill-white/90" />
+              )}
+              <span className="text-[12px] font-semibold text-white/95 tracking-wide">{speedSnackbar.text}</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 2X SPEED PILL — While holding (slide down to lock) */}
       {isFastForwarding && !is2XLocked && (
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[160] pointer-events-none animate-in fade-in zoom-in-95 duration-150">
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[160] pointer-events-none animate-in fade-in zoom-in-95 duration-150">
           <div
-            className={`px-3 py-1 rounded-full backdrop-blur-xl border text-[11px] font-semibold flex items-center gap-1.5 shadow-xl transition-all ${
+            className={`px-4 py-1.5 rounded-full backdrop-blur-2xl border text-[11px] font-semibold flex items-center gap-2 shadow-2xl transition-all duration-200 ${
               isNearLockZone
-                ? "bg-emerald-500/90 text-white border-emerald-400 scale-105 shadow-emerald-500/30"
-                : "bg-black/70 text-white border-white/15"
+                ? "bg-white/25 text-white border-white/40 scale-105 shadow-white/10"
+                : "bg-black/70 text-white/90 border-white/15"
             }`}
           >
-            <Zap className={`w-3 h-3 ${isNearLockZone ? "fill-white text-white" : "fill-amber-400 text-amber-400"}`} />
-            <span className={isNearLockZone ? "text-white font-bold" : "text-amber-400 font-bold"}>2X</span>
-            <span className="text-zinc-300 text-[10px]">
-              {isNearLockZone ? "· Release to lock 🔒" : "· Slide down to lock ⬇️"}
+            <Zap className={`w-3.5 h-3.5 transition-colors ${
+              isNearLockZone ? "fill-white text-white" : "fill-white/80 text-white/80"
+            }`} />
+            <span className="font-bold text-white tracking-wide">2×</span>
+            <span className="text-white/40 text-[10px]">|</span>
+            <span className="text-white/80 text-[11px] font-medium">
+              {isNearLockZone ? "Release to lock" : "Slide down to lock"}
             </span>
+            {isNearLockZone ? (
+              <Lock className="w-3.5 h-3.5 text-white" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5 text-white/60 animate-bounce" />
+            )}
           </div>
         </div>
       )}
 
-      {/* 2X LOCKED MICRO-PILL */}
+      {/* 2X LOCKED PILL — Persistent while locked (slide down to unlock) */}
       {is2XLocked && (
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[160] pointer-events-none animate-in fade-in zoom-in-95 duration-150">
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[160] pointer-events-none animate-in fade-in zoom-in-95 duration-150">
           <div
-            className={`px-3 py-1 rounded-full backdrop-blur-xl border text-[11px] font-semibold flex items-center gap-1.5 shadow-xl transition-all ${
-              isNearLockZone
-                ? "bg-rose-500/90 text-white border-rose-400 scale-105 shadow-rose-500/30"
-                : "bg-black/70 text-amber-400 border-amber-400/30"
+            className={`px-4 py-1.5 rounded-full backdrop-blur-2xl border text-[11px] font-semibold flex items-center gap-2 shadow-2xl transition-all duration-200 ${
+              isNearUnlockZone
+                ? "bg-white/25 text-white border-white/40 scale-105 shadow-white/10"
+                : "bg-black/70 text-white/90 border-white/15"
             }`}
           >
-            <Zap className="w-3 h-3 fill-amber-400 text-amber-400" />
-            <span>{isNearLockZone ? "Release to 1X 🔓" : "2X Locked"}</span>
+            <Zap className="w-3.5 h-3.5 fill-white/90 text-white/90" />
+            <span className="font-bold text-white tracking-wide">
+              {isNearUnlockZone ? "1×" : "2× Locked"}
+            </span>
+            <span className="text-white/40 text-[10px]">|</span>
+            <span className="text-white/80 text-[11px] font-medium">
+              {isNearUnlockZone ? "Release to unlock" : "Slide down to unlock"}
+            </span>
+            {isNearUnlockZone ? (
+              <Unlock className="w-3.5 h-3.5 text-white" />
+            ) : (
+              <Lock className="w-3.5 h-3.5 text-white/70" />
+            )}
           </div>
         </div>
       )}
 
-      {/* INSTAGRAM CENTER PLAY BUTTON (FADES OUT AFTER 700MS ON PAUSE, REAPPEARS ON HOVER) */}
-      {!isPlaying && (showCenterPlayIcon || isHovered) && (
+      {/* INSTAGRAM CENTER PLAY BUTTON (Persistent while paused — shows Play icon) */}
+      {!isPlaying && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 pointer-events-none flex items-center justify-center animate-in zoom-in-75 fade-in duration-200">
           <div className="w-18 h-18 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center shadow-2xl">
             <Play className="w-9 h-9 text-white fill-white ml-1 drop-shadow-md" />
@@ -1301,11 +1481,15 @@ export const ReelCard = ({
         </div>
       )}
 
-      {/* PLAY / PAUSE TRANSIENT PULSE OVERLAY (SHOWN ON PLAY / RESUME) */}
-      {showPlayPauseAnim && isPlaying && (
+      {/* PLAY / PAUSE TRANSIENT PULSE OVERLAY (Brief flash on tap — shows what just happened) */}
+      {showPlayPauseAnim && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none flex items-center justify-center animate-scale-pulse">
           <div className="w-18 h-18 rounded-full bg-black/75 backdrop-blur-md border border-white/20 flex items-center justify-center shadow-2xl">
-            <Pause className="w-9 h-9 text-white fill-white drop-shadow-md" />
+            {isPlaying ? (
+              <Play className="w-9 h-9 text-white fill-white ml-0.5 drop-shadow-md" />
+            ) : (
+              <Pause className="w-9 h-9 text-white fill-white drop-shadow-md" />
+            )}
           </div>
         </div>
       )}
@@ -1506,13 +1690,13 @@ export const ReelCard = ({
           >
             <div className="max-w-[88%] px-3 py-1 rounded-xl bg-black/60 backdrop-blur-md border border-white/10 shadow-lg flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5">
               {syncedSubtitle.words.map((word, idx) => {
-                const isActive = idx === syncedSubtitle.activeIndex;
+                const isWordActive = idx === syncedSubtitle.activeIndex;
                 const isPast = idx < syncedSubtitle.activeIndex;
                 return (
                   <span
                     key={idx}
                     className={`text-xs sm:text-sm md:text-[13px] tracking-normal transition-all duration-100 transform ${
-                      isActive
+                      isWordActive
                         ? "text-yellow-300 font-extrabold scale-105 inline-block drop-shadow-[0_0_8px_rgba(253,224,71,0.8)]"
                         : isPast
                         ? "text-white font-semibold"
@@ -1528,14 +1712,14 @@ export const ReelCard = ({
         )}
       </AnimatePresence>
 
-      {/* DESKTOP CONTROLS (CC SUBTITLES & VOLUME - TOP RIGHT OF VIDEO CARD) */}
+      {/* TOP-RIGHT CONTROLS (CC SUBTITLES & VOLUME - EXACT INSTAGRAM POSITION ON MOBILE & DESKTOP) */}
       {!isFastForwarding && (
         <div
           data-interactive="true"
           onPointerDown={(e) => e.stopPropagation()}
           onTouchStart={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
-          className="hidden md:flex absolute top-4 right-4 z-[100] items-center gap-2 pointer-events-auto"
+          className="flex absolute top-3.5 right-3.5 md:top-4 md:right-4 z-[100] items-center gap-2 pointer-events-auto"
         >
           {/* Quick 1-Tap CC Toggle Button */}
           <button
@@ -1571,12 +1755,7 @@ export const ReelCard = ({
         </div>
       )}
 
-      {/* PROGRESS BAR */}
-      <div className={`absolute bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:bottom-0 left-0 w-full h-1 bg-surface z-40 transition-opacity duration-200 ${
-        isAnyModalOpen ? "opacity-0 pointer-events-none" : "opacity-100"
-      }`}>
-        <div className="h-full bg-rose-500 transition-all duration-150 ease-linear" style={{ width: `${progress}%` }} />
-      </div>
+      {/* Non-interactive progress bar removed — the interactive seek bar at the bottom handles both display and scrubbing */}
 
       {/* MOBILE-ONLY BOTTOM INFO OVERLAY (INSIDE VIDEO CARD) */}
       {!isFastForwarding && (
@@ -1801,55 +1980,6 @@ export const ReelCard = ({
             onClick={(e) => e.stopPropagation()}
             className="flex md:hidden flex-col items-center gap-2.5 text-white pointer-events-auto pb-1"
           >
-            {/* Audio Mute / Unmute Button (Instagram Mobile Ergonomics - Right at Thumb) */}
-            <div
-              onPointerDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-              className="flex flex-col items-center mb-0.5"
-            >
-              <button
-                onPointerDown={(e) => e.stopPropagation()}
-                onTouchStart={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleMute(e);
-                }}
-                className="w-8 h-8 rounded-full bg-black/50 backdrop-blur-md border border-white/20 text-white flex items-center justify-center cursor-pointer active:scale-75 transition-transform shadow-md"
-                title={isMuted ? "Unmute sound" : "Mute sound"}
-              >
-                {isMuted ? (
-                  <VolumeX className="w-4 h-4 text-white/90" />
-                ) : (
-                  <Volume2 className="w-4 h-4 text-white" />
-                )}
-              </button>
-            </div>
-
-            {/* Quick 1-Tap CC Toggle Button (Mobile) */}
-            <div
-              onPointerDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-              className="flex flex-col items-center mb-0.5"
-            >
-              <button
-                onPointerDown={(e) => e.stopPropagation()}
-                onTouchStart={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleToggleCaptions();
-                }}
-                className={`w-8 h-6 rounded-full border text-[10px] font-black transition-all flex items-center justify-center cursor-pointer shadow-md active:scale-75 ${
-                  showCaptions
-                    ? "bg-white text-black border-white shadow-white/20"
-                    : "bg-black/50 backdrop-blur-md border-white/20 text-white/80"
-                }`}
-                title={showCaptions ? "Turn off subtitles (CC)" : "Turn on subtitles (CC)"}
-              >
-                <span>CC</span>
-              </button>
-            </div>
 
             {/* Like */}
             <div
@@ -2060,36 +2190,54 @@ export const ReelCard = ({
         </div>
       )}
 
-      {/* SEEK & PROGRESS BAR OVERLAY */}
+      {/* SEEK & PROGRESS BAR OVERLAY — Positioned cleanly above mobile navbar with smooth touch scrubbing */}
       <div
         ref={seekBarRef}
         data-interactive="true"
-        onPointerDown={handleSeekPointerDown}
-        onTouchStart={(e) => e.stopPropagation()}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          handleSeekStart(e.clientX);
+        }}
+        onTouchStart={(e) => {
+          e.stopPropagation();
+          const touch = e.touches[0];
+          if (touch) {
+            handleSeekStart(touch.clientX);
+          }
+        }}
         onClick={(e) => e.stopPropagation()}
-        className="seek-bar absolute bottom-0 left-0 right-0 z-[130] h-6 flex items-end cursor-pointer group/seek pointer-events-auto touch-none select-none"
+        className={`seek-bar absolute bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:bottom-0 left-0 right-0 z-[140] h-8 md:h-6 flex items-end cursor-pointer group/seek pointer-events-auto select-none ${
+          isAnyModalOpen ? "opacity-0 pointer-events-none" : "opacity-100"
+        }`}
+        style={{ touchAction: "none" }}
       >
         {/* Scrubber Tooltip when dragging */}
         {isScrubbing && (
           <div
-            className="absolute -top-7 transform -translate-x-1/2 px-2.5 py-0.5 rounded-md bg-black/85 backdrop-blur-md border border-white/20 text-[10px] font-bold text-white shadow-lg pointer-events-none"
+            className="absolute -top-8 transform -translate-x-1/2 px-3 py-1 rounded-lg bg-black/90 backdrop-blur-md border border-white/20 text-[11px] font-bold text-white shadow-xl pointer-events-none"
             style={{ left: `${Math.min(95, Math.max(5, progress))}%` }}
           >
             {formatTime(scrubTime)} / {formatTime(duration)}
           </div>
         )}
 
-        {/* Track Background */}
-        <div className="w-full h-[2.5px] group-hover/seek:h-[5px] transition-all bg-white/25 relative overflow-visible">
+        {/* Track Background — Comfortable hit area for finger dragging */}
+        <div className={`w-full relative overflow-visible transition-all ${
+          isScrubbing ? "h-[6px]" : "h-[3px] group-hover/seek:h-[5px]"
+        } bg-white/25`}>
           {/* Filled Progress Bar */}
           <div
             className="h-full bg-white relative transition-all duration-75 ease-out"
             style={{ width: `${progress}%` }}
           >
-            {/* Scrubber Thumb */}
+            {/* Scrubber Thumb — Always visible and scaled up when scrubbing */}
             <div
-              className={`absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-1/2 w-3 h-3 rounded-full bg-white shadow-md transition-all duration-150 ${
-                isScrubbing || isHovered ? "opacity-100 scale-100" : "opacity-0 group-hover/seek:opacity-100 scale-75 group-hover/seek:scale-100"
+              className={`absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-1/2 rounded-full bg-white shadow-lg transition-all duration-150 ${
+                isScrubbing
+                  ? "w-4 h-4 opacity-100 scale-110"
+                  : isHovered
+                  ? "w-3.5 h-3.5 opacity-100 scale-100"
+                  : "w-3 h-3 opacity-0 group-hover/seek:opacity-100 scale-75 group-hover/seek:scale-100"
               }`}
             />
           </div>
