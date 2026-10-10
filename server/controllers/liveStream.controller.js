@@ -123,7 +123,6 @@ export const getLiveStreamDetails = async (req, res) => {
 export const endLiveStream = async (req, res) => {
   try {
     const { streamId } = req.params;
-    const { totalHearts = 0 } = req.body;
     const live = await LiveStream.findById(streamId);
 
     if (!live) return res.status(404).json({ success: false, message: "Live stream not found" });
@@ -140,7 +139,8 @@ export const endLiveStream = async (req, res) => {
     live.archiveExpiresAt = archiveExpiry();
     live.stats = {
       durationSeconds,
-      totalHearts: Number(totalHearts) || live.stats?.totalHearts || 0,
+      // Engagement totals are maintained server-side; never trust client-submitted counters.
+      totalHearts: Math.max(0, Math.floor(Number(live.stats?.totalHearts) || 0)),
       totalComments: live.comments.length,
     };
     await live.save();
