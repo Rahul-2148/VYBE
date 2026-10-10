@@ -3,6 +3,7 @@ import { Server } from "socket.io";
 import { User } from "./models/user.model.js";
 import { Session } from "./models/session.model.js";
 import { Conversation } from "./models/conversation.model.js";
+import { Message } from "./models/message.model.js";
 import { parseCookie } from "cookie";
 import * as cookie from "cookie";
 import jwt from "jsonwebtoken";
@@ -516,35 +517,39 @@ export const initializeSocket = (httpServer) => {
     // =====================================================
     socket.on("send-message", async (data) => {
       try {
-        const { conversationId, messageContent } = data;
-        if (!conversationId) return;
+        const { conversationId, messageContent } = data || {};
+        const messageId = messageContent?._id || messageContent?.id;
+        if (!conversationId || !messageId || !socket.userId) return;
 
-        const isParticipant = await isConversationParticipant(conversationId, socket.userId);
-        if (!isParticipant) {
-          console.warn(`🛡️ Blocked unauthorized send-message: User ${socket.userId} to conversation ${conversationId}`);
-          return;
-        }
-
-        // Get ALL participants and broadcast (group + 1-to-1 support)
         const conversation = await Conversation.findById(conversationId).select("participants");
-        if (!conversation) return;
+        if (!conversation || !conversation.participants.some((p) => String(p) === String(socket.userId))) return;
+
+        // A socket payload may only announce a message already persisted by this authenticated sender.
+        const persistedMessage = await Message.findOne({
+          _id: messageId,
+          conversation: conversationId,
+          sender: socket.userId,
+          deletedForEveryone: { $ne: true },
+        })
+          .populate("sender", "userName profileImage isVerified")
+          .populate({ path: "replyTo", populate: { path: "sender", select: "userName profileImage" } })
+          .lean();
+        if (!persistedMessage) return;
 
         conversation.participants.forEach((participantId) => {
-          const pidStr = participantId.toString();
-          if (pidStr !== socket.userId && getUserSocketCount(pidStr) > 0) {
-            io.to(getUserRoom(pidStr)).emit("message-received", {
-              conversationId,
-              senderId: socket.userId,
-              message: messageContent,
-              timestamp: new Date(),
+          const recipientId = String(participantId);
+          if (recipientId !== String(socket.userId)) {
+            io.to(getUserRoom(recipientId)).emit("message-received", {
+              conversationId: String(conversationId),
+              senderId: String(socket.userId),
+              message: persistedMessage,
+              timestamp: persistedMessage.createdAt || new Date(),
             });
           }
         });
-
-        // Delivery confirmation to sender
         socket.emit("message-delivered", {
-          conversationId,
-          messageId: messageContent?._id,
+          conversationId: String(conversationId),
+          messageId: String(messageId),
           status: "delivered",
         });
       } catch (error) {
@@ -553,67 +558,111 @@ export const initializeSocket = (httpServer) => {
     });
 
     socket.on("edit-message", async (data) => {
-      const { conversationId, messageId, newText } = data;
-      const isParticipant = await isConversationParticipant(conversationId, socket.userId);
-      if (!isParticipant) return;
-      // Broadcast to all users in conversation
-      io.to(`conversation_${conversationId}`).emit("message-edited", {
-        messageId,
-        newText,
-        conversationId,
-        editedAt: new Date(),
-      });
+      try {
+        const { conversationId, messageId, newText } = data || {};
+        if (!conversationId || !messageId || !socket.userId || typeof newText !== "string") return;
+        if (!(await isConversationParticipant(conversationId, socket.userId))) return;
+        const message = await Message.findOne({
+          _id: messageId, conversation: conversationId, sender: socket.userId,
+        }).select("content.text editedAt edited deletedForEveryone");
+        if (!message || message.deletedForEveryone || message.content?.text !== newText) return;
+        io.to(`conversation_${conversationId}`).emit("message-edited", {
+          messageId: String(messageId),
+          newText: message.content.text,
+          conversationId: String(conversationId),
+          editedAt: message.editedAt || new Date(),
+        });
+      } catch (error) {
+        console.error("edit-message authorization failed:", error);
+      }
     });
 
     socket.on("delete-message-everyone", async (data) => {
-      const { conversationId, messageId } = data;
-      const isParticipant = await isConversationParticipant(conversationId, socket.userId);
-      if (!isParticipant) return;
-      io.to(`conversation_${conversationId}`).emit("message-deleted-everyone", {
-        messageId,
-        conversationId,
-      });
+      try {
+        const { conversationId, messageId } = data || {};
+        if (!conversationId || !messageId || !socket.userId) return;
+        if (!(await isConversationParticipant(conversationId, socket.userId))) return;
+        const message = await Message.findOne({
+          _id: messageId, conversation: conversationId, sender: socket.userId, deletedForEveryone: true,
+        }).select("_id");
+        if (!message) return;
+        io.to(`conversation_${conversationId}`).emit("message-deleted-everyone", {
+          messageId: String(messageId), conversationId: String(conversationId),
+        });
+      } catch (error) {
+        console.error("delete-message-everyone authorization failed:", error);
+      }
     });
 
     socket.on("forward-message", async (data) => {
-      const { targetConversationId, message } = data;
-      const isParticipant = await isConversationParticipant(targetConversationId, socket.userId);
-      if (!isParticipant) return;
-      io.to(`conversation_${targetConversationId}`).emit("message-forwarded", {
-        conversationId: targetConversationId,
-        message,
-      });
+      try {
+        const { targetConversationId, message } = data || {};
+        const messageId = message?._id || message?.id;
+        if (!targetConversationId || !messageId || !socket.userId) return;
+        if (!(await isConversationParticipant(targetConversationId, socket.userId))) return;
+        const persistedMessage = await Message.findOne({
+          _id: messageId,
+          conversation: targetConversationId,
+          sender: socket.userId,
+          isForwarded: true,
+          deletedForEveryone: { $ne: true },
+        }).populate("sender", "userName profileImage isVerified").lean();
+        if (!persistedMessage) return;
+        io.to(`conversation_${targetConversationId}`).emit("message-forwarded", {
+          conversationId: String(targetConversationId), message: persistedMessage,
+        });
+      } catch (error) {
+        console.error("forward-message authorization failed:", error);
+      }
     });
 
     socket.on("pin-message", async (data) => {
-      const { conversationId, messageId, isPinned } = data;
-      const isParticipant = await isConversationParticipant(conversationId, socket.userId);
-      if (!isParticipant) return;
-      io.to(`conversation_${conversationId}`).emit("message-pinned", {
-        conversationId,
-        messageId,
-        isPinned,
-        pinnedBy: socket.userId,
-      });
+      try {
+        const { conversationId, messageId } = data || {};
+        if (!conversationId || !messageId || !socket.userId) return;
+        if (!(await isConversationParticipant(conversationId, socket.userId))) return;
+        const message = await Message.findOne({ _id: messageId, conversation: conversationId })
+          .select("isPinned pinnedBy deletedForEveryone");
+        if (!message || message.deletedForEveryone) return;
+        io.to(`conversation_${conversationId}`).emit("message-pinned", {
+          conversationId: String(conversationId),
+          messageId: String(messageId),
+          isPinned: Boolean(message.isPinned),
+          pinnedBy: message.pinnedBy ? String(message.pinnedBy) : null,
+        });
+      } catch (error) {
+        console.error("pin-message authorization failed:", error);
+      }
     });
 
     socket.on("message-read", async (data) => {
       try {
-        const { messageId, conversationId } = data;
-        const isParticipant = await isConversationParticipant(conversationId, socket.userId);
-        if (!isParticipant) return;
+        const { messageId, conversationId } = data || {};
+        if (!messageId || !conversationId || !socket.userId) return;
         const conversation = await Conversation.findById(conversationId).select("participants");
-        if (!conversation) return;
+        if (!conversation || !conversation.participants.some((p) => String(p) === String(socket.userId))) return;
 
+        const message = await Message.findOne({ _id: messageId, conversation: conversationId });
+        if (!message) return;
+        const alreadySeen = (message.seenBy || []).some((entry) =>
+          String(entry.user?._id || entry.user || entry) === String(socket.userId)
+        );
+        if (!alreadySeen) {
+          message.seenBy.push({ user: socket.userId, seenAt: new Date() });
+          message.status = "seen";
+          await message.save();
+        }
+
+        const receipt = {
+          messageId: String(messageId),
+          conversationId: String(conversationId),
+          readBy: String(socket.userId),
+          readAt: new Date(),
+        };
         conversation.participants.forEach((participantId) => {
-          const pidStr = participantId.toString();
-          if (pidStr !== socket.userId && getUserSocketCount(pidStr) > 0) {
-            io.to(getUserRoom(pidStr)).emit("message-read-receipt", {
-              messageId,
-              conversationId,
-              readBy: socket.userId,
-              readAt: new Date(),
-            });
+          const recipientId = String(participantId);
+          if (recipientId !== String(socket.userId) && getUserSocketCount(recipientId) > 0) {
+            io.to(getUserRoom(recipientId)).emit("message-read-receipt", receipt);
           }
         });
       } catch (error) {
