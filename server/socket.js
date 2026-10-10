@@ -2127,12 +2127,18 @@ export const initializeSocket = (httpServer) => {
     socket.on("meeting:breakout-broadcast", async (data) => {
       try {
         const { meetingId, message } = data || {};
-        if (!meetingId || !message) return;
-        const normalizedId = meetingId.toLowerCase();
-
-        // Broadcast to main room and all breakout participants
+        const normalizedId = String(meetingId || "").trim().toLowerCase();
+        if (!normalizedId || typeof message !== "string" || !message.trim() ||
+            message.length > 1000 || !isSocketInMeeting(socket, normalizedId)) return;
+        const access = await getMeetingAccess(normalizedId, socket.userId);
+        if (!access?.isHost) {
+          console.warn(`🛡️ Blocked breakout broadcast by non-host ${socket.userId}`);
+          return;
+        }
+        const session = meetingBreakoutSessions.get(normalizedId);
+        if (!session || session.status !== "active") return;
         io.to(`meeting_${normalizedId}`).emit("meeting:breakout-broadcast-received", {
-          message: typeof message === "string" ? message.trim() : "",
+          message: message.trim(),
           senderName: socket.userName || "Meeting Host",
           timestamp: Date.now(),
         });
@@ -2141,35 +2147,48 @@ export const initializeSocket = (httpServer) => {
       }
     });
 
-    socket.on("meeting:breakout-move-user", (data) => {
+    socket.on("meeting:breakout-move-user", async (data) => {
       const { meetingId, targetSocketId, targetUserId, newRoomId, newRoomName } = data || {};
-      if (!meetingId || !newRoomId) return;
-      const normalizedId = meetingId.toLowerCase();
+      const normalizedId = String(meetingId || "").trim().toLowerCase();
+      if (!normalizedId || !newRoomId || !isSocketInMeeting(socket, normalizedId)) return;
+      const access = await getMeetingAccess(normalizedId, socket.userId);
+      if (!access?.isHost) return;
+      const breakoutSession = meetingBreakoutSessions.get(normalizedId);
+      if (!breakoutSession || breakoutSession.status !== "active" ||
+          !breakoutSession.rooms.some((room) => String(room.id) === String(newRoomId))) return;
 
-      const target = targetSocketId || (targetUserId ? Array.from(activeUsers.get(targetUserId.toString()) || [])[0] : null);
-      if (target) {
-        io.to(target).emit("meeting:breakout-reassigned", {
-          meetingId: normalizedId,
-          newRoomId,
-          newRoomName: newRoomName || `Room ${newRoomId}`,
-        });
-      }
+      const target = targetSocketId || (targetUserId ? Array.from(activeUsers.get(String(targetUserId)) || [])[0] : null);
+      if (!target) return;
+      const targetSocket = io.sockets.sockets.get(target);
+      if (!targetSocket || !isSocketInMeeting(targetSocket, normalizedId)) return;
+      io.to(target).emit("meeting:breakout-reassigned", {
+        meetingId: normalizedId,
+        newRoomId,
+        newRoomName: newRoomName || `Room ${newRoomId}`,
+      });
     });
 
     socket.on("meeting:breakout-end", async (data) => {
       try {
         const { meetingId } = data || {};
-        if (!meetingId) return;
-        const normalizedId = meetingId.toLowerCase();
-
+        const normalizedId = String(meetingId || "").trim().toLowerCase();
+        if (!normalizedId || !isSocketInMeeting(socket, normalizedId)) return;
+        const access = await getMeetingAccess(normalizedId, socket.userId);
+        if (!access?.isHost) {
+          console.warn(`🛡️ Blocked breakout-end by non-host ${socket.userId}`);
+          return;
+        }
+        const session = meetingBreakoutSessions.get(normalizedId);
+        if (!session) return;
         meetingBreakoutSessions.delete(normalizedId);
 
-        // Notify all sockets across all breakout subrooms to return to main meeting
-        io.to(`meeting_${normalizedId}`).emit("meeting:breakout-ended", {
-          meetingId: normalizedId,
-        });
-
-        console.log(`🚪 [Vybe Meet] Breakout session closed in "${normalizedId}". All users returning to main meeting.`);
+        for (const room of session.rooms || []) {
+          const safeRoomId = String(room.id).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
+          const breakoutRoomName = `meeting_${normalizedId}_breakout_${safeRoomId}`;
+          const members = await io.in(breakoutRoomName).fetchSockets();
+          for (const member of members) await member.leave(breakoutRoomName);
+        }
+        io.to(`meeting_${normalizedId}`).emit("meeting:breakout-ended", { meetingId: normalizedId });
       } catch (err) {
         console.error("meeting:breakout-end error:", err);
       }
