@@ -373,7 +373,19 @@ export const getTurnCredentials = async (req, res) => {
         credential: process.env.TURN_CREDENTIAL,
       });
     } else if (process.env.TURN_SERVER_DOMAIN && process.env.TURN_SECRET) {
-      const turnSecret = process.env.TURN_SECRET;
+      const turnSecret = process.env.TURN_SECRET.trim();
+      const isPlaceholderSecret =
+        /^(vybe_|your-|change.?me|replace.?me|placeholder|example|default)/i.test(turnSecret);
+      if (turnSecret.length < 32 || isPlaceholderSecret) {
+        console.error(
+          "[TURN] TURN_SERVER_DOMAIN is configured, but TURN_SECRET is weak or still a placeholder."
+        );
+        return res.status(503).json({
+          success: false,
+          message: "TURN service is misconfigured. Please configure a strong TURN_SECRET.",
+        });
+      }
+
       const turnDomain = process.env.TURN_SERVER_DOMAIN;
       const duration = 24 * 60 * 60; // 24 hours validity
       const unixTimestamp = Math.floor(Date.now() / 1000) + duration;
