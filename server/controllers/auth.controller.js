@@ -152,7 +152,7 @@ export const signUp = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+    const otp = crypto.randomInt(100000, 1000000).toString(); // 6-digit OTP
     const otpExpiresAt = Date.now() + 15 * 60 * 1000; // 15 mins
 
     // Store in Redis (Fast TTL) with in-memory fallback
