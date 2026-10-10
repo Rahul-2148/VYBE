@@ -41,6 +41,9 @@ const allowedOrigins = (process.env.CORS_ORIGINS || process.env.CLIENT_URL || ""
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const isDevelopment = process.env.NODE_ENV !== "production";
+const isLocalDevelopmentOrigin = (origin) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin);
 
 // Security & Performance Middlewares
 app.use(setSecurityHeaders);
@@ -51,14 +54,16 @@ app.use(compression());
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (
-        !origin ||
-        allowedOrigins.length === 0 ||
-        allowedOrigins.includes(origin) ||
-        /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin)
-      ) {
+      // Non-browser clients do not send an Origin header; CORS is not an auth control.
+      if (!origin || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
+
+      // Permit local development origins only outside production.
+      if (isDevelopment && (allowedOrigins.length === 0 || isLocalDevelopmentOrigin(origin))) {
+        return callback(null, true);
+      }
+
       return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
