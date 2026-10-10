@@ -59,7 +59,9 @@ export const getClearCookieOptions = () => ({
 
 const buildAdminCookieOptions = () => ({
   ...buildBaseCookieOptions(),
-  path: "/api/v1/admin", // Scoped to admin API routes only
+  // Socket.IO handshakes use /socket.io rather than /api/v1/admin.
+  // The admin_* names keep sessions isolated; Path must allow both API and socket requests.
+  path: "/",
 });
 
 // Admin Access Token Cookie (7 Days)
