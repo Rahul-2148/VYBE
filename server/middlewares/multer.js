@@ -1,6 +1,7 @@
 import multer from "multer";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -16,13 +17,24 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    cb(null, file.originalname);
+    // Never trust a client-supplied filename for a server-side filesystem path.
+    const extension = path.extname(file.originalname || "").toLowerCase();
+    const safeExtension = /^\.[a-z0-9]{1,10}$/.test(extension) ? extension : "";
+    cb(null, crypto.randomUUID() + safeExtension);
   },
 });
 
 export const upload = multer({
   storage,
-  limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB (1024MB) for high quality 4K & long-form VYBE TV videos
+  limits: {
+    fileSize: Math.min(
+      Math.max(Number.parseInt(process.env.MAX_FILE_SIZE || "1073741824", 10) || 1073741824, 1),
+      1024 * 1024 * 1024
+    ),
+    files: 10,
+    fields: 100,
+    parts: 110,
+  }, // Configurable up to 1GB per file; also cap multipart counts.
 });
 // Trigger nodemon reload
 
