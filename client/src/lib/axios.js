@@ -1,13 +1,13 @@
 import axios from "axios";
 
 const getApiBaseUrl = () => {
-  const envUrl = (import.meta.env.VITE_SERVER_URL || "").trim().replace(/\\/+$/, "");
+  const envUrl = (import.meta.env.VITE_SERVER_URL || "").trim().replace(/\/+$/, "");
 
   // LAN development can target the API on the same machine running the Vite dev server.
   if (
     import.meta.env.DEV &&
     typeof window !== "undefined" &&
-    /^\\d+\\.\\d+\\.\\d+\\.\\d+$/.test(window.location.hostname)
+    /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname)
   ) {
     return `http://${window.location.hostname}:8000/api/v1`;
   }
