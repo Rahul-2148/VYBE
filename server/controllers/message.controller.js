@@ -329,16 +329,27 @@ export const sendMessage = async (req, res) => {
 export const sendVoiceNote = async (req, res) => {
   try {
     const userId = req.userId;
-    const { conversationId, duration } = req.body;
+    const { conversationId, duration } = req.body || {};
 
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
     if (!req.file) {
       return res.status(400).json({ success: false, message: "Audio file required for voice note" });
     }
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({ success: false, message: "Invalid conversation ID" });
+    }
 
-    const upload = await uploadOnCloudinary(req.file.path, "VYBE/messages/voice");
+    // Authorize the destination before uploading media or applying privacy rules.
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      participants: userId,
+    });
+    if (!conversation) return res.status(403).json({ message: "Not authorized to send voice notes to this conversation" });
 
-    const conversation = await Conversation.findById(conversationId);
-    if (!conversation) return res.status(404).json({ message: "Conversation not found" });
+    const safeDuration = Number(duration);
+    if (!Number.isFinite(safeDuration) || safeDuration < 0 || safeDuration > 600) {
+      return res.status(400).json({ success: false, message: "Voice note duration must be between 0 and 600 seconds" });
+    }
 
     // Block & Privacy check
     const privacyCheck = await checkMessagePrivacy(conversation, userId);
@@ -346,6 +357,7 @@ export const sendVoiceNote = async (req, res) => {
       return res.status(privacyCheck.status).json({ message: privacyCheck.message });
     }
 
+    const upload = await uploadOnCloudinary(req.file.path, "VYBE/messages/voice");
     const message = await Message.create({
       conversation: conversationId,
       sender: userId,
@@ -400,13 +412,22 @@ export const forwardMessage = async (req, res) => {
     const { messageId } = req.params;
     const { targetConversationIds } = req.body; // Array of conversation IDs
 
-    if (!targetConversationIds || targetConversationIds.length === 0) {
-      return res.status(400).json({ message: "Target conversations required" });
+    if (!Array.isArray(targetConversationIds) || targetConversationIds.length === 0 || targetConversationIds.length > 10) {
+      return res.status(400).json({ message: "Provide between 1 and 10 target conversations" });
+    }
+    if (!userId || !mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: "Invalid message ID" });
     }
 
     const originalMessage = await Message.findById(messageId);
     if (!originalMessage) return res.status(404).json({ message: "Message not found" });
-
+    const sourceConversation = await Conversation.findOne({
+      _id: originalMessage.conversation,
+      participants: userId,
+    }).select("_id");
+    if (!sourceConversation || (originalMessage.deletedFor || []).some((id) => String(id) === String(userId))) {
+      return res.status(403).json({ message: "You cannot forward a message you cannot access" });
+    }
     if (originalMessage.deletedForEveryone) {
       return res.status(400).json({ message: "Cannot forward deleted message" });
     }
@@ -468,7 +489,7 @@ export const forwardMessage = async (req, res) => {
     }
 
     // Increment forward count on original
-    originalMessage.forwardCount = (originalMessage.forwardCount || 0) + targetConversationIds.length;
+    originalMessage.forwardCount = (originalMessage.forwardCount || 0) + forwardedMessages.length;
     await originalMessage.save();
 
     res.status(201).json({ success: true, messages: forwardedMessages });
@@ -692,8 +713,17 @@ export const markConversationSeen = async (req, res) => {
   try {
     const userId = req.userId;
     const { conversationId } = req.params;
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({ success: false, message: "Invalid conversation ID" });
+    }
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      participants: userId,
+    });
+    if (!conversation) return res.status(403).json({ success: false, message: "Not authorized" });
 
-    // Always reset the current user's unread count for the conversation
+    // Only reset unread counters after confirming conversation membership.
     await Conversation.findByIdAndUpdate(conversationId, {
       $set: { [`unreadCount.${userId}`]: 0 },
     });
@@ -716,7 +746,6 @@ export const markConversationSeen = async (req, res) => {
 
     const io = req.app.locals.io;
     if (io) {
-      const conversation = await Conversation.findById(conversationId);
       conversation.participants.forEach((participantId) => {
         io.to(`user_${participantId}`).emit("messages-seen", {
           conversationId,
@@ -840,7 +869,14 @@ export const deleteMessageForEveryone = async (req, res) => {
     const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ message: "Message not found" });
 
-    if (message.sender.toString() !== userId.toString()) {
+    const conversation = await Conversation.findOne({
+      _id: message.conversation,
+      participants: userId,
+    }).select("_id");
+    if (!conversation) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+    if (String(message.sender) !== String(userId)) {
       return res.status(403).json({ message: "You can only unsend/delete messages you sent." });
     }
 
@@ -1067,7 +1103,7 @@ export const searchMessages = async (req, res) => {
     const { q, query, type, limit = 100 } = req.query;
     const userId = req.userId;
 
-    const searchTerm = (q || query || "").trim();
+    const searchTerm = String(q || query || "").trim().slice(0, 120);
 
     // Verify conversation access
     const conv = await Conversation.findOne({
@@ -1127,11 +1163,12 @@ export const searchMessages = async (req, res) => {
       }
     }
 
+    const safeLimit = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 100));
     const messages = await Message.find(filter)
       .populate("sender", "userName profileImage isVerified name")
       .populate("replyTo")
       .sort({ createdAt: 1 })
-      .limit(Number(limit));
+      .limit(safeLimit);
 
     return res.status(200).json({
       success: true,
