@@ -12,7 +12,7 @@ const normalizeSameSite = (value, fallback = "lax") => {
 };
 
 const buildBaseCookieOptions = () => {
-  const secure = parseBoolean(process.env.COOKIE_SECURE, false);
+  const secure = parseBoolean(process.env.COOKIE_SECURE, process.env.NODE_ENV === "production");
   const sameSiteFallback = secure ? "none" : "lax";
   const sameSite = normalizeSameSite(process.env.COOKIE_SAME_SITE, sameSiteFallback);
 
