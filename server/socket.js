@@ -1343,14 +1343,14 @@ export const initializeSocket = (httpServer) => {
       });
     });
 
-    socket.on("call:signal", (data) => {
-      const { toSocketId, toUserId, room, signal, fromMetadata } = data;
-      if (!signal) return;
+    socket.on("call:signal", async (data) => {
+      const { toSocketId, toUserId, room, signal } = data || {};
+      if (!room || !signal || !isSocketInCallRoom(socket, room)) return;
 
       const payload = {
         fromSocketId: socket.id,
         fromUserId: socket.userId,
-        fromMetadata: fromMetadata || {
+        fromMetadata: {
           userId: socket.userId,
           userName: socket.userName,
           name: socket.name,
@@ -1358,27 +1358,26 @@ export const initializeSocket = (httpServer) => {
         },
         signal,
       };
-
+      const roomSockets = await io.in(room).fetchSockets();
       if (toSocketId) {
-        io.to(toSocketId).emit("call:signal-received", payload);
+        const target = roomSockets.find((candidate) => candidate.id === toSocketId);
+        if (target) io.to(toSocketId).emit("call:signal-received", payload);
+        return;
       }
-
-      const targetUid = toUserId || toSocketId;
-      if (targetUid && activeUsers.has(targetUid.toString())) {
-        for (const sId of activeUsers.get(targetUid.toString())) {
-          if (sId !== socket.id && sId !== toSocketId) {
-            io.to(sId).emit("call:signal-received", payload);
+      if (toUserId) {
+        for (const target of roomSockets) {
+          if (String(target.userId) === String(toUserId) && target.id !== socket.id) {
+            io.to(target.id).emit("call:signal-received", payload);
           }
         }
+        return;
       }
-
-      if (!toSocketId && !toUserId && room) {
-        socket.to(room).emit("call:signal-received", payload);
-      }
+      socket.to(room).emit("call:signal-received", payload);
     });
 
     socket.on("call:heartbeat", (data) => {
-      const { room } = data;
+      const { room } = data || {};
+      if (!isSocketInCallRoom(socket, room)) return;
       socket.to(room).emit("call:heartbeat-received", {
         userId: socket.userId,
         socketId: socket.id,
@@ -1386,16 +1385,31 @@ export const initializeSocket = (httpServer) => {
     });
 
     socket.on("call:action", (data) => {
-      const { room, ...actionPayload } = data; // action: 'mute', 'video', 'screen', 'hand', 'reaction', streamId, hasAudio
+      const { room, ...actionPayload } = data || {};
+      if (!isSocketInCallRoom(socket, room)) return;
+      const allowedActions = ["mute", "video", "screen", "hand", "reaction"];
+      if (actionPayload.action && !allowedActions.includes(actionPayload.action)) return;
       socket.to(room).emit("call:action-broadcast", {
+        ...actionPayload,
         userId: socket.userId,
         socketId: socket.id,
-        ...actionPayload,
       });
     });
 
-    socket.on("call:moderate", (data) => {
-      const { room, targetUserId, action } = data; // action: 'mute-user', 'kick-user', 'mute-all'
+    socket.on("call:moderate", async (data) => {
+      const { room, targetUserId, action } = data || {};
+      if (!isSocketInCallRoom(socket, room) || !targetUserId) return;
+      const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+      const moderator = session?.participants.find((p) => String(p.user) === String(socket.userId));
+      const isHost = session && (
+        String(session.initiator) === String(socket.userId) || moderator?.role === "host"
+      );
+      if (!isHost) {
+        console.warn(`🛡️ Blocked call moderation by non-host ${socket.userId}`);
+        return;
+      }
+      if (!session.participants.some((p) => String(p.user) === String(targetUserId))) return;
+      if (!["mute-user", "kick-user", "mute-all"].includes(action)) return;
       io.to(room).emit("call:moderated", {
         moderatorId: socket.userId,
         targetUserId,
@@ -1403,46 +1417,41 @@ export const initializeSocket = (httpServer) => {
       });
     });
 
-    socket.on("call:leave-room", (data) => {
-      const { room } = data;
+    socket.on("call:leave-room", async (data) => {
+      const { room } = data || {};
+      if (!isSocketInCallRoom(socket, room)) return;
       socket.leave(room);
-      // Clean up room tracking
       socketCallRooms.get(socket.id)?.delete(room);
       socket.to(room).emit("call:peer-left", {
         userId: socket.userId,
         socketId: socket.id,
       });
-
-      // Sync state to DB with grace period
-      if (socket.userId) {
-        leaveCallSessionInDb(room, socket.userId);
-      }
+      if (socket.userId) await leaveCallSessionInDb(room, socket.userId);
     });
 
-    socket.on("call:hangup", async (data) => {
-      const { room, targetUserId } = data;
-      if (!room) return;
+    const handleCallHangup = async (data) => {
+      const { room, targetUserId } = data || {};
+      if (!room || !socket.userId) return;
 
-      console.log(`📴 [call:hangup] User ${socket.userId} explicitly hung up call room ${room}`);
-      cancelRoomTeardown(room);
-
-      // 1. Notify everyone in the room that call is ended
-      io.to(room).emit("call:ended", { room, endedBy: socket.userId });
-
-      // 2. Also notify target user's personal room in case they were ringing
-      if (targetUserId) {
-        io.to(getUserRoom(targetUserId.toString())).emit("call:ended", { room, endedBy: socket.userId });
-        socket.to(getUserRoom(targetUserId.toString())).emit("call:response-received", {
-          room,
-          response: "cancelled",
-          from: (socket.userId || "").toString(),
-        });
-      }
-
-      // 3. Mark session ended in database
       try {
         const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
-        if (session) {
+        if (!session) return;
+        const participant = session.participants.find((p) => String(p.user) === String(socket.userId));
+        if (!participant) {
+          console.warn(`🛡️ Blocked hangup by non-participant ${socket.userId} for ${room}`);
+          return;
+        }
+
+        const isHost = String(session.initiator) === String(socket.userId) || participant.role === "host";
+        const isGroup = ["group", "channel"].includes(session.type) || session.participants.length > 2;
+        const endForEveryone = !isGroup || isHost;
+        cancelRoomTeardown(room);
+
+        const invitedTarget = targetUserId && session.participants.some(
+          (p) => String(p.user) === String(targetUserId)
+        ) ? String(targetUserId) : null;
+
+        if (endForEveryone) {
           session.status = "ended";
           session.endTime = new Date();
           session.participants.forEach((p) => {
@@ -1452,36 +1461,47 @@ export const initializeSocket = (httpServer) => {
             }
           });
           await session.save();
+          io.to(room).emit("call:ended", { room, endedBy: socket.userId });
+          if (invitedTarget) {
+            io.to(getUserRoom(invitedTarget)).emit("call:ended", { room, endedBy: socket.userId });
+            io.to(getUserRoom(invitedTarget)).emit("call:response-received", {
+              room, response: "cancelled", from: String(socket.userId),
+            });
+          }
           recordCallLogMessage(session).catch(() => null);
+        } else {
+          participant.status = "left";
+          participant.leftAt = new Date();
+          await session.save();
+          socket.leave(room);
+          socketCallRooms.get(socket.id)?.delete(room);
+          socket.to(room).emit("call:peer-left", { room, userId: socket.userId, socketId: socket.id });
         }
       } catch (err) {
-        console.error("[call:hangup DB error]:", err);
+        console.error("[call:hangup] authorization/state update failed:", err);
       }
-    });
+    };
+
+    socket.on("call:hangup", handleCallHangup);
 
     // =====================================================
     // IN-CALL CHAT, ATTACHMENTS, PINNING & REACTIONS ENGINE
     // =====================================================
     socket.on("call:chat-message", (data) => {
-      const { room, text, id, senderName, senderAvatar, replyTo, from, file, attachments } = data;
-      if (!room || (!text && !file && (!attachments || attachments.length === 0))) return;
+      const { room, text, id, senderName, senderAvatar, replyTo, file, attachments } = data || {};
+      if (!isSocketInCallRoom(socket, room)) return;
+      if ((!text && !file && (!Array.isArray(attachments) || attachments.length === 0)) ||
+          (typeof text === "string" && text.length > 5000) ||
+          (Array.isArray(attachments) && attachments.length > 10)) return;
 
-      if (!socket.rooms.has(room)) {
-        socket.join(room);
-      }
-
-      const senderId = socket.userId || from || socket.id;
-      console.log(`💬 [In-Call Chat] Message from "${senderName}" (${senderId}) in room "${room}"`);
-
-      // Relay the rich message with file attachments to all other participants in the room
       socket.to(room).emit("call:chat-message-received", {
         id: id || Date.now().toString(),
-        from: senderId,
-        senderName: senderName || "Participant",
-        senderAvatar: senderAvatar || null,
-        text: text || "",
+        from: socket.userId,
+        senderName: socket.userName || "Participant",
+        senderAvatar: socket.profilePicture || null,
+        text: typeof text === "string" ? text : "",
         file: file || null,
-        attachments: attachments || (file ? [file] : []),
+        attachments: Array.isArray(attachments) ? attachments : (file ? [file] : []),
         replyTo: replyTo || null,
         pinned: false,
         reactions: {},
@@ -1490,72 +1510,57 @@ export const initializeSocket = (httpServer) => {
     });
 
     socket.on("call:chat-reaction", (data) => {
-      const { room, messageId, emoji } = data;
-      if (!room || !messageId || !emoji) return;
-
-      if (!socket.rooms.has(room)) {
-        socket.join(room);
-      }
-
-      const userId = socket.userId || data.from || socket.id;
-      console.log(`✨ [In-Call Chat Reaction] User "${userId}" reacted "${emoji}" to message "${messageId}" in room "${room}"`);
+      const { room, messageId, emoji } = data || {};
+      if (!isSocketInCallRoom(socket, room) || !messageId ||
+          typeof emoji !== "string" || emoji.length > 12) return;
 
       io.to(room).emit("call:chat-reaction-received", {
         messageId,
         emoji,
-        userId,
-        senderName: data.senderName || "Participant",
+        userId: socket.userId,
+        senderName: socket.userName || "Participant",
       });
     });
 
-    socket.on("call:pin-message", (data) => {
-      const { room, messageId, pinned } = data;
-      if (!room || !messageId) return;
-
-      if (!socket.rooms.has(room)) {
-        socket.join(room);
-      }
-
-      console.log(`📌 [In-Call Pin] Message ${messageId} pinned=${pinned} in room ${room}`);
-      // Synchronize pinned message state across all attendees
+    socket.on("call:pin-message", async (data) => {
+      const { room, messageId, pinned } = data || {};
+      if (!isSocketInCallRoom(socket, room) || !messageId) return;
+      const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+      const participant = session?.participants.find((p) => String(p.user) === String(socket.userId));
+      const isHost = session && (
+        String(session.initiator) === String(socket.userId) || participant?.role === "host"
+      );
+      if (!isHost) return;
       io.to(room).emit("call:message-pinned", {
-        messageId,
-        pinned: Boolean(pinned),
-        pinnedBy: socket.userId || socket.id,
+        messageId, pinned: Boolean(pinned), pinnedBy: socket.userId,
       });
     });
 
-    socket.on("call:recording-status", (data) => {
-      const { room, isRecording } = data;
-      if (!room) return;
-
-      if (!socket.rooms.has(room)) {
-        socket.join(room);
-      }
-
-      console.log(`🔴 [In-Call Recording] Status in room ${room}: isRecording=${isRecording}`);
+    socket.on("call:recording-status", async (data) => {
+      const { room, isRecording } = data || {};
+      if (!isSocketInCallRoom(socket, room)) return;
+      const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+      const participant = session?.participants.find((p) => String(p.user) === String(socket.userId));
+      const isHost = session && (
+        String(session.initiator) === String(socket.userId) || participant?.role === "host"
+      );
+      if (!isHost) return;
       io.to(room).emit("call:recording-status-changed", {
         isRecording: Boolean(isRecording),
-        startedBy: socket.userId || socket.id,
-        startedByName: data.userName || "Participant",
+        startedBy: socket.userId,
+        startedByName: socket.userName || "Participant",
       });
     });
 
     // In-Call Live Typing Indicator Event
     socket.on("call:typing", (data) => {
-      const { room, senderName, senderAvatar, isTyping } = data;
-      if (!room) return;
-
-      if (!socket.rooms.has(room)) {
-        socket.join(room);
-      }
-
-      const senderId = socket.userId || data.from || socket.id;
+      const { room, isTyping } = data || {};
+      if (!isSocketInCallRoom(socket, room)) return;
       socket.to(room).emit("call:user-typing", {
         room,
-        userId: senderId,
-        userName: senderName || "Participant",
-        userAvatar: senderAvatar || null,
+        userId: socket.userId,
+        userName: socket.userName || "Participant",
+        userAvatar: socket.profilePicture || null,
         isTyping: Boolean(isTyping),
       });
     });
@@ -1564,60 +1569,36 @@ export const initializeSocket = (httpServer) => {
     // CO-WATCHING WATCH PARTY EVENTS
     // =====================================================
     socket.on("call:watch-party-start", (data) => {
-      const { room, videoUrl } = data;
-      socket.to(room).emit("call:watch-party-started", {
-        videoUrl,
-        startedBy: socket.userId,
-      });
+      const { room, videoUrl } = data || {};
+      if (!isSocketInCallRoom(socket, room) || typeof videoUrl !== "string" || videoUrl.length > 2000) return;
+      socket.to(room).emit("call:watch-party-started", { videoUrl, startedBy: socket.userId });
     });
 
     socket.on("call:watch-party-stop", (data) => {
-      const { room } = data;
-      socket.to(room).emit("call:watch-party-stopped", {
-        stoppedBy: socket.userId,
-      });
+      const { room } = data || {};
+      if (!isSocketInCallRoom(socket, room)) return;
+      socket.to(room).emit("call:watch-party-stopped", { stoppedBy: socket.userId });
     });
 
     socket.on("call:watch-party-sync", (data) => {
-      const { room, action, currentTime, playing } = data; // action: 'play', 'pause', 'seek'
+      const { room, action, currentTime, playing } = data || {};
+      if (!isSocketInCallRoom(socket, room) || !["play", "pause", "seek"].includes(action)) return;
+      if (typeof currentTime !== "number" || !Number.isFinite(currentTime) || currentTime < 0) return;
       socket.to(room).emit("call:watch-party-synced", {
-        action,
-        currentTime,
-        playing,
-        senderId: socket.userId,
+        action, currentTime, playing: Boolean(playing), senderId: socket.userId,
       });
     });
 
     // In-Call Reaction Emojis
     socket.on("call:reaction", (data) => {
-      const { room, emoji } = data;
-      io.to(room).emit("call:reaction-received", {
-        emoji,
-        senderId: socket.userId,
-      });
+      const { room, emoji } = data || {};
+      if (!isSocketInCallRoom(socket, room) || typeof emoji !== "string" || emoji.length > 12) return;
+      io.to(room).emit("call:reaction-received", { emoji, senderId: socket.userId });
     });
 
     // Explicit Call End Event
-    socket.on("call:end", async (data) => {
-      const { room } = data;
-      console.log(`🛑 Call ended in room ${room} by ${socket.userId}`);
-      socket.to(room).emit("call:ended", { room, endedBy: socket.userId });
-      io.to(room).emit("call:ended", { room, endedBy: socket.userId });
-
-      try {
-        const session = await CallSession.findOneAndUpdate(
-          { room, status: { $ne: "ended" } },
-          { status: "ended", endTime: new Date() },
-          { returnDocument: 'after' }
-        );
-        if (session) {
-          recordCallLogMessage(session).catch(() => null);
-        }
-      } catch (e) {
-        console.warn("Could not mark call session ended in db:", e);
-      }
-    });
-
+    // Explicit Call End Event; shares the same participant/host policy as hangup.
+    socket.on("call:end", handleCallHangup);
 
     // =====================================================
     // VYBE MEET REAL-TIME CONFERENCING ENGINE
