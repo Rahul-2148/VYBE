@@ -348,6 +348,28 @@ export const CallManager = () => {
         console.warn("Snackbar call skipped:", err);
       }
 
+      // Create the authoritative server session before sending the invitation.
+      // Otherwise a fast recipient could join a client-chosen room before membership exists.
+      try {
+        const response = await api.post("/call/initiate", {
+          room,
+          type: dbType,
+          receiverId: targetUserId,
+          conversationId,
+        });
+        if (!response.data?.success || !response.data?.session) {
+          throw new Error(response.data?.message || "Call session could not be created");
+        }
+      } catch (err) {
+        stopOutgoingSound();
+        clearRingTimeout();
+        setActiveCall(null);
+        snackbar.error(
+          err.response?.data?.message || err.message || "Unable to start this call"
+        );
+        return;
+      }
+
       // 2. Emit invite signal via socket with retry resilience
       const currentUser = userDataRef.current?.user || userDataRef.current;
       const callerAvatarUrl = currentUser?.profileImage?.url || 
@@ -390,15 +412,6 @@ export const CallManager = () => {
         setActiveCall(null);
       }, RING_TIMEOUT_MS);
 
-      // 4. Non-blocking backend session initiation
-      api.post("/call/initiate", {
-        room,
-        type: dbType,
-        receiverId: targetUserId,
-        conversationId,
-      }).catch((err) => {
-        console.warn("DB call initiate sync warning:", err?.message);
-      });
     };
 
     window.addEventListener("vybe:initiate-call", handleInitiateCallEvent);
