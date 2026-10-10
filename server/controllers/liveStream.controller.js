@@ -56,12 +56,32 @@ export const startLiveStream = async (req, res) => {
 
 export const getActiveLiveStreams = async (req, res) => {
   try {
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
     const lives = await LiveStream.find({ isLive: true })
       .sort({ createdAt: -1 })
       .populate("host", "name userName profileImage isVerified")
       .populate("coHost", "name userName profileImage isVerified");
 
-    return res.status(200).json({ success: true, lives });
+    const restrictedHostIds = lives
+      .filter((live) => live.audience === "close_friends" &&
+        String(live.host?._id || live.host) !== String(userId))
+      .map((live) => String(live.host?._id || live.host));
+    const uniqueHostIds = [...new Set(restrictedHostIds)];
+    const hostPrivacy = uniqueHostIds.length
+      ? await User.find({ _id: { $in: uniqueHostIds } }).select("closeFriends").lean()
+      : [];
+    const closeFriendsByHost = new Map(
+      hostPrivacy.map((host) => [String(host._id), new Set((host.closeFriends || []).map(String))])
+    );
+
+    const visibleLives = lives.filter((live) => {
+      if (live.audience !== "close_friends" || String(live.host?._id || live.host) === String(userId)) return true;
+      return closeFriendsByHost.get(String(live.host?._id || live.host))?.has(String(userId)) === true;
+    });
+
+    return res.status(200).json({ success: true, lives: visibleLives });
   } catch (error) {
     return res.status(500).json({ success: false, message: `getActiveLives error: ${error.message}` });
   }
@@ -72,14 +92,25 @@ export const getActiveLiveStreams = async (req, res) => {
 export const getLiveStreamDetails = async (req, res) => {
   try {
     const { streamId } = req.params;
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const baseLive = await LiveStream.findById(streamId).select("host audience");
+    if (!baseLive) {
+      return res.status(404).json({ success: false, message: "Live stream not found" });
+    }
+    if (baseLive.audience === "close_friends" && String(baseLive.host) !== String(userId)) {
+      const host = await User.findById(baseLive.host).select("closeFriends").lean();
+      const isCloseFriend = (host?.closeFriends || []).some((id) => String(id) === String(userId));
+      if (!isCloseFriend) {
+        return res.status(403).json({ success: false, message: "This live stream is limited to close friends" });
+      }
+    }
+
     const live = await LiveStream.findById(streamId)
       .populate("host", "name userName profileImage isVerified bio followers")
       .populate("coHost", "name userName profileImage isVerified")
       .populate("viewers", "name userName profileImage isVerified");
-
-    if (!live) {
-      return res.status(404).json({ success: false, message: "Live stream not found" });
-    }
 
     return res.status(200).json({ success: true, live });
   } catch (error) {
@@ -92,7 +123,6 @@ export const getLiveStreamDetails = async (req, res) => {
 export const endLiveStream = async (req, res) => {
   try {
     const { streamId } = req.params;
-    const { totalHearts = 0 } = req.body;
     const live = await LiveStream.findById(streamId);
 
     if (!live) return res.status(404).json({ success: false, message: "Live stream not found" });
@@ -109,7 +139,8 @@ export const endLiveStream = async (req, res) => {
     live.archiveExpiresAt = archiveExpiry();
     live.stats = {
       durationSeconds,
-      totalHearts: Number(totalHearts) || live.stats?.totalHearts || 0,
+      // Engagement totals are maintained server-side; never trust client-submitted counters.
+      totalHearts: Math.max(0, Math.floor(Number(live.stats?.totalHearts) || 0)),
       totalComments: live.comments.length,
     };
     await live.save();
@@ -284,6 +315,17 @@ export const deleteArchive = async (req, res) => {
 export const getReplay = async (req, res) => {
   try {
     const { streamId } = req.params;
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+    const baseLive = await LiveStream.findById(streamId).select("host audience recording");
+    if (!baseLive) return res.status(404).json({ success: false, message: "Stream not found" });
+    if (baseLive.audience === "close_friends" && String(baseLive.host) !== String(userId)) {
+      const host = await User.findById(baseLive.host).select("closeFriends").lean();
+      const isCloseFriend = (host?.closeFriends || []).some((id) => String(id) === String(userId));
+      if (!isCloseFriend) {
+        return res.status(403).json({ success: false, message: "This replay is limited to close friends" });
+      }
+    }
     const live = await LiveStream.findById(streamId)
       .populate("host", "name userName profileImage isVerified")
       .select("title recording stats startedAt endedAt peakViewers host audience");
@@ -336,6 +378,16 @@ export const submitLiveQuestion = async (req, res) => {
     const live = await LiveStream.findById(streamId);
     if (!live || !live.isLive) {
       return res.status(404).json({ success: false, message: "Live stream not active" });
+    }
+    if (live.audience === "close_friends" && String(live.host) !== String(userId)) {
+      const host = await User.findById(live.host).select("closeFriends").lean();
+      const isCloseFriend = (host?.closeFriends || []).some((id) => String(id) === String(userId));
+      if (!isCloseFriend) {
+        return res.status(403).json({ success: false, message: "This live stream is limited to close friends" });
+      }
+    }
+    if (typeof text !== "string" || !text.trim() || text.length > 1000) {
+      return res.status(400).json({ success: false, message: "Question text must be 1-1000 characters" });
     }
 
     const user = await User.findById(userId).select("userName profileImage name");

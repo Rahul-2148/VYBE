@@ -3,7 +3,7 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import QRCode from "qrcode";
 import uploadOnCloudinary from "../config/cloudinary.js";
-import { generateAccessToken, generateRefreshToken } from "../config/generateToken.js";
+import { generateAccessToken, generateRefreshToken, getRefreshTokenSecret } from "../config/generateToken.js";
 import {
   getAccessTokenCookieOptions,
   getRefreshTokenCookieOptions,
@@ -80,8 +80,13 @@ const getOrCreateDeviceGroupId = (req, res) => {
     deviceGroupId = crypto.randomBytes(16).toString("hex");
     res.cookie("deviceGroupId", deviceGroupId, {
       httpOnly: true,
-      secure: process.env.COOKIE_SECURE === "true" || false,
-      sameSite: process.env.COOKIE_SAME_SITE || "lax",
+      secure:
+        process.env.COOKIE_SECURE === undefined
+          ? process.env.NODE_ENV === "production"
+          : process.env.COOKIE_SECURE === "true",
+      sameSite:
+        process.env.COOKIE_SAME_SITE ||
+        (process.env.NODE_ENV === "production" ? "none" : "lax"),
       maxAge: 365 * 24 * 60 * 60 * 1000,
       path: "/",
     });
@@ -94,16 +99,34 @@ export const signUp = async (req, res) => {
   try {
     const { name, email, password, userName } = req.body || {};
 
-    if (!name || !email || !password || !userName) {
+    if (
+      typeof name !== "string" ||
+      typeof email !== "string" ||
+      typeof password !== "string" ||
+      typeof userName !== "string" ||
+      !name.trim() ||
+      !email.trim() ||
+      !password ||
+      !userName.trim()
+    ) {
       return res.status(400).json({
         success: false,
         error: true,
-        message: "Name, email, password, and username are required",
+        message: "Name, email, password, and username are required as valid strings",
       });
     }
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanUserName = userName.trim().toLowerCase();
+
+    // Validate before interpolating the username into a case-insensitive regex query.
+    if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(cleanUserName)) {
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Username must be 3-30 characters and contain only letters, numbers, dots, hyphens, or underscores",
+      });
+    }
 
     if (!isValidEmailAddress(cleanEmail)) {
       return res.status(400).json({
@@ -152,7 +175,7 @@ export const signUp = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+    const otp = crypto.randomInt(100000, 1000000).toString(); // 6-digit OTP
     const otpExpiresAt = Date.now() + 15 * 60 * 1000; // 15 mins
 
     // Store in Redis (Fast TTL) with in-memory fallback
@@ -545,7 +568,7 @@ export const refreshToken = async (req, res) => {
       });
     }
 
-    const refreshSecret = process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET || "vybe_super_secret_refresh_key_2026";
+    const refreshSecret = getRefreshTokenSecret();
     let decoded;
 
     try {
@@ -560,7 +583,12 @@ export const refreshToken = async (req, res) => {
 
     const session = await Session.findById(decoded.sessionId);
 
-    if (!session || session.isRevoked || session.user.toString() !== decoded.userId.toString()) {
+    if (
+      !session ||
+      session.isRevoked ||
+      session.user.toString() !== decoded.userId.toString() ||
+      (session.expiresAt && new Date(session.expiresAt).getTime() <= Date.now())
+    ) {
       res.clearCookie("accessToken", getClearCookieOptions());
       res.clearCookie("refreshToken", getClearCookieOptions());
       res.clearCookie("token", getClearCookieOptions());
@@ -1083,7 +1111,7 @@ export const sendOtp = async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ success: false, error: true, message: "User not found" });
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+    const otp = crypto.randomInt(100000, 1000000).toString(); // 6-digit OTP
     const otpExpiresAt = Date.now() + 15 * 60 * 1000; // 15 mins
     const token = crypto.randomBytes(32).toString("hex");
 

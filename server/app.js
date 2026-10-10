@@ -8,12 +8,14 @@ import cron from "node-cron";
 import { cleanupExpiredMessages } from "./utils/cronJob/cleanupDisappearingMessages.js";
 import { cleanupExpiredStories } from "./utils/cronJob/storyCleanup.js";
 import { cleanupExpiredPremiumPayments } from "./utils/cronJob/premiumPaymentCleanup.js";
+import { runScheduledMessagesDispatcher } from "./utils/cronJob/dispatchScheduledJob.js";
 import { errorMiddleware } from "./utils/errorHandler.js";
 
 // Cron jobs
 cron.schedule("*/1 * * * *", cleanupExpiredMessages); // every 1 min
 cron.schedule("*/30 * * * * *", cleanupExpiredStories); // every 30 sec
 cron.schedule("*/5 * * * *", cleanupExpiredPremiumPayments); // every 5 min
+cron.schedule("*/30 * * * * *", runScheduledMessagesDispatcher); // dispatch scheduled DMs every 30 sec
 
 // Import routes
 import authRouter from "./routes/auth.route.js";
@@ -37,10 +39,15 @@ import { setSecurityHeaders } from "./middlewares/securityHeaders.js";
 import { apiRateLimiter } from "./middlewares/rateLimiter.js";
 
 const app = express();
+// Honor forwarded client IPs only when deployment config confirms one trusted proxy.
+if (process.env.TRUST_PROXY === "1") app.set("trust proxy", 1);
 const allowedOrigins = (process.env.CORS_ORIGINS || process.env.CLIENT_URL || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const isDevelopment = process.env.NODE_ENV !== "production";
+const isLocalDevelopmentOrigin = (origin) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin);
 
 // Security & Performance Middlewares
 app.use(setSecurityHeaders);
@@ -51,14 +58,16 @@ app.use(compression());
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (
-        !origin ||
-        allowedOrigins.length === 0 ||
-        allowedOrigins.includes(origin) ||
-        /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin)
-      ) {
+      // Non-browser clients do not send an Origin header; CORS is not an auth control.
+      if (!origin || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
+
+      // Permit local development origins only outside production.
+      if (isDevelopment && (allowedOrigins.length === 0 || isLocalDevelopmentOrigin(origin))) {
+        return callback(null, true);
+      }
+
       return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,

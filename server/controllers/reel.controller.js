@@ -1301,5 +1301,73 @@ export const getReelTranscript = async (req, res) => {
   }
 };
 
+/* ================= REELS FRIENDS ACTIVITY ================= */
+export const getFriendsReelsActivity = async (req, res) => {
+  try {
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const currentUser = await User.findById(userId).select("following blockedUsers");
+    const followingIds = currentUser?.following || [];
+
+    if (!followingIds.length) {
+      return res.status(200).json({
+        success: true,
+        reels: [],
+        message: "Follow creators and friends to see their activity here",
+      });
+    }
+
+    const blockedIds = await getBlockedUserIds(userId);
+    const excludedAuthorIds = await getExcludedAuthorIdsForFeed(userId);
+    const allExcluded = new Set([...blockedIds, ...excludedAuthorIds].map((id) => id.toString()));
+
+    const query = {
+      author: { $nin: Array.from(allExcluded) },
+      $or: [
+        { author: { $in: followingIds } },
+        { likes: { $in: followingIds } },
+        { reshares: { $in: followingIds } },
+      ],
+    };
+
+    const reels = await Reel.find(query)
+      .populate("author", "userName profileImage isVerified bio")
+      .populate("audioTrack")
+      .populate({
+        path: "comments.author",
+        select: "userName profileImage isVerified",
+      })
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .lean();
+
+    const enrichedReels = reels.map((reel) => {
+      const isAuthoredByFriend = followingIds.some((fId) => fId.toString() === reel.author?._id?.toString());
+      const likedByFriendId = reel.likes?.find((likeId) => followingIds.some((fId) => fId.toString() === likeId.toString()));
+      const resharedByFriendId = reel.reshares?.find((shareId) => followingIds.some((fId) => fId.toString() === shareId.toString()));
+
+      return {
+        ...reel,
+        activityContext: isAuthoredByFriend
+          ? { type: "authored" }
+          : likedByFriendId
+          ? { type: "liked", friendUserId: likedByFriendId }
+          : resharedByFriendId
+          ? { type: "reshared", friendUserId: resharedByFriendId }
+          : null,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      reels: enrichedReels,
+    });
+  } catch (error) {
+    console.error("getFriendsReelsActivity error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 
 

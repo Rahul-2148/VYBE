@@ -68,6 +68,23 @@ const liveStreamSchema = new mongoose.Schema(
       pinnedAt: Date,
     },
 
+    // Audience Q&A shown during a live stream.
+    questions: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+        },
+        userName: { type: String, default: "Viewer", maxlength: 50 },
+        userAvatar: { type: String, default: "" },
+        text: { type: String, required: true, maxlength: 1000 },
+        isAnswered: { type: Boolean, default: false },
+        isDisplayed: { type: Boolean, default: false },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+
     // Comments
     comments: [
       {

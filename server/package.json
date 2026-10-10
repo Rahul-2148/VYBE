@@ -11,7 +11,7 @@
     "create-admin": "node scripts/createSuperAdmin.js",
     "build": "node scripts/check-all.js",
     "check": "node scripts/check-all.js",
-    "test": "node scripts/check-all.js"
+    "test": "node scripts/check-all.js && node --test tests/security-config.test.js"
   },
   "author": "Rahul Raj Modi",
   "license": "ISC",

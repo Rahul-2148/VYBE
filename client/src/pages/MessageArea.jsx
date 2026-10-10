@@ -21,6 +21,7 @@ import ChatInfoDrawer from "../components/ChatInfoDrawer";
 import ChatThemePickerModal from "../components/ChatThemePickerModal";
 import VybeExpressionPicker from "../components/VybeExpressionPicker";
 import ForwardMessageModal from "../components/ForwardMessageModal";
+import ScheduleMessageModal from "../components/ScheduleMessageModal";
 import VerifiedBadge from "../components/VerifiedBadge";
 import useMessageSocketEvents from "../hooks/useMessageSocketEvents";
 import useTypingIndicator from "../hooks/useTypingIndicator";
@@ -226,6 +227,8 @@ export const MessageArea = () => {
   const [showPicker, setShowPicker] = useState({ open: false, tab: "emojis" });
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
+  const [isViewOnce, setIsViewOnce] = useState(false);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
 
   const messagesRef = useRef(messages);
   useEffect(() => {
@@ -616,6 +619,7 @@ export const MessageArea = () => {
         text: input.trim(),
         media: frontendFiles.map((url) => ({ url, type: "image" })),
       },
+      isViewOnce,
       replyTo: replyTo || null,
       status: "sending",
       createdAt: new Date().toISOString(),
@@ -629,11 +633,13 @@ export const MessageArea = () => {
     const savedInput = input;
     const savedFiles = backendFiles;
     const savedReplyTo = replyTo;
+    const savedIsViewOnce = isViewOnce;
 
     setInput("");
     setFrontendFiles([]);
     setBackendFiles([]);
     setReplyTo(null);
+    setIsViewOnce(false);
     inputRef.current?.focus();
 
     try {
@@ -650,6 +656,7 @@ export const MessageArea = () => {
         savedFiles.forEach((file) => fd.append("media", file));
       }
       if (savedReplyTo) fd.append("replyTo", savedReplyTo._id);
+      if (savedIsViewOnce) fd.append("isViewOnce", "true");
 
       const res = await api.post("/message/send", fd, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -1386,21 +1393,43 @@ export const MessageArea = () => {
 
       {/* ===== FILE PREVIEW ===== */}
       {frontendFiles.length > 0 && (
-        <div className="px-4 py-2 border-t border-border bg-surface flex gap-2 overflow-x-auto hide-scrollbar shrink-0">
-          {frontendFiles.map((url, i) => (
-            <div key={i} className="relative group shrink-0">
-              <img src={url} alt="" className="w-16 h-16 rounded-xl object-cover border border-border shadow-xs" />
-              <button
-                onClick={() => {
-                  setFrontendFiles((p) => p.filter((_, idx) => idx !== i));
-                  setBackendFiles((p) => p.filter((_, idx) => idx !== i));
-                }}
-                className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-surface-hover rounded-full flex items-center justify-center shadow transition cursor-pointer"
-              >
-                <X className="w-3 h-3 text-text-secondary" />
-              </button>
+        <div className="px-4 py-2 border-t border-border bg-surface flex items-center justify-between gap-3 shrink-0">
+          <div className="flex gap-2 overflow-x-auto hide-scrollbar flex-1 min-w-0">
+            {frontendFiles.map((url, i) => (
+              <div key={i} className="relative group shrink-0">
+                <img src={url} alt="" className="w-16 h-16 rounded-xl object-cover border border-border shadow-xs" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFrontendFiles((p) => p.filter((_, idx) => idx !== i));
+                    setBackendFiles((p) => p.filter((_, idx) => idx !== i));
+                  }}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-surface-hover rounded-full flex items-center justify-center shadow transition cursor-pointer"
+                >
+                  <X className="w-3 h-3 text-text-secondary" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Instagram-style View Once toggle */}
+          <button
+            type="button"
+            onClick={() => setIsViewOnce((prev) => !prev)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition cursor-pointer shrink-0 select-none ${
+              isViewOnce
+                ? "bg-gradient-to-r from-pink-500 to-purple-600 text-white shadow-md ring-2 ring-purple-400/50"
+                : "bg-surface-hover text-text-secondary hover:text-text border border-border"
+            }`}
+            title="Toggle View Once: Recipient can only open this photo/video once"
+          >
+            <div className={`w-4 h-4 rounded-full flex items-center justify-center border text-[10px] font-black ${
+              isViewOnce ? "border-white bg-white/20" : "border-text-secondary"
+            }`}>
+              1
             </div>
-          ))}
+            <span>{isViewOnce ? "View once" : "Allow replay"}</span>
+          </button>
         </div>
       )}
 
@@ -1613,6 +1642,15 @@ export const MessageArea = () => {
 
                       <button
                         type="button"
+                        onClick={() => setShowScheduleModal(true)}
+                        className="p-1.5 text-text-secondary hover:text-primary transition cursor-pointer rounded-full hover:bg-surface-hover"
+                        title="Schedule message"
+                      >
+                        <Clock className="w-5 h-5" />
+                      </button>
+
+                      <button
+                        type="button"
                         data-expression-trigger="true"
                         onClick={() => setShowPicker({ open: true, tab: "stickers" })}
                         className="p-1.5 text-text-secondary hover:text-rose-400 transition cursor-pointer rounded-full hover:bg-surface-hover"
@@ -1677,6 +1715,19 @@ export const MessageArea = () => {
 
       {/* ===== FORWARD MESSAGE MODAL ===== */}
       <ForwardMessageModal />
+
+      {/* ===== SCHEDULE MESSAGE MODAL ===== */}
+      {showScheduleModal && (
+        <ScheduleMessageModal
+          isOpen={showScheduleModal}
+          onClose={() => setShowScheduleModal(false)}
+          conversationId={selectedChatUser?.conversationId}
+          initialText={input}
+          onScheduledSuccess={() => {
+            setInput("");
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { Session } from "../models/session.model.js";
-import { generateAccessToken, generateRefreshToken } from "../config/generateToken.js";
+import { generateAccessToken, generateRefreshToken, getAccessTokenSecret, getRefreshTokenSecret } from "../config/generateToken.js";
 import {
   getAdminAccessTokenCookieOptions,
   getAdminRefreshTokenCookieOptions,
@@ -29,7 +29,7 @@ const isAdminAuthenticated = async (req, res, next) => {
       token = req.headers.authorization.split(" ")[1];
     }
 
-    const secret = process.env.JWT_SECRET || "vybe_super_secret_jwt_key_2026";
+    const secret = getAccessTokenSecret();
     let decoded = null;
 
     if (token) {
@@ -58,16 +58,13 @@ const isAdminAuthenticated = async (req, res, next) => {
         });
       }
 
-      const refreshSecret =
-        process.env.REFRESH_TOKEN_SECRET ||
-        process.env.JWT_SECRET ||
-        "vybe_super_secret_refresh_key_2026";
+      const refreshSecret = getRefreshTokenSecret();
 
       try {
         const refreshDecoded = jwt.verify(rawRefreshToken, refreshSecret);
         if (refreshDecoded && refreshDecoded.userId && refreshDecoded.sessionId) {
           const session = await Session.findById(refreshDecoded.sessionId);
-          if (session && !session.isRevoked) {
+          if (session && !session.isRevoked && String(session.user) === String(refreshDecoded.userId)) {
             const incomingHash = crypto.createHash("sha256").update(rawRefreshToken).digest("hex");
 
             if (incomingHash === session.refreshTokenHash) {
@@ -129,10 +126,25 @@ const isAdminAuthenticated = async (req, res, next) => {
       });
     }
 
+    // Admin tokens must be bound to a database session so revocation and ownership checks cannot be bypassed.
+    if (!decoded.sessionId) {
+      return res.status(401).json({
+        success: false,
+        error: true,
+        code: "SESSION_INVALID",
+        message: "Admin authentication session is missing. Please sign in again.",
+      });
+    }
+
     // Verify session validity
     if (decoded.sessionId) {
       const activeSession = await Session.findById(decoded.sessionId);
-      if (!activeSession || activeSession.isRevoked) {
+      if (
+        !activeSession ||
+        activeSession.isRevoked ||
+        String(activeSession.user) !== String(decoded.userId) ||
+        (activeSession.expiresAt && new Date(activeSession.expiresAt).getTime() <= Date.now())
+      ) {
         return res.status(401).json({
           success: false,
           error: true,
@@ -161,10 +173,11 @@ const isAdminAuthenticated = async (req, res, next) => {
     req.userId = decoded.userId;
     next();
   } catch (error) {
+    console.error("[admin auth middleware] Request authentication failed:", error.message);
     return res.status(500).json({
       success: false,
       error: true,
-      message: `Admin authentication middleware error: ${error.message}`,
+      message: "Admin authentication could not be completed. Please try again.",
     });
   }
 };

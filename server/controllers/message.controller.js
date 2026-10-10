@@ -263,6 +263,11 @@ export const sendMessage = async (req, res) => {
       disappearConfig.expireAt = new Date(Date.now() + duration * 1000);
     }
 
+    // Scheduled DM & View Once parameters
+    const isScheduled = req.body.scheduledFor && new Date(req.body.scheduledFor) > new Date(Date.now() + 5000);
+    const scheduledDate = isScheduled ? new Date(req.body.scheduledFor) : null;
+    const isViewOnce = Boolean(req.body.isViewOnce || req.body.viewOnce);
+
     let message;
     try {
       message = await Message.create({
@@ -273,7 +278,9 @@ export const sendMessage = async (req, res) => {
         replyTo,
         isForwarded: Boolean(isForwarded),
         forwardedFrom: forwardedFrom || undefined,
-        status: "sent",
+        status: isScheduled ? "scheduled" : "sent",
+        scheduledFor: scheduledDate || undefined,
+        isViewOnce: isViewOnce,
         disappear: disappearConfig.enabled ? disappearConfig : undefined,
         clientMessageId: clientMessageId || undefined,
       });
@@ -285,6 +292,15 @@ export const sendMessage = async (req, res) => {
         }
       }
       throw createErr;
+    }
+
+    if (isScheduled) {
+      const populatedScheduled = await message.populate("sender", "userName profileImage isVerified");
+      return res.status(201).json({
+        success: true,
+        message: populatedScheduled,
+        scheduled: true,
+      });
     }
 
     // Update lastMessage & unread counts atomically
@@ -329,16 +345,27 @@ export const sendMessage = async (req, res) => {
 export const sendVoiceNote = async (req, res) => {
   try {
     const userId = req.userId;
-    const { conversationId, duration } = req.body;
+    const { conversationId, duration } = req.body || {};
 
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
     if (!req.file) {
       return res.status(400).json({ success: false, message: "Audio file required for voice note" });
     }
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({ success: false, message: "Invalid conversation ID" });
+    }
 
-    const upload = await uploadOnCloudinary(req.file.path, "VYBE/messages/voice");
+    // Authorize the destination before uploading media or applying privacy rules.
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      participants: userId,
+    });
+    if (!conversation) return res.status(403).json({ message: "Not authorized to send voice notes to this conversation" });
 
-    const conversation = await Conversation.findById(conversationId);
-    if (!conversation) return res.status(404).json({ message: "Conversation not found" });
+    const safeDuration = Number(duration);
+    if (!Number.isFinite(safeDuration) || safeDuration < 0 || safeDuration > 600) {
+      return res.status(400).json({ success: false, message: "Voice note duration must be between 0 and 600 seconds" });
+    }
 
     // Block & Privacy check
     const privacyCheck = await checkMessagePrivacy(conversation, userId);
@@ -346,6 +373,7 @@ export const sendVoiceNote = async (req, res) => {
       return res.status(privacyCheck.status).json({ message: privacyCheck.message });
     }
 
+    const upload = await uploadOnCloudinary(req.file.path, "VYBE/messages/voice");
     const message = await Message.create({
       conversation: conversationId,
       sender: userId,
@@ -400,13 +428,22 @@ export const forwardMessage = async (req, res) => {
     const { messageId } = req.params;
     const { targetConversationIds } = req.body; // Array of conversation IDs
 
-    if (!targetConversationIds || targetConversationIds.length === 0) {
-      return res.status(400).json({ message: "Target conversations required" });
+    if (!Array.isArray(targetConversationIds) || targetConversationIds.length === 0 || targetConversationIds.length > 10) {
+      return res.status(400).json({ message: "Provide between 1 and 10 target conversations" });
+    }
+    if (!userId || !mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: "Invalid message ID" });
     }
 
     const originalMessage = await Message.findById(messageId);
     if (!originalMessage) return res.status(404).json({ message: "Message not found" });
-
+    const sourceConversation = await Conversation.findOne({
+      _id: originalMessage.conversation,
+      participants: userId,
+    }).select("_id");
+    if (!sourceConversation || (originalMessage.deletedFor || []).some((id) => String(id) === String(userId))) {
+      return res.status(403).json({ message: "You cannot forward a message you cannot access" });
+    }
     if (originalMessage.deletedForEveryone) {
       return res.status(400).json({ message: "Cannot forward deleted message" });
     }
@@ -468,7 +505,7 @@ export const forwardMessage = async (req, res) => {
     }
 
     // Increment forward count on original
-    originalMessage.forwardCount = (originalMessage.forwardCount || 0) + targetConversationIds.length;
+    originalMessage.forwardCount = (originalMessage.forwardCount || 0) + forwardedMessages.length;
     await originalMessage.save();
 
     res.status(201).json({ success: true, messages: forwardedMessages });
@@ -545,17 +582,25 @@ export const getMessages = async (req, res) => {
   try {
     const userId = req.userId;
     const { conversationId } = req.params;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 30;
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 30));
 
-    // Automatically delete seen vanish messages in this conversation
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({ message: "Invalid conversation ID" });
+    }
+
+    const conversation = await Conversation.findById(conversationId).select("participants");
+    if (!conversation || !conversation.participants.some((p) => String(p) === String(userId))) {
+      return res.status(403).json({ message: "Not authorized to access this conversation" });
+    }
+
+    // Only run expiring-message cleanup after confirming this user can access the conversation.
     await Message.deleteMany({
       conversation: conversationId,
       "disappear.afterSeen": true,
       status: "seen",
     });
-
-    if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const before = req.query.before;
     let filter = {
@@ -596,8 +641,20 @@ export const getSharedMedia = async (req, res) => {
     const userId = req.userId;
     const { conversationId } = req.params;
     const { mediaType } = req.query; // "image", "video", "file", "document", "link", "audio", "voice"
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
+
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({ message: "Invalid conversation ID" });
+    }
+    const authorizedConversation = await Conversation.findOne({
+      _id: conversationId,
+      participants: userId,
+    }).select("_id");
+    if (!authorizedConversation) {
+      return res.status(403).json({ message: "Not authorized to access this conversation" });
+    }
 
     let convFilter = conversationId;
     if (mongoose.Types.ObjectId.isValid(conversationId)) {
@@ -672,8 +729,17 @@ export const markConversationSeen = async (req, res) => {
   try {
     const userId = req.userId;
     const { conversationId } = req.params;
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({ success: false, message: "Invalid conversation ID" });
+    }
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      participants: userId,
+    });
+    if (!conversation) return res.status(403).json({ success: false, message: "Not authorized" });
 
-    // Always reset the current user's unread count for the conversation
+    // Only reset unread counters after confirming conversation membership.
     await Conversation.findByIdAndUpdate(conversationId, {
       $set: { [`unreadCount.${userId}`]: 0 },
     });
@@ -696,7 +762,6 @@ export const markConversationSeen = async (req, res) => {
 
     const io = req.app.locals.io;
     if (io) {
-      const conversation = await Conversation.findById(conversationId);
       conversation.participants.forEach((participantId) => {
         io.to(`user_${participantId}`).emit("messages-seen", {
           conversationId,
@@ -717,12 +782,25 @@ export const editMessage = async (req, res) => {
   try {
     const userId = req.userId;
     const { messageId } = req.params;
-    const { text } = req.body;
+    const text = req.body?.text;
 
+    if (!userId || typeof text !== "string" || !text.trim() || text.length > 5000) {
+      return res.status(400).json({ message: "A valid message text is required" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: "Invalid message ID" });
+    }
     const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ message: "Message not found" });
+    const conversationForEdit = await Conversation.findOne({
+      _id: message.conversation,
+      participants: userId,
+    }).select("participants");
+    if (!conversationForEdit) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
 
-    if (message.sender.toString() !== userId.toString()) {
+    if (String(message.sender) !== String(userId)) {
       return res.status(403).json({ message: "Not allowed" });
     }
 
@@ -807,7 +885,14 @@ export const deleteMessageForEveryone = async (req, res) => {
     const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ message: "Message not found" });
 
-    if (message.sender.toString() !== userId.toString()) {
+    const conversation = await Conversation.findOne({
+      _id: message.conversation,
+      participants: userId,
+    }).select("_id");
+    if (!conversation) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+    if (String(message.sender) !== String(userId)) {
       return res.status(403).json({ message: "You can only unsend/delete messages you sent." });
     }
 
@@ -850,12 +935,21 @@ export const markMessageAsSeen = async (req, res) => {
   try {
     const userId = req.userId;
     const { messageId } = req.params;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: "Invalid message ID" });
+    }
 
     const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ message: "Message not found" });
+    const conversation = await Conversation.findOne({
+      _id: message.conversation,
+      participants: userId,
+    }).select("_id");
+    if (!conversation) return res.status(403).json({ message: "Not authorized" });
 
     const alreadySeen = message.seenBy.some((s) =>
-      (s.user || s).toString() === userId.toString()
+      String(s.user?._id || s.user || s) === String(userId)
     );
 
     if (!alreadySeen) {
@@ -893,8 +987,11 @@ export const reactMessage = async (req, res) => {
     const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ success: false, message: "Message not found" });
 
-    const conversation = await Conversation.findById(message.conversation);
-    if (conversation && !conversation.participants.some((p) => (p?._id || p?.id || p)?.toString() === userId?.toString())) {
+    const conversation = await Conversation.findOne({
+      _id: message.conversation,
+      participants: userId,
+    }).select("participants");
+    if (!conversation) {
       return res.status(403).json({ success: false, message: "Not authorized" });
     }
 
@@ -957,6 +1054,16 @@ export const reactMessage = async (req, res) => {
 export const getPinnedMessages = async (req, res) => {
   try {
     const { conversationId } = req.params;
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({ message: "Invalid conversation ID" });
+    }
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      participants: userId,
+    }).select("_id");
+    if (!conversation) return res.status(403).json({ message: "Not authorized" });
 
     const messages = await Message.find({
       conversation: conversationId,
@@ -1012,7 +1119,7 @@ export const searchMessages = async (req, res) => {
     const { q, query, type, limit = 100 } = req.query;
     const userId = req.userId;
 
-    const searchTerm = (q || query || "").trim();
+    const searchTerm = String(q || query || "").trim().slice(0, 120);
 
     // Verify conversation access
     const conv = await Conversation.findOne({
@@ -1072,11 +1179,12 @@ export const searchMessages = async (req, res) => {
       }
     }
 
+    const safeLimit = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 100));
     const messages = await Message.find(filter)
       .populate("sender", "userName profileImage isVerified name")
       .populate("replyTo")
       .sort({ createdAt: 1 })
-      .limit(Number(limit));
+      .limit(safeLimit);
 
     return res.status(200).json({
       success: true,
@@ -1086,6 +1194,172 @@ export const searchMessages = async (req, res) => {
   } catch (error) {
     console.error("searchMessages error:", error);
     return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* ================= SCHEDULED MESSAGES ================= */
+export const getScheduledMessages = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const messages = await Message.find({
+      conversation: conversationId,
+      sender: userId,
+      status: "scheduled",
+    })
+      .populate("sender", "userName profileImage isVerified")
+      .sort({ scheduledFor: 1 });
+
+    return res.status(200).json({ success: true, messages });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+export const cancelScheduledMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const message = await Message.findOneAndDelete({
+      _id: messageId,
+      sender: userId,
+      status: "scheduled",
+    });
+
+    if (!message) {
+      return res.status(404).json({ success: false, message: "Scheduled message not found or already sent" });
+    }
+
+    return res.status(200).json({ success: true, message: "Scheduled message cancelled" });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ================= INSTANTS / VIEW ONCE EPHEMERAL MEDIA ================= */
+export const openViewOnceMedia = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const message = await Message.findById(messageId);
+    if (!message) return res.status(404).json({ success: false, message: "Message not found" });
+
+    if (!message.isViewOnce) {
+      return res.status(400).json({ success: false, message: "Message is not View Once media" });
+    }
+
+    const conversation = await Conversation.findOne({
+      _id: message.conversation,
+      participants: userId,
+    });
+    if (!conversation) {
+      return res.status(403).json({ success: false, message: "Not a participant in this conversation" });
+    }
+
+    const alreadyOpened = message.viewOnceOpenedBy?.some(
+      (v) => v.user?.toString() === userId.toString()
+    );
+
+    if (alreadyOpened) {
+      return res.status(410).json({
+        success: false,
+        message: "This media has already been viewed and expired",
+        expired: true,
+      });
+    }
+
+    message.viewOnceOpenedBy.push({
+      user: userId,
+      openedAt: new Date(),
+    });
+
+    await message.save();
+
+    // Socket real-time broadcast to ALL participants
+    const io = req.app.locals.io;
+    if (io) {
+      conversation.participants.forEach((pId) => {
+        io.to(`user_${pId}`).emit("message:view-once-opened", {
+          conversationId: message.conversation.toString(),
+          messageId: message._id.toString(),
+          openedBy: userId.toString(),
+        });
+      });
+    }
+
+    const mediaList = message.content?.media || [];
+    return res.status(200).json({
+      success: true,
+      messageId: message._id,
+      media: mediaList,
+      viewOnce: true,
+      openedAt: new Date(),
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ================= BACKGROUND DISPATCH FOR SCHEDULED MESSAGES ================= */
+export const dispatchScheduledMessages = async (io) => {
+  try {
+    const dueMessages = await Message.find({
+      status: "scheduled",
+      scheduledFor: { $lte: new Date() },
+    }).populate("sender", "userName profileImage isVerified");
+
+    if (!dueMessages || dueMessages.length === 0) return 0;
+
+    for (const msg of dueMessages) {
+      // Atomically claim the message so concurrent workers cannot double-dispatch
+      const claimedMsg = await Message.findOneAndUpdate(
+        { _id: msg._id, status: "scheduled" },
+        { $set: { status: "sent", dispatchedAt: new Date() } },
+        { returnDocument: "after" }
+      ).populate("sender", "userName profileImage isVerified");
+
+      if (!claimedMsg) continue; // Already processed by concurrent worker
+
+      const conv = await Conversation.findById(claimedMsg.conversation);
+      if (!conv) continue;
+
+      const incFields = {};
+      conv.participants.forEach((uid) => {
+        if (uid.toString() !== (claimedMsg.sender?._id || claimedMsg.sender).toString()) {
+          incFields[`unreadCount.${uid.toString()}`] = 1;
+        }
+      });
+
+      const updatedConv = await Conversation.findByIdAndUpdate(
+        msg.conversation,
+        {
+          $set: { lastMessage: msg._id },
+          ...(Object.keys(incFields).length > 0 ? { $inc: incFields } : {}),
+        },
+        { returnDocument: 'after' }
+      );
+
+      if (io && updatedConv) {
+        updatedConv.participants.forEach((participantId) => {
+          io.to(`user_${participantId}`).emit("message-received", {
+            conversationId: msg.conversation.toString(),
+            message: msg,
+            unreadCount: updatedConv.unreadCount?.get(participantId.toString()) || 0,
+          });
+        });
+      }
+    }
+
+    return dueMessages.length;
+  } catch (err) {
+    console.error("dispatchScheduledMessages error:", err.message);
+    return 0;
   }
 };
 

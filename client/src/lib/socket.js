@@ -22,15 +22,29 @@ export const initializeSocket = (userId) => {
     socket = null;
   }
 
-  const defaultHost =
-    typeof window !== "undefined" &&
-    window.location.hostname &&
-    window.location.hostname !== "localhost" &&
-    window.location.hostname !== "127.0.0.1"
-      ? (/^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname)
-          ? `http://${window.location.hostname}:8000`
-          : (import.meta.env.VITE_SOCKET_URL || "http://localhost:8000"))
-      : (import.meta.env.VITE_SOCKET_URL || "http://localhost:8000");
+  const configuredSocketUrl = (
+    import.meta.env.VITE_SOCKET_URL ||
+    import.meta.env.VITE_SERVER_URL ||
+    ""
+  ).trim().replace(/\/+$/, "");
+
+  let defaultHost = configuredSocketUrl;
+  if (!defaultHost) {
+    if (import.meta.env.PROD) {
+      throw new Error(
+        "VYBE configuration error: set VITE_SOCKET_URL or VITE_SERVER_URL to the backend origin before building the production client."
+      );
+    }
+
+    const host =
+      typeof window !== "undefined" && window.location.hostname
+        ? window.location.hostname
+        : "localhost";
+    defaultHost =
+      host !== "localhost" && host !== "127.0.0.1"
+        ? `http://${host}:8000`
+        : "http://localhost:8000";
+  }
 
   const socketURL = defaultHost;
   const socketPath = import.meta.env.VITE_SOCKET_PATH || "/socket.io";

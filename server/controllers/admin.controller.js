@@ -1959,7 +1959,12 @@ export const getPayoutsList = async (req, res) => {
 export const processPayout = async (req, res) => {
   try {
     const { monetizationId, payoutId } = req.params;
-    const { status } = req.body; // "paid", "rejected", "processing"
+    const { status, utrNumber, settlementNotes } = req.body; // "paid", "rejected", "processing"
+
+    const allowedStatuses = ["paid", "rejected", "processing"];
+    if (!status || !allowedStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: "Invalid payout status specified." });
+    }
 
     const mon = await Monetization.findById(monetizationId);
     if (!mon) return res.status(404).json({ success: false, message: "Monetization record not found." });
@@ -1967,7 +1972,36 @@ export const processPayout = async (req, res) => {
     const payout = (mon.payoutHistory || []).id(payoutId);
     if (!payout) return res.status(404).json({ success: false, message: "Payout record not found." });
 
-    payout.status = status || "paid";
+    if (payout.status === "paid") {
+      return res.status(400).json({ success: false, message: "This payout has already been finalized as paid and cannot be altered." });
+    }
+
+    if (payout.status === "rejected") {
+      return res.status(400).json({
+        success: false,
+        message: "This payout was already rejected and refunded to the creator. It cannot be altered.",
+      });
+    }
+
+    if (status === "paid" && (!utrNumber || !utrNumber.trim())) {
+      return res.status(400).json({
+        success: false,
+        message: "UTR number / bank transfer settlement reference is required when marking a payout as paid.",
+      });
+    }
+
+    const previousStatus = payout.status;
+    payout.status = status;
+    if (utrNumber) payout.utrNumber = utrNumber.trim();
+    if (settlementNotes) payout.settlementNotes = settlementNotes.trim();
+    payout.processedAt = new Date();
+    payout.processedBy = req.adminUser._id;
+
+    // Refund creator balance if rejected
+    if (status === "rejected" && previousStatus !== "rejected") {
+      mon.totalEarnings += payout.amount;
+    }
+
     await mon.save();
 
     await logAudit(
@@ -1976,11 +2010,16 @@ export const processPayout = async (req, res) => {
       "finance",
       payoutId,
       `Creator ${mon.creator}`,
-      { status, amount: payout.amount },
+      { status, amount: payout.amount, previousStatus, utrNumber },
       req
     );
 
-    return res.status(200).json({ success: true, message: `Payout status updated to ${status}.` });
+    return res.status(200).json({
+      success: true,
+      message: status === "rejected"
+        ? `Payout marked as rejected. ₹${payout.amount} has been refunded to creator balance.`
+        : `Payout status updated to ${status}.`,
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: `processPayout error: ${error.message}` });
   }

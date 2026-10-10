@@ -3,9 +3,11 @@ import { Server } from "socket.io";
 import { User } from "./models/user.model.js";
 import { Session } from "./models/session.model.js";
 import { Conversation } from "./models/conversation.model.js";
+import { Message } from "./models/message.model.js";
 import { parseCookie } from "cookie";
 import * as cookie from "cookie";
 import jwt from "jsonwebtoken";
+import { getAccessTokenSecret } from "./config/generateToken.js";
 import { Channel } from "./models/channel.model.js";
 import { Community } from "./models/community.model.js";
 import Redis from "ioredis";
@@ -13,7 +15,10 @@ import { createAdapter } from "@socket.io/redis-adapter";
 import { CallSession } from "./models/callSession.model.js";
 import { Meeting } from "./models/meeting.model.js";
 import { LiveStream } from "./models/liveStream.model.js";
+import { ChannelMessage } from "./models/channelMessage.model.js";
+import { Reel } from "./models/reel.model.js";
 import { recordCallLogMessage } from "./controllers/call.controller.js";
+import { canAccessChannel } from "./utils/communityPermissionHelper.js";
 
 const parseRawCookie = (cookieStr) => {
   if (!cookieStr) return {};
@@ -159,6 +164,78 @@ const isConversationParticipant = async (conversationId, userId) => {
   }
 };
 
+const getCommunityChannelMembership = async (channelId, userId) => {
+  try {
+    if (!channelId || !userId) return null;
+    const channel = await Channel.findById(channelId).select("community type isPrivate allowedRoles");
+    if (!channel) return null;
+    const community = await Community.findById(channel.community).select("owner members roles");
+    if (!community) return null;
+    const member = community.members.find((item) => String(item.user) === String(userId));
+    if (!member) return null;
+    if (!canAccessChannel(community, channel, userId)) return null;
+    return { channel, community, member };
+  } catch (err) {
+    console.error("[socket auth helper] community membership check failed:", err.message);
+    return null;
+  }
+};
+
+const isSocketInCallRoom = (socket, room) =>
+  Boolean(room && socket.rooms.has(room) && socketCallRooms.get(socket.id)?.has(room));
+
+const isSocketInMeeting = (socket, meetingId) =>
+  Boolean(meetingId && socketMeetingRooms.get(socket.id)?.has(String(meetingId).trim().toLowerCase()));
+
+const getMeetingAccess = async (meetingId, userId) => {
+  try {
+    if (!meetingId || !userId) return null;
+    const normalizedId = String(meetingId).trim().toLowerCase();
+    const meeting = await Meeting.findOne({ meetingId: normalizedId }).select(
+      "host status settings participants hiddenFor"
+    );
+    if (!meeting || meeting.status === "ended") return null;
+    if (meeting.hiddenFor?.some((id) => String(id) === String(userId))) return null;
+    const participant = meeting.participants.find((item) => String(item.user) === String(userId));
+    const isHost = String(meeting.host) === String(userId);
+    const isCoHost = participant?.role === "co-host" && participant.status !== "kicked";
+    return { meeting, participant, isHost, isCoHost };
+  } catch (err) {
+    console.error("[socket auth helper] meeting access check failed:", err.message);
+    return null;
+  }
+};
+
+const getLiveStreamForHost = async (streamId, userId) => {
+  try {
+    if (!streamId || !userId) return null;
+    return await LiveStream.findOne({
+      _id: streamId,
+      host: userId,
+      isLive: true,
+    });
+  } catch (err) {
+    console.error("[socket auth helper] live host check failed:", err.message);
+    return null;
+  }
+};
+
+const getCallSessionForParticipant = async (room, userId) => {
+  try {
+    if (!room || !userId) return null;
+    const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+    if (!session) return null;
+    const participant = session.participants.find(
+      (item) => String(item.user) === String(userId) &&
+        !["declined", "left", "busy"].includes(item.status)
+    );
+    return participant ? { session, participant } : null;
+  } catch (err) {
+    console.error("[socket auth helper] call session membership check failed:", err.message);
+    return null;
+  }
+};
+
 // Get all online contacts for a user (users sharing conversations who are currently online)
 const getOnlineContactsForUser = async (userId) => {
   try {
@@ -221,18 +298,33 @@ const broadcastPresenceToContacts = async (io, userId, isOnline) => {
 let ioInstance = null;
 
 export const initializeSocket = (httpServer) => {
+  const socketAllowedOrigins = (
+    process.env.SOCKET_CORS_ORIGINS ||
+    process.env.CORS_ORIGINS ||
+    process.env.CLIENT_URL ||
+    ""
+  )
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const isDevelopment = process.env.NODE_ENV !== "production";
+  const isLocalDevelopmentOrigin = (origin) =>
+    /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin);
+
   const io = new Server(httpServer, {
     cors: {
       origin: (origin, callback) => {
+        // Non-browser clients can omit Origin. Browser origins must match exactly.
+        if (!origin || socketAllowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
         if (
-          !origin ||
-          /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin) ||
-          (process.env.CLIENT_URL && origin === process.env.CLIENT_URL) ||
-          (process.env.SOCKET_CORS_ORIGINS && process.env.SOCKET_CORS_ORIGINS.includes(origin))
+          isDevelopment &&
+          (socketAllowedOrigins.length === 0 || isLocalDevelopmentOrigin(origin))
         ) {
           return callback(null, true);
         }
-        return callback(null, true); // Dev-friendly fallback
+        return callback(new Error("Not allowed by Socket.IO CORS policy"));
       },
       methods: ["GET", "POST"],
       credentials: true,
@@ -278,30 +370,40 @@ export const initializeSocket = (httpServer) => {
         const userId = socket.handshake.auth?.userId || socket.handshake.query?.userId;
         if (userId && process.env.NODE_ENV !== "production") {
           console.warn(`⚠️ Dev Fallback: socket connect for userId: ${userId}`);
-          socket.userId = userId;
+          socket.authenticatedUserId = String(userId);
+          socket.userId = socket.authenticatedUserId;
           return next();
         }
         return next(new Error("Authentication token is required for socket connection"));
       }
 
-      const secret = process.env.JWT_SECRET || "vybe_super_secret_jwt_key_2026";
+      const secret = getAccessTokenSecret();
       const decoded = jwt.verify(jwtToken, secret);
-      if (!decoded || !decoded.userId) {
-        return next(new Error("Invalid authentication token"));
+      if (!decoded || !decoded.userId || !decoded.sessionId) {
+        return next(new Error("Invalid authentication token or missing session"));
       }
 
       if (decoded.sessionId) {
+        let session;
         try {
-          const session = await Session.findById(decoded.sessionId);
-          if (session && session.isRevoked) {
-            return next(new Error("Session has been revoked or expired"));
-          }
+          session = await Session.findById(decoded.sessionId);
         } catch (dbErr) {
-          console.warn("[socket auth] Session check DB notice (non-fatal):", dbErr.message);
+          console.error("[socket auth] Session validation failed:", dbErr.message);
+          return next(new Error("Unable to validate authentication session"));
+        }
+
+        if (
+          !session ||
+          session.isRevoked ||
+          String(session.user) !== String(decoded.userId) ||
+          (session.expiresAt && new Date(session.expiresAt).getTime() <= Date.now())
+        ) {
+          return next(new Error("Session has been revoked, expired, or does not match this account"));
         }
       }
 
-      socket.userId = decoded.userId;
+      socket.authenticatedUserId = String(decoded.userId);
+      socket.userId = socket.authenticatedUserId;
       next();
     } catch (err) {
       return next(new Error("Authentication error: " + err.message));
@@ -341,26 +443,32 @@ export const initializeSocket = (httpServer) => {
     // Explicit User ID Registration from client to guarantee 100% active socket mapping
     socket.on("register-user", async (data) => {
       const rawId = data?.userId || data?._id || data;
-      const targetUid = (rawId?._id || rawId?.id || rawId)?.toString();
-      if (targetUid) {
-        const isAlreadyBound = socket.userId === targetUid && activeUsers.get(targetUid)?.has(socket.id);
-        if (!isAlreadyBound) {
-          if (socket.userId && socket.userId !== targetUid) {
-            removeUserSocket(socket.userId, socket.id);
-            socket.leave(getUserRoom(socket.userId));
-          }
-          socket.userId = targetUid;
-          addUserSocket(targetUid, socket.id);
-          socket.join(getUserRoom(targetUid));
-          console.log(`🔗 Explicit user registration: Socket ${socket.id} bound to User ${targetUid} (Total sockets: ${getUserSocketCount(targetUid)})`);
+      const requestedUid = (rawId?._id || rawId?.id || rawId)?.toString();
+      const authenticatedUid = socket.authenticatedUserId;
 
-          persistPresence(targetUid, true).catch(() => null);
-          broadcastPresenceToContacts(io, targetUid, true);
-        }
-
-        const onlineContacts = await getOnlineContactsForUser(targetUid);
-        socket.emit("online-users-list", { onlineUsers: onlineContacts });
+      if (!authenticatedUid || !requestedUid) return;
+      if (requestedUid !== authenticatedUid) {
+        console.warn(
+          `🛡️ Blocked socket identity reassignment: authenticated user ${authenticatedUid} tried to register as ${requestedUid}`
+        );
+        return;
       }
+
+      // Re-register only the authenticated principal; a client cannot change socket.userId.
+      const isAlreadyBound =
+        socket.userId === authenticatedUid &&
+        activeUsers.get(authenticatedUid)?.has(socket.id);
+
+      if (!isAlreadyBound) {
+        socket.userId = authenticatedUid;
+        addUserSocket(authenticatedUid, socket.id);
+        socket.join(getUserRoom(authenticatedUid));
+        persistPresence(authenticatedUid, true).catch(() => null);
+        broadcastPresenceToContacts(io, authenticatedUid, true);
+      }
+
+      const onlineContacts = await getOnlineContactsForUser(authenticatedUid);
+      socket.emit("online-users-list", { onlineUsers: onlineContacts });
     });
 
     // Client requests current online contacts list
@@ -380,20 +488,24 @@ export const initializeSocket = (httpServer) => {
       socket.emit("user-presence-updated", { userId: socket.userId, status, lastSeen: lastSeen || new Date() });
     });
 
-    // Direct notification relay
-    socket.on("send-notification", async (data) => {
-      const { recipientId, type, payload } = data || {};
-      if (!recipientId) return;
-      const notifData = payload || { type, senderId: socket.userId, createdAt: new Date() };
-      io.to(getUserRoom(recipientId)).emit("notification-received", { notification: notifData });
-      io.to(getUserRoom(recipientId)).emit("new-notification", notifData);
-      io.to(getUserRoom(recipientId)).emit("notification:received", notifData);
+    // Notifications must be emitted by trusted server-side controllers after authorization.
+    // Never relay a client-supplied recipient/payload directly into another user's notification stream.
+    socket.on("send-notification", () => {
+      socket.emit("notification:rejected", {
+        code: "SERVER_OWNED_EVENT",
+        message: "Notifications must be created through an authorized server action.",
+      });
     });
 
     // Send conversation reaction
     socket.on("send-reaction", async (data) => {
       const { conversationId, type, targetId } = data || {};
-      if (!conversationId) return;
+      if (!conversationId || !socket.userId) return;
+      if (!(await isConversationParticipant(conversationId, socket.userId))) {
+        console.warn(`🛡️ Blocked unauthorized send-reaction by ${socket.userId}`);
+        return;
+      }
+      if (!["like", "love", "laugh", "wow", "sad", "angry", "heart"].includes(type)) return;
       socket.to(`conversation_${conversationId}`).emit("reaction-received", {
         conversationId,
         type,
@@ -407,35 +519,39 @@ export const initializeSocket = (httpServer) => {
     // =====================================================
     socket.on("send-message", async (data) => {
       try {
-        const { conversationId, messageContent } = data;
-        if (!conversationId) return;
+        const { conversationId, messageContent } = data || {};
+        const messageId = messageContent?._id || messageContent?.id;
+        if (!conversationId || !messageId || !socket.userId) return;
 
-        const isParticipant = await isConversationParticipant(conversationId, socket.userId);
-        if (!isParticipant) {
-          console.warn(`🛡️ Blocked unauthorized send-message: User ${socket.userId} to conversation ${conversationId}`);
-          return;
-        }
-
-        // Get ALL participants and broadcast (group + 1-to-1 support)
         const conversation = await Conversation.findById(conversationId).select("participants");
-        if (!conversation) return;
+        if (!conversation || !conversation.participants.some((p) => String(p) === String(socket.userId))) return;
+
+        // A socket payload may only announce a message already persisted by this authenticated sender.
+        const persistedMessage = await Message.findOne({
+          _id: messageId,
+          conversation: conversationId,
+          sender: socket.userId,
+          deletedForEveryone: { $ne: true },
+        })
+          .populate("sender", "userName profileImage isVerified")
+          .populate({ path: "replyTo", populate: { path: "sender", select: "userName profileImage" } })
+          .lean();
+        if (!persistedMessage) return;
 
         conversation.participants.forEach((participantId) => {
-          const pidStr = participantId.toString();
-          if (pidStr !== socket.userId && getUserSocketCount(pidStr) > 0) {
-            io.to(getUserRoom(pidStr)).emit("message-received", {
-              conversationId,
-              senderId: socket.userId,
-              message: messageContent,
-              timestamp: new Date(),
+          const recipientId = String(participantId);
+          if (recipientId !== String(socket.userId)) {
+            io.to(getUserRoom(recipientId)).emit("message-received", {
+              conversationId: String(conversationId),
+              senderId: String(socket.userId),
+              message: persistedMessage,
+              timestamp: persistedMessage.createdAt || new Date(),
             });
           }
         });
-
-        // Delivery confirmation to sender
         socket.emit("message-delivered", {
-          conversationId,
-          messageId: messageContent?._id,
+          conversationId: String(conversationId),
+          messageId: String(messageId),
           status: "delivered",
         });
       } catch (error) {
@@ -444,67 +560,111 @@ export const initializeSocket = (httpServer) => {
     });
 
     socket.on("edit-message", async (data) => {
-      const { conversationId, messageId, newText } = data;
-      const isParticipant = await isConversationParticipant(conversationId, socket.userId);
-      if (!isParticipant) return;
-      // Broadcast to all users in conversation
-      io.to(`conversation_${conversationId}`).emit("message-edited", {
-        messageId,
-        newText,
-        conversationId,
-        editedAt: new Date(),
-      });
+      try {
+        const { conversationId, messageId, newText } = data || {};
+        if (!conversationId || !messageId || !socket.userId || typeof newText !== "string") return;
+        if (!(await isConversationParticipant(conversationId, socket.userId))) return;
+        const message = await Message.findOne({
+          _id: messageId, conversation: conversationId, sender: socket.userId,
+        }).select("content.text editedAt edited deletedForEveryone");
+        if (!message || message.deletedForEveryone || message.content?.text !== newText) return;
+        io.to(`conversation_${conversationId}`).emit("message-edited", {
+          messageId: String(messageId),
+          newText: message.content.text,
+          conversationId: String(conversationId),
+          editedAt: message.editedAt || new Date(),
+        });
+      } catch (error) {
+        console.error("edit-message authorization failed:", error);
+      }
     });
 
     socket.on("delete-message-everyone", async (data) => {
-      const { conversationId, messageId } = data;
-      const isParticipant = await isConversationParticipant(conversationId, socket.userId);
-      if (!isParticipant) return;
-      io.to(`conversation_${conversationId}`).emit("message-deleted-everyone", {
-        messageId,
-        conversationId,
-      });
+      try {
+        const { conversationId, messageId } = data || {};
+        if (!conversationId || !messageId || !socket.userId) return;
+        if (!(await isConversationParticipant(conversationId, socket.userId))) return;
+        const message = await Message.findOne({
+          _id: messageId, conversation: conversationId, sender: socket.userId, deletedForEveryone: true,
+        }).select("_id");
+        if (!message) return;
+        io.to(`conversation_${conversationId}`).emit("message-deleted-everyone", {
+          messageId: String(messageId), conversationId: String(conversationId),
+        });
+      } catch (error) {
+        console.error("delete-message-everyone authorization failed:", error);
+      }
     });
 
     socket.on("forward-message", async (data) => {
-      const { targetConversationId, message } = data;
-      const isParticipant = await isConversationParticipant(targetConversationId, socket.userId);
-      if (!isParticipant) return;
-      io.to(`conversation_${targetConversationId}`).emit("message-forwarded", {
-        conversationId: targetConversationId,
-        message,
-      });
+      try {
+        const { targetConversationId, message } = data || {};
+        const messageId = message?._id || message?.id;
+        if (!targetConversationId || !messageId || !socket.userId) return;
+        if (!(await isConversationParticipant(targetConversationId, socket.userId))) return;
+        const persistedMessage = await Message.findOne({
+          _id: messageId,
+          conversation: targetConversationId,
+          sender: socket.userId,
+          isForwarded: true,
+          deletedForEveryone: { $ne: true },
+        }).populate("sender", "userName profileImage isVerified").lean();
+        if (!persistedMessage) return;
+        io.to(`conversation_${targetConversationId}`).emit("message-forwarded", {
+          conversationId: String(targetConversationId), message: persistedMessage,
+        });
+      } catch (error) {
+        console.error("forward-message authorization failed:", error);
+      }
     });
 
     socket.on("pin-message", async (data) => {
-      const { conversationId, messageId, isPinned } = data;
-      const isParticipant = await isConversationParticipant(conversationId, socket.userId);
-      if (!isParticipant) return;
-      io.to(`conversation_${conversationId}`).emit("message-pinned", {
-        conversationId,
-        messageId,
-        isPinned,
-        pinnedBy: socket.userId,
-      });
+      try {
+        const { conversationId, messageId } = data || {};
+        if (!conversationId || !messageId || !socket.userId) return;
+        if (!(await isConversationParticipant(conversationId, socket.userId))) return;
+        const message = await Message.findOne({ _id: messageId, conversation: conversationId })
+          .select("isPinned pinnedBy deletedForEveryone");
+        if (!message || message.deletedForEveryone) return;
+        io.to(`conversation_${conversationId}`).emit("message-pinned", {
+          conversationId: String(conversationId),
+          messageId: String(messageId),
+          isPinned: Boolean(message.isPinned),
+          pinnedBy: message.pinnedBy ? String(message.pinnedBy) : null,
+        });
+      } catch (error) {
+        console.error("pin-message authorization failed:", error);
+      }
     });
 
     socket.on("message-read", async (data) => {
       try {
-        const { messageId, conversationId } = data;
-        const isParticipant = await isConversationParticipant(conversationId, socket.userId);
-        if (!isParticipant) return;
+        const { messageId, conversationId } = data || {};
+        if (!messageId || !conversationId || !socket.userId) return;
         const conversation = await Conversation.findById(conversationId).select("participants");
-        if (!conversation) return;
+        if (!conversation || !conversation.participants.some((p) => String(p) === String(socket.userId))) return;
 
+        const message = await Message.findOne({ _id: messageId, conversation: conversationId });
+        if (!message) return;
+        const alreadySeen = (message.seenBy || []).some((entry) =>
+          String(entry.user?._id || entry.user || entry) === String(socket.userId)
+        );
+        if (!alreadySeen) {
+          message.seenBy.push({ user: socket.userId, seenAt: new Date() });
+          message.status = "seen";
+          await message.save();
+        }
+
+        const receipt = {
+          messageId: String(messageId),
+          conversationId: String(conversationId),
+          readBy: String(socket.userId),
+          readAt: new Date(),
+        };
         conversation.participants.forEach((participantId) => {
-          const pidStr = participantId.toString();
-          if (pidStr !== socket.userId && getUserSocketCount(pidStr) > 0) {
-            io.to(getUserRoom(pidStr)).emit("message-read-receipt", {
-              messageId,
-              conversationId,
-              readBy: socket.userId,
-              readAt: new Date(),
-            });
+          const recipientId = String(participantId);
+          if (recipientId !== String(socket.userId) && getUserSocketCount(recipientId) > 0) {
+            io.to(getUserRoom(recipientId)).emit("message-read-receipt", receipt);
           }
         });
       } catch (error) {
@@ -613,8 +773,12 @@ export const initializeSocket = (httpServer) => {
     // Real-time Chat Theme Update (Instagram / WhatsApp style)
     socket.on("chat:theme-update", async (data) => {
       try {
-        const { conversationId, theme, systemMessage } = data;
-        if (!conversationId) return;
+        const { conversationId, theme, systemMessage } = data || {};
+        if (!conversationId || !socket.userId) return;
+        if (!(await isConversationParticipant(conversationId, socket.userId))) {
+          console.warn(`🛡️ Blocked unauthorized chat:theme-update by ${socket.userId}`);
+          return;
+        }
 
         socket.to(`conversation_${conversationId}`).emit("chat:theme-updated", {
           conversationId,
@@ -645,29 +809,29 @@ export const initializeSocket = (httpServer) => {
     // =====================================================
     socket.on("start-live-stream", async (data) => {
       try {
-        const { streamId, title } = data;
-        if (!streamId) return;
+        const { streamId } = data || {};
+        if (!streamId || !socket.userId) return;
 
+        const stream = await getLiveStreamForHost(streamId, socket.userId);
+        if (!stream) {
+          console.warn(`🛡️ Blocked start-live-stream by non-host ${socket.userId}`);
+          return;
+        }
         socket.join(`live_${streamId}`);
 
-        // Broadcast to followers that creator went LIVE
-        if (socket.userId) {
-          const hostUser = await User.findById(socket.userId).select("userName name profileImage followers");
-          if (hostUser && hostUser.followers?.length > 0) {
-            hostUser.followers.forEach((fId) => {
-              const fIdStr = fId.toString();
-              if (getUserSocketCount(fIdStr) > 0) {
-                io.to(getUserRoom(fIdStr)).emit("live:creator-started", {
-                  streamId,
-                  title: title || "Live Video",
-                  host: {
-                    _id: hostUser._id,
-                    userName: hostUser.userName,
-                    name: hostUser.name,
-                    profileImage: hostUser.profileImage,
-                  },
-                });
-              }
+        const hostUser = await User.findById(socket.userId).select("userName name profileImage followers").lean();
+        for (const followerId of hostUser?.followers || []) {
+          const follower = String(followerId);
+          if (getUserSocketCount(follower) > 0) {
+            io.to(getUserRoom(follower)).emit("live:creator-started", {
+              streamId,
+              title: stream.title || "Live Video",
+              host: {
+                _id: hostUser._id,
+                userName: hostUser.userName,
+                name: hostUser.name,
+                profileImage: hostUser.profileImage,
+              },
             });
           }
         }
@@ -678,53 +842,53 @@ export const initializeSocket = (httpServer) => {
 
     socket.on("join-live-stream", async (data) => {
       try {
-        const { streamId } = data;
-        if (!streamId) return;
+        const { streamId } = data || {};
+        if (!streamId || !socket.userId) return;
 
-        socket.join(`live_${streamId}`);
-
-        let viewerInfo = {
-          socketId: socket.id,
-          userId: socket.userId || null,
-          userName: socket.userName || "Viewer",
-          userAvatar: socket.profilePicture || "",
-        };
-
-        if (socket.userId) {
-          const u = await User.findById(socket.userId).select("userName name profileImage isVerified").lean();
-          if (u) {
-            viewerInfo.userName = u.userName || u.name || viewerInfo.userName;
-            viewerInfo.userAvatar = u.profileImage?.url || u.profilePicture || "";
+        const live = await LiveStream.findById(streamId).select("host isLive audience viewers peakViewers totalUniqueViewers");
+        if (!live || !live.isLive) {
+          socket.emit("live:error", { message: "This live stream is no longer available" });
+          return;
+        }
+        if (String(live.host) !== String(socket.userId) && live.audience === "close_friends") {
+          const host = await User.findById(live.host).select("closeFriends").lean();
+          const isCloseFriend = (host?.closeFriends || []).some((id) => String(id) === String(socket.userId));
+          if (!isCloseFriend) {
+            socket.emit("live:error", { message: "This live stream is limited to close friends" });
+            return;
           }
         }
 
-        // Update LiveStream in DB
-        let currentViewerCount = 1;
-        try {
-          const live = await LiveStream.findById(streamId);
-          if (live && live.isLive) {
-            if (socket.userId && !live.viewers.some((v) => v.toString() === socket.userId.toString())) {
-              live.viewers.push(socket.userId);
-            }
-            if (live.viewers.length > live.peakViewers) {
-              live.peakViewers = live.viewers.length;
-            }
-            live.totalUniqueViewers = Math.max(live.totalUniqueViewers || 1, live.viewers.length);
-            await live.save();
-            currentViewerCount = live.viewers.length;
-          }
-        } catch (e) {}
+        socket.join(`live_${streamId}`);
+        let viewerInfo = {
+          socketId: socket.id,
+          userId: socket.userId,
+          userName: socket.userName || "Viewer",
+          userAvatar: socket.profilePicture || "",
+        };
+        const user = await User.findById(socket.userId).select("userName name profileImage isVerified").lean();
+        if (user) {
+          viewerInfo.userName = user.userName || user.name || viewerInfo.userName;
+          viewerInfo.userAvatar = user.profileImage?.url || user.profilePicture || "";
+          viewerInfo.isVerified = Boolean(user.isVerified);
+        }
 
-        viewerInfo.viewerCount = currentViewerCount;
+        if (!live.viewers.some((id) => String(id) === String(socket.userId))) {
+          live.viewers.push(socket.userId);
+        }
+        live.peakViewers = Math.max(live.peakViewers || 1, live.viewers.length);
+        live.totalUniqueViewers = Math.max(live.totalUniqueViewers || 1, live.viewers.length);
+        await live.save();
 
-        // Notify room that new viewer joined
+        viewerInfo.viewerCount = live.viewers.length;
         socket.to(`live_${streamId}`).emit("live-viewer-joined", viewerInfo);
         io.to(`live_${streamId}`).emit("live:viewer-count-updated", {
           streamId,
-          viewerCount: currentViewerCount,
+          viewerCount: live.viewers.length,
         });
       } catch (err) {
         console.error("join-live-stream error:", err);
+        socket.emit("live:error", { message: "Unable to join this live stream" });
       }
     });
 
@@ -762,11 +926,16 @@ export const initializeSocket = (httpServer) => {
     });
 
     // WebRTC Signaling Relay for Live Stream (Host <-> Viewer / Co-Host)
-    socket.on("live:signal", (data) => {
-      const { toSocketId, signal } = data;
-      if (!toSocketId || !signal) return;
+    socket.on("live:signal", async (data) => {
+      const { streamId, toSocketId, signal } = data || {};
+      const room = streamId ? `live_${streamId}` : "";
+      if (!room || !toSocketId || !signal || !socket.rooms.has(room)) return;
+      const roomSockets = await io.in(room).fetchSockets();
+      if (!roomSockets.some((candidate) => candidate.id === toSocketId)) return;
       io.to(toSocketId).emit("live:signal-received", {
+        streamId,
         fromSocketId: socket.id,
+        fromUserId: socket.userId,
         signal,
       });
     });
@@ -774,58 +943,52 @@ export const initializeSocket = (httpServer) => {
     // Live Comments
     socket.on("send-live-comment", async (data) => {
       try {
-        const { streamId, comment } = data;
-        if (!streamId || !comment) return;
+        const { streamId, comment } = data || {};
+        const room = streamId ? `live_${streamId}` : "";
+        if (!socket.userId || !room || !socket.rooms.has(room) ||
+            typeof comment?.text !== "string" || !comment.text.trim() || comment.text.length > 1000) return;
 
-        let commentPayload = {
-          _id: new Date().getTime().toString(),
+        const user = await User.findById(socket.userId).select("userName name profileImage isVerified").lean();
+        const commentPayload = {
           user: socket.userId,
-          userName: socket.userName || comment.user || "Viewer",
-          userAvatar: socket.profilePicture || comment.userAvatar || "",
-          text: comment.text,
+          userName: user?.userName || user?.name || "Viewer",
+          userAvatar: user?.profileImage?.url || user?.profilePicture || "",
+          text: comment.text.trim(),
           createdAt: new Date(),
         };
+        const live = await LiveStream.findOneAndUpdate(
+          { _id: streamId, isLive: true, commentsDisabled: { $ne: true } },
+          { $push: { comments: commentPayload }, $inc: { "stats.totalComments": 1 } },
+          { new: true }
+        );
+        if (!live) return;
 
-        if (socket.userId) {
-          const u = await User.findById(socket.userId).select("userName name profileImage isVerified").lean();
-          if (u) {
-            commentPayload.userName = u.userName || u.name;
-            commentPayload.userAvatar = u.profileImage?.url || u.profilePicture || "";
-            commentPayload.isVerified = u.isVerified;
-          }
-        }
-
-        // Persist comment in database asynchronously
-        LiveStream.findByIdAndUpdate(streamId, {
-          $push: { comments: commentPayload },
-          $inc: { "stats.totalComments": 1 },
-        }).catch(() => null);
-
-        io.to(`live_${streamId}`).emit("live-comment-received", {
-          streamId,
-          comment: commentPayload,
-        });
+        // Let Mongoose generate the embedded comment ObjectId; the old custom string ID
+        // could not be cast to the schema's default ObjectId and caused comment persistence failures.
+        const storedComment = live.comments[live.comments.length - 1];
+        io.to(room).emit("live-comment-received", { streamId, comment: storedComment });
       } catch (err) {
         console.error("send-live-comment error:", err);
       }
     });
 
     // Live Heart Burst Reactions
-    socket.on("send-live-heart", (data) => {
+    socket.on("send-live-heart", async (data) => {
       try {
-        const { streamId, reactionType = "heart", count = 1 } = data;
-        if (!streamId) return;
-
-        // Increment stats asynchronously
-        LiveStream.findByIdAndUpdate(streamId, {
-          $inc: { "stats.totalHearts": count },
-        }).catch(() => null);
-
-        socket.to(`live_${streamId}`).emit("live-heart-received", {
-          streamId,
-          fromUserId: socket.userId,
-          reactionType,
-          count,
+        const { streamId, reactionType = "heart", count = 1 } = data || {};
+        const room = streamId ? `live_${streamId}` : "";
+        if (!socket.userId || !room || !socket.rooms.has(room)) return;
+        const safeCount = Number.isInteger(count) ? Math.max(1, Math.min(10, count)) : 1;
+        const allowedReactions = ["heart", "fire", "clap", "laugh", "wow"];
+        const safeReaction = allowedReactions.includes(reactionType) ? reactionType : "heart";
+        const live = await LiveStream.findOneAndUpdate(
+          { _id: streamId, isLive: true },
+          { $inc: { "stats.totalHearts": safeCount } },
+          { new: true }
+        ).select("_id");
+        if (!live) return;
+        socket.to(room).emit("live-heart-received", {
+          streamId, fromUserId: socket.userId, reactionType: safeReaction, count: safeCount,
         });
       } catch (err) {
         console.error("send-live-heart error:", err);
@@ -835,38 +998,73 @@ export const initializeSocket = (httpServer) => {
     // Live Pinned Comments
     socket.on("live:pin-comment", async (data) => {
       try {
-        const { streamId, comment } = data;
-        if (!streamId) return;
-        io.to(`live_${streamId}`).emit("live:pinned-comment-updated", {
-          streamId,
-          pinnedComment: comment,
-        });
-      } catch (err) {}
+        const { streamId, comment } = data || {};
+        const live = await getLiveStreamForHost(streamId, socket.userId);
+        if (!live) return;
+        let pinnedComment = null;
+        if (comment) {
+          const commentId = String(comment._id || comment.id || "");
+          const existing = live.comments.find((item) => String(item._id) === commentId);
+          if (!existing) return;
+          pinnedComment = {
+            user: existing.user,
+            userName: existing.userName,
+            text: existing.text,
+            pinnedAt: new Date(),
+          };
+        }
+        live.pinnedComment = pinnedComment;
+        await live.save();
+        io.to(`live_${streamId}`).emit("live:pinned-comment-updated", { streamId, pinnedComment });
+      } catch (err) {
+        console.error("live:pin-comment error:", err);
+      }
     });
 
     // Live Q&A Box
-    socket.on("live:new-question", (data) => {
-      const { streamId, question } = data;
-      if (!streamId) return;
-      io.to(`live_${streamId}`).emit("live:question-received", {
-        streamId,
-        question,
-      });
+    socket.on("live:new-question", async (data) => {
+      try {
+        const { streamId, question } = data || {};
+        const room = streamId ? `live_${streamId}` : "";
+        if (!socket.userId || !room || !socket.rooms.has(room) ||
+            typeof question?.text !== "string" || !question.text.trim() || question.text.length > 1000) return;
+        const live = await LiveStream.findOne({ _id: streamId, isLive: true }).select("_id");
+        if (!live) return;
+        io.to(room).emit("live:question-received", {
+          streamId,
+          question: {
+            id: `${Date.now()}_${socket.id}`,
+            text: question.text.trim(),
+            author: socket.userName || "Viewer",
+            userId: socket.userId,
+            upvotes: 0,
+            isAnswered: false,
+            createdAt: new Date(),
+          },
+        });
+      } catch (err) {
+        console.error("live:new-question error:", err);
+      }
     });
 
-    socket.on("live:display-question", (data) => {
-      const { streamId, question } = data;
-      if (!streamId) return;
+    socket.on("live:display-question", async (data) => {
+      const { streamId, question } = data || {};
+      if (!(await getLiveStreamForHost(streamId, socket.userId))) return;
+      if (question && (typeof question.text !== "string" || question.text.length > 1000)) return;
       io.to(`live_${streamId}`).emit("live:question-displayed", {
         streamId,
-        question, // null to hide, or question object to display
+        question: question ? { ...question, userId: undefined, hostId: socket.userId } : null,
       });
     });
 
     // Co-Host Dual Screen Live Signaling
-    socket.on("live:cohost-request", (data) => {
-      const { streamId, hostSocketId } = data;
-      if (!hostSocketId) return;
+    socket.on("live:cohost-request", async (data) => {
+      const { streamId, hostSocketId } = data || {};
+      const room = streamId ? `live_${streamId}` : "";
+      if (!socket.userId || !room || !socket.rooms.has(room) || !hostSocketId) return;
+      const live = await LiveStream.findOne({ _id: streamId, isLive: true }).select("host");
+      const target = io.sockets.sockets.get(hostSocketId);
+      if (!live || !target || String(target.userId) !== String(live.host)) return;
       io.to(hostSocketId).emit("live:cohost-request-received", {
         streamId,
         guestSocketId: socket.id,
@@ -876,54 +1074,65 @@ export const initializeSocket = (httpServer) => {
       });
     });
 
-    socket.on("live:cohost-accept", (data) => {
-      const { streamId, guestSocketId, guestUser } = data;
-      if (!guestSocketId) return;
-
-      io.to(guestSocketId).emit("live:cohost-accepted", {
+    socket.on("live:cohost-accept", async (data) => {
+      const { streamId, guestSocketId } = data || {};
+      const live = await getLiveStreamForHost(streamId, socket.userId);
+      const guest = guestSocketId ? io.sockets.sockets.get(guestSocketId) : null;
+      const room = streamId ? `live_${streamId}` : "";
+      if (!live || !guest || !guest.userId || !guest.rooms.has(room)) return;
+      live.coHost = guest.userId;
+      await live.save();
+      io.to(guestSocketId).emit("live:cohost-accepted", { streamId, hostSocketId: socket.id });
+      io.to(room).emit("live:cohost-joined", {
         streamId,
-        hostSocketId: socket.id,
-      });
-
-      io.to(`live_${streamId}`).emit("live:cohost-joined", {
-        streamId,
-        coHost: guestUser,
+        coHost: { _id: guest.userId, userName: guest.userName, profileImage: guest.profilePicture },
       });
     });
 
-    socket.on("live:cohost-leave", (data) => {
-      const { streamId } = data;
-      if (!streamId) return;
-      io.to(`live_${streamId}`).emit("live:cohost-ended", { streamId });
+    socket.on("live:cohost-leave", async (data) => {
+      const { streamId } = data || {};
+      const live = await LiveStream.findOne({ _id: streamId, isLive: true }).select("host coHost");
+      if (!live) return;
+      const isHost = String(live.host) === String(socket.userId);
+      const isCoHost = live.coHost && String(live.coHost) === String(socket.userId);
+      if (!isHost && !isCoHost) return;
+      if (isCoHost) {
+        live.coHost = null;
+        await live.save();
+      }
+      io.to(`live_${streamId}`).emit("live:cohost-ended", { streamId, endedBy: socket.userId });
     });
 
     // Host Friendly Wave
-    socket.on("live:wave", (data) => {
-      const { targetSocketId, targetUserName } = data;
-      if (!targetSocketId) return;
+    socket.on("live:wave", async (data) => {
+      const { streamId, targetSocketId } = data || {};
+      const room = streamId ? `live_${streamId}` : "";
+      if (!room || !socket.userId || !socket.rooms.has(room) || !targetSocketId) return;
+      const target = await io.in(room).fetchSockets();
+      if (!target.some((candidate) => candidate.id === targetSocketId)) return;
       io.to(targetSocketId).emit("live:wave-received", {
-        fromUserName: socket.userName || "Host",
+        fromUserId: socket.userId,
+        fromUserName: socket.userName || "Viewer",
       });
     });
 
     // End Live Stream Broadcast
     socket.on("end-live-stream", async (data) => {
       try {
-        const { streamId, stats } = data;
-        if (!streamId) return;
-
+        const { streamId } = data || {};
+        const live = await getLiveStreamForHost(streamId, socket.userId);
+        if (!live) return;
+        live.isLive = false;
+        live.endedAt = new Date();
+        await live.save();
         io.to(`live_${streamId}`).emit("live-stream-ended", {
           streamId,
-          stats: stats || {},
+          stats: {
+            totalHearts: live.stats?.totalHearts || 0,
+            totalComments: live.stats?.totalComments || 0,
+          },
         });
-
-        // Broadcast to all that creator has ended live
-        if (socket.userId) {
-          io.emit("live:creator-ended", {
-            streamId,
-            hostId: socket.userId,
-          });
-        }
+        io.emit("live:creator-ended", { streamId, hostId: socket.userId });
       } catch (err) {
         console.error("end-live-stream error:", err);
       }
@@ -936,146 +1145,179 @@ export const initializeSocket = (httpServer) => {
     // ENTERPRISE WEBRTC CALL SIGNALING & LIFECYCLE
     // =====================================================
     socket.on("call:invite", async (data) => {
-      const { room, userToCall, targetUserId: explicitTargetId, type, callerName, callerAvatar, conversationId } = data;
-      const targetUserId = (explicitTargetId || userToCall?._id || userToCall?.id || userToCall?.user?._id || userToCall)?.toString();
-      if (!targetUserId) {
-        console.warn(`[call:invite] Missing targetUserId from caller ${socket.userId}`);
-        return;
-      }
-      const recipientRoom = getUserRoom(targetUserId);
+      try {
+        const { room, userToCall, targetUserId: explicitTargetId, type, callerName, callerAvatar, conversationId } = data || {};
+        const targetUserId = (explicitTargetId || userToCall?._id || userToCall?.id || userToCall?.user?._id || userToCall)?.toString();
+        if (!socket.userId || !room || !targetUserId || targetUserId === String(socket.userId)) return;
 
-      console.log(`📞 [call:invite] User ${socket.userId} calling ${targetUserId} in room ${room} (recipient sockets: ${getUserSocketCount(targetUserId)})`);
+        // The REST endpoint creates the canonical session first. Only the initiator may
+        // invite the receiver recorded in that session.
+        const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+        if (!session || String(session.initiator) !== String(socket.userId)) {
+          console.warn(`🛡️ Blocked call invite from non-initiator ${socket.userId} for room ${room}`);
+          return;
+        }
+        const callerIsParticipant = session.participants.some((p) => String(p.user) === String(socket.userId));
+        const targetIsParticipant = session.participants.some((p) => String(p.user) === targetUserId);
+        if (!callerIsParticipant || !targetIsParticipant) return;
+        if (session.conversationId && conversationId && String(session.conversationId) !== String(conversationId)) return;
+        if (!session.participants.some((p) => String(p.user) === targetUserId && ["ringing", "joined"].includes(p.status))) return;
 
-      let resolvedAvatar = callerAvatar || socket.profilePicture || "";
-      let resolvedCallerName = callerName || socket.userName || "User";
+        const recipientRoom = getUserRoom(targetUserId);
+        let resolvedAvatar = socket.profilePicture || "";
+        let resolvedCallerName = socket.userName || "User";
+        if ((!resolvedAvatar || !resolvedCallerName) && socket.userId) {
+          try {
+            const u = await User.findById(socket.userId).select("userName name profileImage profilePicture").lean();
+            if (u) {
+              resolvedCallerName = u.userName || u.name || resolvedCallerName;
+              resolvedAvatar = u.profileImage?.url || (typeof u.profileImage === "string" ? u.profileImage : u.profilePicture?.url || u.profilePicture || "");
+              socket.profilePicture = resolvedAvatar;
+              socket.userName = resolvedCallerName;
+            }
+          } catch (e) {}
+        }
 
-      if ((!resolvedAvatar || !resolvedCallerName) && socket.userId) {
-        try {
-          const u = await User.findById(socket.userId).select("userName name profileImage profilePicture").lean();
-          if (u) {
-            resolvedCallerName = u.userName || u.name || resolvedCallerName;
-            resolvedAvatar = u.profileImage?.url || (typeof u.profileImage === "string" ? u.profileImage : u.profilePicture?.url || u.profilePicture || "");
-            socket.profilePicture = resolvedAvatar;
-            socket.userName = resolvedCallerName;
-          }
-        } catch (e) {}
-      }
+        const invitePayload = {
+          room,
+          from: String(socket.userId),
+          callerName: resolvedCallerName,
+          callerAvatar: resolvedAvatar,
+          type: type || session.type || "video",
+          conversationId: session.conversationId ? String(session.conversationId) : null,
+        };
 
-      const invitePayload = {
-        room,
-        from: (socket.userId || "").toString(),
-        callerName: resolvedCallerName,
-        callerAvatar: resolvedAvatar,
-        type: type || "video",
-        conversationId,
-      };
-
-      // 1. Emit invite to recipient room, excluding caller's socket
-      socket.to(recipientRoom).emit("call:invite-received", invitePayload);
-
-      // 2. Also emit directly to every active socket of recipient, excluding caller's socket
-      const recipientSockets = activeUsers.get(targetUserId);
-      if (recipientSockets && recipientSockets.size > 0) {
-        for (const sockId of recipientSockets) {
-          if (sockId !== socket.id) {
-            io.to(sockId).emit("call:invite-received", invitePayload);
+        io.to(recipientRoom).emit("call:invite-received", invitePayload);
+        const recipientSockets = activeUsers.get(targetUserId);
+        if (recipientSockets) {
+          for (const sockId of recipientSockets) {
+            if (sockId !== socket.id) io.to(sockId).emit("call:invite-received", invitePayload);
           }
         }
+        socket.emit("call:status", { room, status: recipientSockets?.size ? "ringing" : "calling" });
+      } catch (err) {
+        console.error("call:invite error:", err);
       }
-
-      const isOnline = getUserSocketCount(targetUserId) > 0;
-      socket.emit("call:status", { room, status: isOnline ? "ringing" : "calling" });
     });
 
     socket.on("call:respond", async (data) => {
-      const { room, response, to, targetUserId: explicitTargetId } = data; // response: "joined", "declined", "busy", "accepted", "cancelled"
-      const targetUserId = (explicitTargetId || to?._id || to?.id || to?.user?._id || to)?.toString();
-      if (!targetUserId) return;
+      try {
+        const { room, response, to, targetUserId: explicitTargetId } = data || {};
+        const targetUserId = (explicitTargetId || to?._id || to?.id || to?.user?._id || to)?.toString();
+        const allowedResponses = ["accepted", "joined", "declined", "busy", "cancelled"];
+        if (!socket.userId || !room || !targetUserId || !allowedResponses.includes(response)) return;
 
-      console.log(`📞 [call:respond] User ${socket.userId} responded ${response} to ${targetUserId} in room ${room}`);
+        const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+        if (!session) return;
+        const ownParticipant = session.participants.find((p) => String(p.user) === String(socket.userId));
+        const targetParticipant = session.participants.find((p) => String(p.user) === targetUserId);
+        if (!ownParticipant || !targetParticipant || targetUserId === String(socket.userId)) {
+          console.warn(`🛡️ Blocked unauthorized call response for room ${room}`);
+          return;
+        }
 
-      const responsePayload = {
-        room,
-        response,
-        from: (socket.userId || "").toString(),
-      };
-
-      socket.to(getUserRoom(targetUserId)).emit("call:response-received", responsePayload);
-
-      const targetSockets = activeUsers.get(targetUserId);
-      if (targetSockets && targetSockets.size > 0) {
-        for (const sockId of targetSockets) {
-          if (sockId !== socket.id) {
-            io.to(sockId).emit("call:response-received", responsePayload);
+        const responsePayload = { room, response, from: String(socket.userId) };
+        io.to(getUserRoom(targetUserId)).emit("call:response-received", responsePayload);
+        const targetSockets = activeUsers.get(targetUserId);
+        if (targetSockets) {
+          for (const sockId of targetSockets) {
+            if (sockId !== socket.id) io.to(sockId).emit("call:response-received", responsePayload);
           }
         }
+      } catch (err) {
+        console.error("call:respond error:", err);
       }
     });
 
     // In-call invitation ("Add People" to live call)
     socket.on("call:invite-user", async (data) => {
-      const { room, targetUserId: rawTargetId, type, conversationId } = data || {};
-      const targetUserId = (rawTargetId?._id || rawTargetId?.id || rawTargetId)?.toString();
-      if (!room || !targetUserId) return;
+      try {
+        const { room, targetUserId: rawTargetId, type, conversationId } = data || {};
+        const targetUserId = (rawTargetId?._id || rawTargetId?.id || rawTargetId)?.toString();
+        if (!socket.userId || !room || !targetUserId || targetUserId === String(socket.userId)) return;
+        if (!isSocketInCallRoom(socket, room)) return;
 
-      console.log(`📞 [call:invite-user] User ${socket.userId} inviting ${targetUserId} to live call room ${room}`);
+        const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+        const callerIsParticipant = session?.participants.some((p) =>
+          String(p.user) === String(socket.userId) && ["joined", "ringing"].includes(p.status)
+        );
+        if (!session || !callerIsParticipant) return;
+        if (!["group", "channel"].includes(session.type)) {
+          socket.emit("call:error", { message: "Adding participants is only available for group/channel calls" });
+          return;
+        }
 
-      let callerName = socket.name || socket.userName || "Vybe User";
-      let callerAvatar = socket.profilePicture || null;
-      if (socket.userId) {
-        try {
-          const u = await User.findById(socket.userId).select("name userName profileImage").lean();
-          if (u) {
-            callerName = u.name || u.userName || callerName;
-            callerAvatar = u.profileImage?.url || (typeof u.profileImage === "string" ? u.profileImage : callerAvatar);
-          }
-        } catch (e) {}
-      }
-
-      const invitePayload = {
-        room,
-        from: (socket.userId || "").toString(),
-        callerName,
-        callerAvatar,
-        type: type || "video",
-        conversationId,
-        isGroupInvite: true,
-      };
-
-      // 1. Emit to recipient personal room
-      socket.to(getUserRoom(targetUserId)).emit("call:invite-received", invitePayload);
-
-      // 2. Emit to all active socket connections of recipient
-      const recipientSockets = activeUsers.get(targetUserId);
-      if (recipientSockets) {
-        for (const sockId of recipientSockets) {
-          if (sockId !== socket.id) {
-            io.to(sockId).emit("call:invite-received", invitePayload);
+        const targetUser = await User.findById(targetUserId).select("_id").lean();
+        if (!targetUser) return;
+        const effectiveConversationId = session.conversationId ? String(session.conversationId) : null;
+        if (effectiveConversationId) {
+          const isConversationMember = await isConversationParticipant(effectiveConversationId, targetUserId);
+          if (!isConversationMember) {
+            socket.emit("call:error", { message: "The invited user is not a participant in this conversation" });
+            return;
           }
         }
+        const existing = session.participants.find((p) => String(p.user) === targetUserId);
+        if (!existing) {
+          session.participants.push({ user: targetUserId, status: "ringing", role: "listener" });
+          await session.save();
+        } else if (["left", "declined", "busy", "disconnected"].includes(existing.status)) {
+          existing.status = "ringing";
+          existing.leftAt = null;
+          await session.save();
+        }
+
+        const caller = await User.findById(socket.userId).select("name userName profileImage").lean();
+        const invitePayload = {
+          room,
+          from: String(socket.userId),
+          callerName: caller?.name || caller?.userName || socket.userName || "VYBE User",
+          callerAvatar: caller?.profileImage?.url || socket.profilePicture || null,
+          type: type || session.type || "video",
+          conversationId: effectiveConversationId,
+          isGroupInvite: true,
+        };
+
+        io.to(getUserRoom(targetUserId)).emit("call:invite-received", invitePayload);
+        const recipientSockets = activeUsers.get(targetUserId);
+        if (recipientSockets) {
+          for (const sockId of recipientSockets) {
+            if (sockId !== socket.id) io.to(sockId).emit("call:invite-received", invitePayload);
+          }
+        }
+      } catch (err) {
+        console.error("call:invite-user error:", err);
       }
     });
 
     // Floating reaction emojis broadcast (WhatsApp / Instagram Live call reactions)
     socket.on("call:send-reaction", (data) => {
-      const { room, emoji, userName, userId } = data || {};
-      if (!room || !emoji) return;
+      const { room, emoji } = data || {};
+      if (!room || typeof emoji !== "string" || emoji.length > 12 || !isSocketInCallRoom(socket, room)) return;
 
       io.to(room).emit("call:reaction-received", {
         emoji,
-        userName: userName || socket.userName || "User",
-        userId: userId || socket.userId,
+        userName: socket.userName || "User",
+        userId: socket.userId,
         id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       });
     });
 
     socket.on("call:join-room", async (data) => {
-      const { room, userId: payloadUserId, userName: payloadUserName, name: payloadName, profilePicture: payloadProfilePicture } = data || {};
-      if (!room) return;
+      const { room, userName: payloadUserName, name: payloadName, profilePicture: payloadProfilePicture } = data || {};
+      if (!room || !socket.userId || typeof room !== "string" || room.length > 180) return;
+
+      // Validate room membership before joining, rather than trusting a client-supplied room ID.
+      if (!room.startsWith("channel_")) {
+        const authorized = await getCallSessionForParticipant(room, socket.userId);
+        if (!authorized) {
+          socket.emit("call:error", { message: "You are not authorized to join this call" });
+          return;
+        }
+      }
 
       cancelRoomTeardown(room);
 
-      if (payloadUserId && !socket.userId) socket.userId = payloadUserId;
       if (payloadUserName) socket.userName = payloadUserName;
       if (payloadName) socket.name = payloadName;
       if (payloadProfilePicture) socket.profilePicture = payloadProfilePicture;
@@ -1103,6 +1345,12 @@ export const initializeSocket = (httpServer) => {
           if (!isMember) {
             console.error(`🛡️ Access Denied: User ${socket.userId} is not a member of community ${community._id}`);
             socket.emit("call:error", { message: "You are not a member of this community" });
+            return;
+          }
+
+          if (!canAccessChannel(community, channel, socket.userId)) {
+            console.error(`🛡️ Access Denied: User ${socket.userId} lacks role to join private channel room ${channelId}`);
+            socket.emit("call:error", { message: "You do not have permission to access this channel" });
             return;
           }
         } catch (err) {
@@ -1197,14 +1445,14 @@ export const initializeSocket = (httpServer) => {
       });
     });
 
-    socket.on("call:signal", (data) => {
-      const { toSocketId, toUserId, room, signal, fromMetadata } = data;
-      if (!signal) return;
+    socket.on("call:signal", async (data) => {
+      const { toSocketId, toUserId, room, signal } = data || {};
+      if (!room || !signal || !isSocketInCallRoom(socket, room)) return;
 
       const payload = {
         fromSocketId: socket.id,
         fromUserId: socket.userId,
-        fromMetadata: fromMetadata || {
+        fromMetadata: {
           userId: socket.userId,
           userName: socket.userName,
           name: socket.name,
@@ -1212,27 +1460,26 @@ export const initializeSocket = (httpServer) => {
         },
         signal,
       };
-
+      const roomSockets = await io.in(room).fetchSockets();
       if (toSocketId) {
-        io.to(toSocketId).emit("call:signal-received", payload);
+        const target = roomSockets.find((candidate) => candidate.id === toSocketId);
+        if (target) io.to(toSocketId).emit("call:signal-received", payload);
+        return;
       }
-
-      const targetUid = toUserId || toSocketId;
-      if (targetUid && activeUsers.has(targetUid.toString())) {
-        for (const sId of activeUsers.get(targetUid.toString())) {
-          if (sId !== socket.id && sId !== toSocketId) {
-            io.to(sId).emit("call:signal-received", payload);
+      if (toUserId) {
+        for (const target of roomSockets) {
+          if (String(target.userId) === String(toUserId) && target.id !== socket.id) {
+            io.to(target.id).emit("call:signal-received", payload);
           }
         }
+        return;
       }
-
-      if (!toSocketId && !toUserId && room) {
-        socket.to(room).emit("call:signal-received", payload);
-      }
+      socket.to(room).emit("call:signal-received", payload);
     });
 
     socket.on("call:heartbeat", (data) => {
-      const { room } = data;
+      const { room } = data || {};
+      if (!isSocketInCallRoom(socket, room)) return;
       socket.to(room).emit("call:heartbeat-received", {
         userId: socket.userId,
         socketId: socket.id,
@@ -1240,16 +1487,31 @@ export const initializeSocket = (httpServer) => {
     });
 
     socket.on("call:action", (data) => {
-      const { room, ...actionPayload } = data; // action: 'mute', 'video', 'screen', 'hand', 'reaction', streamId, hasAudio
+      const { room, ...actionPayload } = data || {};
+      if (!isSocketInCallRoom(socket, room)) return;
+      const allowedActions = ["mute", "video", "screen", "hand", "reaction"];
+      if (actionPayload.action && !allowedActions.includes(actionPayload.action)) return;
       socket.to(room).emit("call:action-broadcast", {
+        ...actionPayload,
         userId: socket.userId,
         socketId: socket.id,
-        ...actionPayload,
       });
     });
 
-    socket.on("call:moderate", (data) => {
-      const { room, targetUserId, action } = data; // action: 'mute-user', 'kick-user', 'mute-all'
+    socket.on("call:moderate", async (data) => {
+      const { room, targetUserId, action } = data || {};
+      if (!isSocketInCallRoom(socket, room) || !targetUserId) return;
+      const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+      const moderator = session?.participants.find((p) => String(p.user) === String(socket.userId));
+      const isHost = session && (
+        String(session.initiator) === String(socket.userId) || moderator?.role === "host"
+      );
+      if (!isHost) {
+        console.warn(`🛡️ Blocked call moderation by non-host ${socket.userId}`);
+        return;
+      }
+      if (!session.participants.some((p) => String(p.user) === String(targetUserId))) return;
+      if (!["mute-user", "kick-user", "mute-all"].includes(action)) return;
       io.to(room).emit("call:moderated", {
         moderatorId: socket.userId,
         targetUserId,
@@ -1257,46 +1519,41 @@ export const initializeSocket = (httpServer) => {
       });
     });
 
-    socket.on("call:leave-room", (data) => {
-      const { room } = data;
+    socket.on("call:leave-room", async (data) => {
+      const { room } = data || {};
+      if (!isSocketInCallRoom(socket, room)) return;
       socket.leave(room);
-      // Clean up room tracking
       socketCallRooms.get(socket.id)?.delete(room);
       socket.to(room).emit("call:peer-left", {
         userId: socket.userId,
         socketId: socket.id,
       });
-
-      // Sync state to DB with grace period
-      if (socket.userId) {
-        leaveCallSessionInDb(room, socket.userId);
-      }
+      if (socket.userId) await leaveCallSessionInDb(room, socket.userId);
     });
 
-    socket.on("call:hangup", async (data) => {
-      const { room, targetUserId } = data;
-      if (!room) return;
+    const handleCallHangup = async (data) => {
+      const { room, targetUserId } = data || {};
+      if (!room || !socket.userId) return;
 
-      console.log(`📴 [call:hangup] User ${socket.userId} explicitly hung up call room ${room}`);
-      cancelRoomTeardown(room);
-
-      // 1. Notify everyone in the room that call is ended
-      io.to(room).emit("call:ended", { room, endedBy: socket.userId });
-
-      // 2. Also notify target user's personal room in case they were ringing
-      if (targetUserId) {
-        io.to(getUserRoom(targetUserId.toString())).emit("call:ended", { room, endedBy: socket.userId });
-        socket.to(getUserRoom(targetUserId.toString())).emit("call:response-received", {
-          room,
-          response: "cancelled",
-          from: (socket.userId || "").toString(),
-        });
-      }
-
-      // 3. Mark session ended in database
       try {
         const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
-        if (session) {
+        if (!session) return;
+        const participant = session.participants.find((p) => String(p.user) === String(socket.userId));
+        if (!participant) {
+          console.warn(`🛡️ Blocked hangup by non-participant ${socket.userId} for ${room}`);
+          return;
+        }
+
+        const isHost = String(session.initiator) === String(socket.userId) || participant.role === "host";
+        const isGroup = ["group", "channel"].includes(session.type) || session.participants.length > 2;
+        const endForEveryone = !isGroup || isHost;
+        cancelRoomTeardown(room);
+
+        const invitedTarget = targetUserId && session.participants.some(
+          (p) => String(p.user) === String(targetUserId)
+        ) ? String(targetUserId) : null;
+
+        if (endForEveryone) {
           session.status = "ended";
           session.endTime = new Date();
           session.participants.forEach((p) => {
@@ -1306,36 +1563,47 @@ export const initializeSocket = (httpServer) => {
             }
           });
           await session.save();
+          io.to(room).emit("call:ended", { room, endedBy: socket.userId });
+          if (invitedTarget) {
+            io.to(getUserRoom(invitedTarget)).emit("call:ended", { room, endedBy: socket.userId });
+            io.to(getUserRoom(invitedTarget)).emit("call:response-received", {
+              room, response: "cancelled", from: String(socket.userId),
+            });
+          }
           recordCallLogMessage(session).catch(() => null);
+        } else {
+          participant.status = "left";
+          participant.leftAt = new Date();
+          await session.save();
+          socket.leave(room);
+          socketCallRooms.get(socket.id)?.delete(room);
+          socket.to(room).emit("call:peer-left", { room, userId: socket.userId, socketId: socket.id });
         }
       } catch (err) {
-        console.error("[call:hangup DB error]:", err);
+        console.error("[call:hangup] authorization/state update failed:", err);
       }
-    });
+    };
+
+    socket.on("call:hangup", handleCallHangup);
 
     // =====================================================
     // IN-CALL CHAT, ATTACHMENTS, PINNING & REACTIONS ENGINE
     // =====================================================
     socket.on("call:chat-message", (data) => {
-      const { room, text, id, senderName, senderAvatar, replyTo, from, file, attachments } = data;
-      if (!room || (!text && !file && (!attachments || attachments.length === 0))) return;
+      const { room, text, id, senderName, senderAvatar, replyTo, file, attachments } = data || {};
+      if (!isSocketInCallRoom(socket, room)) return;
+      if ((!text && !file && (!Array.isArray(attachments) || attachments.length === 0)) ||
+          (typeof text === "string" && text.length > 5000) ||
+          (Array.isArray(attachments) && attachments.length > 10)) return;
 
-      if (!socket.rooms.has(room)) {
-        socket.join(room);
-      }
-
-      const senderId = socket.userId || from || socket.id;
-      console.log(`💬 [In-Call Chat] Message from "${senderName}" (${senderId}) in room "${room}"`);
-
-      // Relay the rich message with file attachments to all other participants in the room
       socket.to(room).emit("call:chat-message-received", {
         id: id || Date.now().toString(),
-        from: senderId,
-        senderName: senderName || "Participant",
-        senderAvatar: senderAvatar || null,
-        text: text || "",
+        from: socket.userId,
+        senderName: socket.userName || "Participant",
+        senderAvatar: socket.profilePicture || null,
+        text: typeof text === "string" ? text : "",
         file: file || null,
-        attachments: attachments || (file ? [file] : []),
+        attachments: Array.isArray(attachments) ? attachments : (file ? [file] : []),
         replyTo: replyTo || null,
         pinned: false,
         reactions: {},
@@ -1344,72 +1612,57 @@ export const initializeSocket = (httpServer) => {
     });
 
     socket.on("call:chat-reaction", (data) => {
-      const { room, messageId, emoji } = data;
-      if (!room || !messageId || !emoji) return;
-
-      if (!socket.rooms.has(room)) {
-        socket.join(room);
-      }
-
-      const userId = socket.userId || data.from || socket.id;
-      console.log(`✨ [In-Call Chat Reaction] User "${userId}" reacted "${emoji}" to message "${messageId}" in room "${room}"`);
+      const { room, messageId, emoji } = data || {};
+      if (!isSocketInCallRoom(socket, room) || !messageId ||
+          typeof emoji !== "string" || emoji.length > 12) return;
 
       io.to(room).emit("call:chat-reaction-received", {
         messageId,
         emoji,
-        userId,
-        senderName: data.senderName || "Participant",
+        userId: socket.userId,
+        senderName: socket.userName || "Participant",
       });
     });
 
-    socket.on("call:pin-message", (data) => {
-      const { room, messageId, pinned } = data;
-      if (!room || !messageId) return;
-
-      if (!socket.rooms.has(room)) {
-        socket.join(room);
-      }
-
-      console.log(`📌 [In-Call Pin] Message ${messageId} pinned=${pinned} in room ${room}`);
-      // Synchronize pinned message state across all attendees
+    socket.on("call:pin-message", async (data) => {
+      const { room, messageId, pinned } = data || {};
+      if (!isSocketInCallRoom(socket, room) || !messageId) return;
+      const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+      const participant = session?.participants.find((p) => String(p.user) === String(socket.userId));
+      const isHost = session && (
+        String(session.initiator) === String(socket.userId) || participant?.role === "host"
+      );
+      if (!isHost) return;
       io.to(room).emit("call:message-pinned", {
-        messageId,
-        pinned: Boolean(pinned),
-        pinnedBy: socket.userId || socket.id,
+        messageId, pinned: Boolean(pinned), pinnedBy: socket.userId,
       });
     });
 
-    socket.on("call:recording-status", (data) => {
-      const { room, isRecording } = data;
-      if (!room) return;
-
-      if (!socket.rooms.has(room)) {
-        socket.join(room);
-      }
-
-      console.log(`🔴 [In-Call Recording] Status in room ${room}: isRecording=${isRecording}`);
+    socket.on("call:recording-status", async (data) => {
+      const { room, isRecording } = data || {};
+      if (!isSocketInCallRoom(socket, room)) return;
+      const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+      const participant = session?.participants.find((p) => String(p.user) === String(socket.userId));
+      const isHost = session && (
+        String(session.initiator) === String(socket.userId) || participant?.role === "host"
+      );
+      if (!isHost) return;
       io.to(room).emit("call:recording-status-changed", {
         isRecording: Boolean(isRecording),
-        startedBy: socket.userId || socket.id,
-        startedByName: data.userName || "Participant",
+        startedBy: socket.userId,
+        startedByName: socket.userName || "Participant",
       });
     });
 
     // In-Call Live Typing Indicator Event
     socket.on("call:typing", (data) => {
-      const { room, senderName, senderAvatar, isTyping } = data;
-      if (!room) return;
-
-      if (!socket.rooms.has(room)) {
-        socket.join(room);
-      }
-
-      const senderId = socket.userId || data.from || socket.id;
+      const { room, isTyping } = data || {};
+      if (!isSocketInCallRoom(socket, room)) return;
       socket.to(room).emit("call:user-typing", {
         room,
-        userId: senderId,
-        userName: senderName || "Participant",
-        userAvatar: senderAvatar || null,
+        userId: socket.userId,
+        userName: socket.userName || "Participant",
+        userAvatar: socket.profilePicture || null,
         isTyping: Boolean(isTyping),
       });
     });
@@ -1418,60 +1671,36 @@ export const initializeSocket = (httpServer) => {
     // CO-WATCHING WATCH PARTY EVENTS
     // =====================================================
     socket.on("call:watch-party-start", (data) => {
-      const { room, videoUrl } = data;
-      socket.to(room).emit("call:watch-party-started", {
-        videoUrl,
-        startedBy: socket.userId,
-      });
+      const { room, videoUrl } = data || {};
+      if (!isSocketInCallRoom(socket, room) || typeof videoUrl !== "string" || videoUrl.length > 2000) return;
+      socket.to(room).emit("call:watch-party-started", { videoUrl, startedBy: socket.userId });
     });
 
     socket.on("call:watch-party-stop", (data) => {
-      const { room } = data;
-      socket.to(room).emit("call:watch-party-stopped", {
-        stoppedBy: socket.userId,
-      });
+      const { room } = data || {};
+      if (!isSocketInCallRoom(socket, room)) return;
+      socket.to(room).emit("call:watch-party-stopped", { stoppedBy: socket.userId });
     });
 
     socket.on("call:watch-party-sync", (data) => {
-      const { room, action, currentTime, playing } = data; // action: 'play', 'pause', 'seek'
+      const { room, action, currentTime, playing } = data || {};
+      if (!isSocketInCallRoom(socket, room) || !["play", "pause", "seek"].includes(action)) return;
+      if (typeof currentTime !== "number" || !Number.isFinite(currentTime) || currentTime < 0) return;
       socket.to(room).emit("call:watch-party-synced", {
-        action,
-        currentTime,
-        playing,
-        senderId: socket.userId,
+        action, currentTime, playing: Boolean(playing), senderId: socket.userId,
       });
     });
 
     // In-Call Reaction Emojis
     socket.on("call:reaction", (data) => {
-      const { room, emoji } = data;
-      io.to(room).emit("call:reaction-received", {
-        emoji,
-        senderId: socket.userId,
-      });
+      const { room, emoji } = data || {};
+      if (!isSocketInCallRoom(socket, room) || typeof emoji !== "string" || emoji.length > 12) return;
+      io.to(room).emit("call:reaction-received", { emoji, senderId: socket.userId });
     });
 
     // Explicit Call End Event
-    socket.on("call:end", async (data) => {
-      const { room } = data;
-      console.log(`🛑 Call ended in room ${room} by ${socket.userId}`);
-      socket.to(room).emit("call:ended", { room, endedBy: socket.userId });
-      io.to(room).emit("call:ended", { room, endedBy: socket.userId });
-
-      try {
-        const session = await CallSession.findOneAndUpdate(
-          { room, status: { $ne: "ended" } },
-          { status: "ended", endTime: new Date() },
-          { returnDocument: 'after' }
-        );
-        if (session) {
-          recordCallLogMessage(session).catch(() => null);
-        }
-      } catch (e) {
-        console.warn("Could not mark call session ended in db:", e);
-      }
-    });
-
+    // Explicit Call End Event; shares the same participant/host policy as hangup.
+    socket.on("call:end", handleCallHangup);
 
     // =====================================================
     // VYBE MEET REAL-TIME CONFERENCING ENGINE
@@ -1481,8 +1710,45 @@ export const initializeSocket = (httpServer) => {
         const { meetingId, userName: payloadUserName, name: payloadName, profilePicture: payloadAvatar } = data || {};
         if (!meetingId) return;
 
+        if (typeof meetingId !== "string" || !socket.userId) {
+          socket.emit("meeting:error", { message: "A valid meeting ID and authenticated account are required" });
+          return;
+        }
         const normalizedMeetingId = meetingId.trim().toLowerCase();
+        if (!normalizedMeetingId || normalizedMeetingId.length > 120) return;
         const roomName = `meeting_${normalizedMeetingId}`;
+
+        // Only an existing, non-ended meeting can be joined; honor locks and kicked participants.
+        const access = await getMeetingAccess(normalizedMeetingId, socket.userId);
+        if (!access) {
+          socket.emit("meeting:error", { message: "Meeting not found or access denied" });
+          return;
+        }
+        const { meeting, participant, isHost, isCoHost } = access;
+        if (participant?.status === "kicked") {
+          socket.emit("meeting:error", { message: "You have been removed from this meeting" });
+          return;
+        }
+        if (meeting.settings?.isLocked && !isHost && !isCoHost && !participant) {
+          socket.emit("meeting:error", { message: "This meeting is locked" });
+          return;
+        }
+        if (participant) {
+          participant.status = "joined";
+          participant.leftAt = null;
+          participant.joinedAt = new Date();
+          if (isHost) participant.role = "host";
+        } else {
+          meeting.participants.push({
+            user: socket.userId,
+            role: "participant",
+            status: "joined",
+            joinedAt: new Date(),
+            leftAt: null,
+          });
+        }
+        if (meeting.status === "waiting") meeting.status = "active";
+        await meeting.save();
 
         socket.join(roomName);
 
@@ -1568,14 +1834,14 @@ export const initializeSocket = (httpServer) => {
       }
     });
 
-    socket.on("meeting:signal", (data) => {
-      const { toSocketId, toUserId, meetingId, signal, fromMetadata } = data;
-      if (!signal) return;
+    socket.on("meeting:signal", async (data) => {
+      const { toSocketId, toUserId, meetingId, signal } = data || {};
+      if (!meetingId || !signal || !isSocketInMeeting(socket, meetingId)) return;
 
       const payload = {
         fromSocketId: socket.id,
         fromUserId: socket.userId,
-        fromMetadata: fromMetadata || {
+        fromMetadata: {
           userId: socket.userId,
           userName: socket.userName,
           name: socket.name,
@@ -1583,68 +1849,70 @@ export const initializeSocket = (httpServer) => {
         },
         signal,
       };
+      const roomName = `meeting_${String(meetingId).trim().toLowerCase()}`;
+      const roomSockets = await io.in(roomName).fetchSockets();
 
       if (toSocketId) {
-        io.to(toSocketId).emit("meeting:signal-received", payload);
+        const target = roomSockets.find((candidate) => candidate.id === toSocketId);
+        if (target) io.to(toSocketId).emit("meeting:signal-received", payload);
+        return;
       }
-
-      const targetUid = toUserId || toSocketId;
-      if (targetUid && activeUsers.has(targetUid.toString())) {
-        for (const sId of activeUsers.get(targetUid.toString())) {
-          if (sId !== socket.id && sId !== toSocketId) {
-            io.to(sId).emit("meeting:signal-received", payload);
+      if (toUserId) {
+        for (const target of roomSockets) {
+          if (String(target.userId) === String(toUserId) && target.id !== socket.id) {
+            io.to(target.id).emit("meeting:signal-received", payload);
           }
         }
+        return;
       }
-
-      if (!toSocketId && !toUserId && meetingId) {
-        socket.to(`meeting_${meetingId.toLowerCase()}`).emit("meeting:signal-received", payload);
-      }
+      socket.to(roomName).emit("meeting:signal-received", payload);
     });
 
     socket.on("meeting:action", (data) => {
-      const { meetingId, ...actionPayload } = data;
-      if (!meetingId) return;
-      socket.to(`meeting_${meetingId.toLowerCase()}`).emit("meeting:action-broadcast", {
+      const { meetingId, ...actionPayload } = data || {};
+      if (!meetingId || !isSocketInMeeting(socket, meetingId)) return;
+      const allowedActions = ["mute", "video", "screen", "hand", "raise-hand", "lower-hand", "reaction"];
+      if (actionPayload.action && !allowedActions.includes(actionPayload.action)) return;
+      socket.to(`meeting_${String(meetingId).trim().toLowerCase()}`).emit("meeting:action-broadcast", {
+        ...actionPayload,
         userId: socket.userId,
         socketId: socket.id,
-        ...actionPayload,
       });
     });
 
     socket.on("meeting:caption", (data) => {
-      const { meetingId, text, isFinal, id, speakerId, speakerName, speakerAvatar, language } = data || {};
-      if (!meetingId || !text) return;
-      const roomName = `meeting_${meetingId.toLowerCase()}`;
+      const { meetingId, text, isFinal, id, language } = data || {};
+      if (!meetingId || typeof text !== "string" || !text.trim() || text.length > 2000 ||
+          !isSocketInMeeting(socket, meetingId)) return;
+      const roomName = `meeting_${String(meetingId).trim().toLowerCase()}`;
       socket.to(roomName).emit("meeting:caption-received", {
         id: id || `caption_${socket.id}_${Date.now()}`,
-        speakerId: speakerId || socket.userId || socket.id,
-        speakerName: speakerName || socket.userName || "Participant",
-        speakerAvatar: speakerAvatar || socket.profilePicture || null,
-        text: typeof text === "string" ? text.trim() : "",
+        speakerId: socket.userId,
+        speakerName: socket.userName || "Participant",
+        speakerAvatar: socket.profilePicture || null,
+        text: text.trim(),
         isFinal: Boolean(isFinal),
-        language: language || "en-US",
+        language: typeof language === "string" ? language.slice(0, 24) : "en-US",
         timestamp: Date.now(),
       });
     });
 
     socket.on("meeting:chat-message", (data) => {
-      const { meetingId, text, id, senderName, senderAvatar, replyTo, file, attachments } = data;
-      if (!meetingId || (!text && !file && (!attachments || attachments.length === 0))) return;
+      const { meetingId, text, id, replyTo, file, attachments } = data || {};
+      if (!meetingId || !isSocketInMeeting(socket, meetingId)) return;
+      if ((!text && !file && (!Array.isArray(attachments) || attachments.length === 0)) ||
+          (typeof text === "string" && text.length > 5000) ||
+          (Array.isArray(attachments) && attachments.length > 10)) return;
 
-      const roomName = `meeting_${meetingId.toLowerCase()}`;
-      if (!socket.rooms.has(roomName)) {
-        socket.join(roomName);
-      }
-
+      const roomName = `meeting_${String(meetingId).trim().toLowerCase()}`;
       socket.to(roomName).emit("meeting:chat-message-received", {
         id: id || Date.now().toString(),
-        from: socket.userId || socket.id,
-        senderName: senderName || socket.userName || "Participant",
-        senderAvatar: senderAvatar || socket.profilePicture || null,
-        text: text || "",
+        from: socket.userId,
+        senderName: socket.userName || "Participant",
+        senderAvatar: socket.profilePicture || null,
+        text: typeof text === "string" ? text : "",
         file: file || null,
-        attachments: attachments || (file ? [file] : []),
+        attachments: Array.isArray(attachments) ? attachments : (file ? [file] : []),
         replyTo: replyTo || null,
         pinned: false,
         reactions: {},
@@ -1652,70 +1920,73 @@ export const initializeSocket = (httpServer) => {
       });
     });
 
-    socket.on("meeting:chat-reaction", (data) => {
-      const { meetingId, messageId, emoji, senderName } = data;
-      if (!meetingId || !messageId || !emoji) return;
-
-      io.to(`meeting_${meetingId.toLowerCase()}`).emit("meeting:chat-reaction-received", {
+    socket.on("meeting:chat-reaction", async (data) => {
+      const { meetingId, messageId, emoji } = data || {};
+      if (!meetingId || !messageId || typeof emoji !== "string" || emoji.length > 12 ||
+          !isSocketInMeeting(socket, meetingId)) return;
+      const roomName = `meeting_${String(meetingId).trim().toLowerCase()}`;
+      io.to(roomName).emit("meeting:chat-reaction-received", {
         messageId,
         emoji,
-        userId: socket.userId || socket.id,
-        senderName: senderName || socket.userName || "Participant",
-      });
-    });
-
-    socket.on("meeting:pin-message", (data) => {
-      const { meetingId, messageId, pinned } = data;
-      if (!meetingId || !messageId) return;
-
-      io.to(`meeting_${meetingId.toLowerCase()}`).emit("meeting:message-pinned", {
-        messageId,
-        pinned: Boolean(pinned),
-        pinnedBy: socket.userId || socket.id,
-      });
-    });
-
-    socket.on("meeting:reaction", (data) => {
-      const { meetingId, emoji, leftPercent, driftX } = data;
-      if (!meetingId || !emoji) return;
-
-      io.to(`meeting_${meetingId.toLowerCase()}`).emit("meeting:reaction-received", {
-        emoji,
-        leftPercent,
-        driftX,
-        senderId: socket.userId || socket.id,
+        userId: socket.userId,
         senderName: socket.userName || "Participant",
       });
     });
 
-    socket.on("meeting:recording-status", (data) => {
-      const { meetingId, isRecording } = data;
-      if (!meetingId) return;
+    socket.on("meeting:pin-message", async (data) => {
+      const { meetingId, messageId, pinned } = data || {};
+      if (!meetingId || !messageId || !isSocketInMeeting(socket, meetingId)) return;
+      const access = await getMeetingAccess(meetingId, socket.userId);
+      if (!access || (!access.isHost && !access.isCoHost)) return;
+      io.to(`meeting_${String(meetingId).trim().toLowerCase()}`).emit("meeting:message-pinned", {
+        messageId,
+        pinned: Boolean(pinned),
+        pinnedBy: socket.userId,
+      });
+    });
 
-      io.to(`meeting_${meetingId.toLowerCase()}`).emit("meeting:recording-status-changed", {
+    socket.on("meeting:reaction", (data) => {
+      const { meetingId, emoji, leftPercent, driftX } = data || {};
+      if (!meetingId || typeof emoji !== "string" || emoji.length > 12 ||
+          !isSocketInMeeting(socket, meetingId)) return;
+      socket.to(`meeting_${String(meetingId).trim().toLowerCase()}`).emit("meeting:reaction-received", {
+        emoji,
+        leftPercent: Number.isFinite(leftPercent) ? Math.max(0, Math.min(100, leftPercent)) : 50,
+        driftX: Number.isFinite(driftX) ? Math.max(-100, Math.min(100, driftX)) : 0,
+        senderId: socket.userId,
+        senderName: socket.userName || "Participant",
+      });
+    });
+
+    socket.on("meeting:recording-status", async (data) => {
+      const { meetingId, isRecording } = data || {};
+      if (!meetingId || !isSocketInMeeting(socket, meetingId)) return;
+      const access = await getMeetingAccess(meetingId, socket.userId);
+      if (!access || (!access.isHost && !access.isCoHost)) return;
+      io.to(`meeting_${String(meetingId).trim().toLowerCase()}`).emit("meeting:recording-status-changed", {
         isRecording: Boolean(isRecording),
-        startedBy: socket.userId || socket.id,
-        startedByName: socket.userName || data.userName || "Participant",
+        startedBy: socket.userId,
+        startedByName: socket.userName || "Participant",
       });
     });
 
     socket.on("meeting:host-control", async (data) => {
-      const { meetingId, targetUserId, targetSocketId, action } = data;
-      if (!meetingId || !action) return;
-
-      const roomName = `meeting_${meetingId.toLowerCase()}`;
-      console.log(`🛡️ [Vybe Meet Host Action] ${action} in meeting ${meetingId} by ${socket.userId}`);
-
+      const { meetingId, targetUserId, targetSocketId, action } = data || {};
+      if (!meetingId || !action || !isSocketInMeeting(socket, meetingId)) return;
+      const normalizedId = String(meetingId).trim().toLowerCase();
+      const access = await getMeetingAccess(normalizedId, socket.userId);
+      if (!access || (!access.isHost && !access.isCoHost)) {
+        console.warn(`🛡️ Blocked unauthorized meeting host action ${action} by ${socket.userId}`);
+        return;
+      }
+      const roomName = `meeting_${normalizedId}`;
       if (action === "end-meeting") {
-        io.to(roomName).emit("meeting:ended", {
-          meetingId,
-          endedBy: socket.userId,
-        });
-
-        Meeting.findOneAndUpdate(
-          { meetingId: meetingId.toLowerCase() },
+        if (!access.isHost) return;
+        await Meeting.findOneAndUpdate(
+          { meetingId: normalizedId, host: socket.userId, status: { $ne: "ended" } },
           { status: "ended", endTime: new Date() }
-        ).catch(() => null);
+        );
+        io.to(roomName).emit("meeting:ended", { meetingId: normalizedId, endedBy: socket.userId });
       } else {
         io.to(roomName).emit("meeting:host-action-received", {
           moderatorId: socket.userId,
@@ -1727,25 +1998,21 @@ export const initializeSocket = (httpServer) => {
     });
 
     socket.on("meeting:leave-room", async (data) => {
-      const { meetingId } = data;
-      if (!meetingId) return;
-
-      const normalizedId = meetingId.toLowerCase();
+      const { meetingId } = data || {};
+      if (!meetingId || !isSocketInMeeting(socket, meetingId)) return;
+      const normalizedId = String(meetingId).trim().toLowerCase();
       const roomName = `meeting_${normalizedId}`;
-
       socket.leave(roomName);
       socketMeetingRooms.get(socket.id)?.delete(normalizedId);
-
       socket.to(roomName).emit("meeting:peer-left", {
         userId: socket.userId,
         socketId: socket.id,
       });
-
       if (socket.userId) {
         try {
           await Meeting.findOneAndUpdate(
             { meetingId: normalizedId, "participants.user": socket.userId },
-            { $set: { "participants.$.leftAt": new Date() } }
+            { $set: { "participants.$.leftAt": new Date(), "participants.$.status": "left" } }
           );
         } catch (err) {
           console.error("meeting:leave-room error:", err);
@@ -1762,9 +2029,9 @@ export const initializeSocket = (httpServer) => {
         if (!meetingId || !rooms || !Array.isArray(rooms)) return;
         const normalizedId = meetingId.toLowerCase();
 
-        // Verify host authorization server-side
-        const meeting = await Meeting.findOne({ meetingId: normalizedId }).select("host").lean();
-        const isHost = meeting && socket.userId && meeting.host.toString() === socket.userId.toString();
+        // Verify host authorization and confirm the caller is in the parent meeting.
+        const access = await getMeetingAccess(normalizedId, socket.userId);
+        const isHost = access?.isHost && isSocketInMeeting(socket, normalizedId);
         if (!isHost) {
           console.warn(`🛡️ Blocked unauthorized breakout-start by socket ${socket.id} (user: ${socket.userId})`);
           return;
@@ -1805,32 +2072,42 @@ export const initializeSocket = (httpServer) => {
     socket.on("meeting:breakout-join-room", async (data) => {
       try {
         const { meetingId, roomId } = data || {};
-        if (!meetingId || !roomId) return;
-        const normalizedId = meetingId.toLowerCase();
-        const breakoutRoomName = `meeting_${normalizedId}_breakout_${roomId}`;
+        if (!meetingId || !roomId || !socket.userId || !isSocketInMeeting(socket, meetingId)) return;
+        const normalizedId = String(meetingId).trim().toLowerCase();
+        const breakoutSession = meetingBreakoutSessions.get(normalizedId);
+        if (!breakoutSession || breakoutSession.status !== "active") {
+          socket.emit("meeting:error", { message: "No active breakout session exists" });
+          return;
+        }
+        const breakoutRoom = breakoutSession.rooms.find((room) => String(room.id) === String(roomId));
+        if (!breakoutRoom) {
+          socket.emit("meeting:error", { message: "Breakout room not found" });
+          return;
+        }
+        const access = await getMeetingAccess(normalizedId, socket.userId);
+        if (!access || access.participant?.status === "kicked") return;
+        const assignedIds = Array.isArray(breakoutRoom.participants)
+          ? breakoutRoom.participants.map((item) => String(item?._id || item?.userId || item?.user || item))
+          : [];
+        if (assignedIds.length > 0 && !assignedIds.includes(String(socket.userId)) &&
+            !access.isHost && !access.isCoHost) {
+          socket.emit("meeting:error", { message: "You are not assigned to this breakout room" });
+          return;
+        }
 
-        // Join breakout sub-room
+        const safeRoomId = String(roomId).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
+        const breakoutRoomName = `meeting_${normalizedId}_breakout_${safeRoomId}`;
         socket.join(breakoutRoomName);
 
-        // Fetch other members in this breakout room
         const roomSockets = await io.in(breakoutRoomName).fetchSockets();
-        const members = roomSockets
-          .filter((s) => s.id !== socket.id)
-          .map((s) => ({
-            socketId: s.id,
-            userId: s.userId || null,
-            userName: s.userName || "Participant",
-            name: s.name || "",
-            profilePicture: s.profilePicture || null,
-          }));
-
-        socket.emit("meeting:breakout-room-members", {
-          meetingId: normalizedId,
-          roomId,
-          members,
-        });
-
-        // Notify existing members in this breakout room
+        const members = roomSockets.filter((member) => member.id !== socket.id).map((member) => ({
+          socketId: member.id,
+          userId: member.userId || null,
+          userName: member.userName || "Participant",
+          name: member.name || "",
+          profilePicture: member.profilePicture || null,
+        }));
+        socket.emit("meeting:breakout-room-members", { meetingId: normalizedId, roomId, members });
         socket.to(breakoutRoomName).emit("meeting:breakout-peer-joined", {
           socketId: socket.id,
           userId: socket.userId,
@@ -1838,8 +2115,6 @@ export const initializeSocket = (httpServer) => {
           name: socket.name || "",
           profilePicture: socket.profilePicture || null,
         });
-
-        console.log(`🚪 [Vybe Meet] @${socket.userName || socket.id} entered breakout sub-room "${breakoutRoomName}"`);
       } catch (err) {
         console.error("meeting:breakout-join-room error:", err);
       }
@@ -1847,10 +2122,11 @@ export const initializeSocket = (httpServer) => {
 
     socket.on("meeting:breakout-leave-room", (data) => {
       const { meetingId, roomId } = data || {};
-      if (!meetingId || !roomId) return;
-      const normalizedId = meetingId.toLowerCase();
-      const breakoutRoomName = `meeting_${normalizedId}_breakout_${roomId}`;
-
+      if (!meetingId || !roomId || !socket.userId || !isSocketInMeeting(socket, meetingId)) return;
+      const normalizedId = String(meetingId).trim().toLowerCase();
+      const safeRoomId = String(roomId).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
+      const breakoutRoomName = `meeting_${normalizedId}_breakout_${safeRoomId}`;
+      if (!socket.rooms.has(breakoutRoomName)) return;
       socket.leave(breakoutRoomName);
       socket.to(breakoutRoomName).emit("meeting:breakout-peer-left", {
         socketId: socket.id,
@@ -1861,12 +2137,18 @@ export const initializeSocket = (httpServer) => {
     socket.on("meeting:breakout-broadcast", async (data) => {
       try {
         const { meetingId, message } = data || {};
-        if (!meetingId || !message) return;
-        const normalizedId = meetingId.toLowerCase();
-
-        // Broadcast to main room and all breakout participants
+        const normalizedId = String(meetingId || "").trim().toLowerCase();
+        if (!normalizedId || typeof message !== "string" || !message.trim() ||
+            message.length > 1000 || !isSocketInMeeting(socket, normalizedId)) return;
+        const access = await getMeetingAccess(normalizedId, socket.userId);
+        if (!access?.isHost) {
+          console.warn(`🛡️ Blocked breakout broadcast by non-host ${socket.userId}`);
+          return;
+        }
+        const session = meetingBreakoutSessions.get(normalizedId);
+        if (!session || session.status !== "active") return;
         io.to(`meeting_${normalizedId}`).emit("meeting:breakout-broadcast-received", {
-          message: typeof message === "string" ? message.trim() : "",
+          message: message.trim(),
           senderName: socket.userName || "Meeting Host",
           timestamp: Date.now(),
         });
@@ -1875,35 +2157,48 @@ export const initializeSocket = (httpServer) => {
       }
     });
 
-    socket.on("meeting:breakout-move-user", (data) => {
+    socket.on("meeting:breakout-move-user", async (data) => {
       const { meetingId, targetSocketId, targetUserId, newRoomId, newRoomName } = data || {};
-      if (!meetingId || !newRoomId) return;
-      const normalizedId = meetingId.toLowerCase();
+      const normalizedId = String(meetingId || "").trim().toLowerCase();
+      if (!normalizedId || !newRoomId || !isSocketInMeeting(socket, normalizedId)) return;
+      const access = await getMeetingAccess(normalizedId, socket.userId);
+      if (!access?.isHost) return;
+      const breakoutSession = meetingBreakoutSessions.get(normalizedId);
+      if (!breakoutSession || breakoutSession.status !== "active" ||
+          !breakoutSession.rooms.some((room) => String(room.id) === String(newRoomId))) return;
 
-      const target = targetSocketId || (targetUserId ? Array.from(activeUsers.get(targetUserId.toString()) || [])[0] : null);
-      if (target) {
-        io.to(target).emit("meeting:breakout-reassigned", {
-          meetingId: normalizedId,
-          newRoomId,
-          newRoomName: newRoomName || `Room ${newRoomId}`,
-        });
-      }
+      const target = targetSocketId || (targetUserId ? Array.from(activeUsers.get(String(targetUserId)) || [])[0] : null);
+      if (!target) return;
+      const targetSocket = io.sockets.sockets.get(target);
+      if (!targetSocket || !isSocketInMeeting(targetSocket, normalizedId)) return;
+      io.to(target).emit("meeting:breakout-reassigned", {
+        meetingId: normalizedId,
+        newRoomId,
+        newRoomName: newRoomName || `Room ${newRoomId}`,
+      });
     });
 
     socket.on("meeting:breakout-end", async (data) => {
       try {
         const { meetingId } = data || {};
-        if (!meetingId) return;
-        const normalizedId = meetingId.toLowerCase();
-
+        const normalizedId = String(meetingId || "").trim().toLowerCase();
+        if (!normalizedId || !isSocketInMeeting(socket, normalizedId)) return;
+        const access = await getMeetingAccess(normalizedId, socket.userId);
+        if (!access?.isHost) {
+          console.warn(`🛡️ Blocked breakout-end by non-host ${socket.userId}`);
+          return;
+        }
+        const session = meetingBreakoutSessions.get(normalizedId);
+        if (!session) return;
         meetingBreakoutSessions.delete(normalizedId);
 
-        // Notify all sockets across all breakout subrooms to return to main meeting
-        io.to(`meeting_${normalizedId}`).emit("meeting:breakout-ended", {
-          meetingId: normalizedId,
-        });
-
-        console.log(`🚪 [Vybe Meet] Breakout session closed in "${normalizedId}". All users returning to main meeting.`);
+        for (const room of session.rooms || []) {
+          const safeRoomId = String(room.id).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
+          const breakoutRoomName = `meeting_${normalizedId}_breakout_${safeRoomId}`;
+          const members = await io.in(breakoutRoomName).fetchSockets();
+          for (const member of members) await member.leave(breakoutRoomName);
+        }
+        io.to(`meeting_${normalizedId}`).emit("meeting:breakout-ended", { meetingId: normalizedId });
       } catch (err) {
         console.error("meeting:breakout-end error:", err);
       }
@@ -1914,7 +2209,8 @@ export const initializeSocket = (httpServer) => {
     // =====================================================
     socket.on("community:join-channel", async (data) => {
       try {
-        const { channelId } = data;
+        const { channelId } = data || {};
+        if (!channelId || !socket.userId) return;
         const channel = await Channel.findById(channelId);
         if (!channel) return;
         const community = await Community.findById(channel.community);
@@ -1922,6 +2218,10 @@ export const initializeSocket = (httpServer) => {
         const isMember = community.members.some((m) => m.user.toString() === socket.userId?.toString());
         if (!isMember) {
           console.warn(`🛡️ Blocked unauthorized community:join-channel: User ${socket.userId} to channel ${channelId}`);
+          return;
+        }
+        if (!canAccessChannel(community, channel, socket.userId)) {
+          console.warn(`🛡️ Blocked private community:join-channel: User ${socket.userId} to channel ${channelId}`);
           return;
         }
 
@@ -1941,112 +2241,187 @@ export const initializeSocket = (httpServer) => {
 
     socket.on("community:send-message", async (data) => {
       try {
-        const { channelId, message } = data;
-        const channel = await Channel.findById(channelId);
-        if (!channel) return;
-        const community = await Community.findById(channel.community);
-        if (!community) return;
-        const isMember = community.members.some((m) => m.user.toString() === socket.userId?.toString());
-        if (!isMember) {
-          console.warn(`🛡️ Blocked unauthorized community:send-message: User ${socket.userId} to channel ${channelId}`);
-          return;
-        }
+        const { channelId, message } = data || {};
+        if (!socket.userId || !channelId || !message?._id ||
+            !socket.rooms.has(`channel_${channelId}`)) return;
+        const membership = await getCommunityChannelMembership(channelId, socket.userId);
+        if (!membership) return;
 
-        // Broadcast to other users in this channel room
+        const persistedMessage = await ChannelMessage.findOne({
+          _id: message._id,
+          channel: channelId,
+          sender: socket.userId,
+        })
+          .populate("sender", "name userName profileImage")
+          .populate({ path: "replyTo", populate: { path: "sender", select: "name userName profileImage" } })
+          .lean();
+        if (!persistedMessage) return;
+
         socket.to(`channel_${channelId}`).emit("community:message-received", {
           channelId,
-          message,
+          message: persistedMessage,
         });
       } catch (err) {
         console.error("community:send-message error:", err);
       }
     });
 
-    socket.on("community:typing", (data) => {
-      const { channelId, userName } = data;
+    socket.on("community:typing", async (data) => {
+      const { channelId } = data || {};
+      if (!channelId || !socket.userId || !socket.rooms.has(`channel_${channelId}`)) return;
+      if (!(await getCommunityChannelMembership(channelId, socket.userId))) return;
       socket.to(`channel_${channelId}`).emit("community:user-typing", {
         channelId,
         userId: socket.userId,
-        userName,
+        userName: socket.userName || "Member",
       });
     });
 
-    socket.on("community:stop-typing", (data) => {
-      const { channelId } = data;
+    socket.on("community:stop-typing", async (data) => {
+      const { channelId } = data || {};
+      if (!channelId || !socket.userId || !socket.rooms.has(`channel_${channelId}`)) return;
+      if (!(await getCommunityChannelMembership(channelId, socket.userId))) return;
       socket.to(`channel_${channelId}`).emit("community:user-stop-typing", {
         channelId,
         userId: socket.userId,
       });
     });
 
-    socket.on("community:message-reaction", (data) => {
-      const { channelId, message } = data;
-      socket.to(`channel_${channelId}`).emit("community:reaction-updated", {
-        channelId,
-        message,
+    socket.on("community:message-reaction", async (data) => {
+      try {
+        const { channelId, message } = data || {};
+        if (!channelId || !socket.userId || !message?._id ||
+            !socket.rooms.has(`channel_${channelId}`)) return;
+        if (!(await getCommunityChannelMembership(channelId, socket.userId))) return;
+        const persistedMessage = await ChannelMessage.findOne({ _id: message._id, channel: channelId })
+          .populate("sender", "name userName profileImage")
+          .populate("reactions.user", "name userName profileImage")
+          .lean();
+        if (!persistedMessage) return;
+        socket.to(`channel_${channelId}`).emit("community:reaction-updated", {
+          channelId, message: persistedMessage,
+        });
+      } catch (err) {
+        console.error("community:message-reaction error:", err);
+      }
+    });
+
+    // Deletion broadcasts are emitted by the authorized REST controller after deletion succeeds.
+    // Ignore client-originated deletion events because the row no longer exists to verify here.
+    socket.on("community:message-deleted", () => {
+      socket.emit("community:event-rejected", {
+        code: "SERVER_OWNED_EVENT",
+        message: "Message deletion events are emitted by the server after permission checks.",
       });
     });
 
-    socket.on("community:message-deleted", (data) => {
-      const { channelId, messageId } = data;
-      socket.to(`channel_${channelId}`).emit("community:message-deleted", {
-        channelId,
-        messageId,
-      });
+    socket.on("community:message-edited", async (data) => {
+      try {
+        const { channelId, message } = data || {};
+        if (!channelId || !socket.userId || !message?._id ||
+            !socket.rooms.has(`channel_${channelId}`)) return;
+        const membership = await getCommunityChannelMembership(channelId, socket.userId);
+        if (!membership) return;
+        const persistedMessage = await ChannelMessage.findOne({ _id: message._id, channel: channelId })
+          .populate("sender", "name userName profileImage")
+          .populate("reactions.user", "name userName profileImage")
+          .lean();
+        if (!persistedMessage) return;
+        const senderId = String(persistedMessage.sender?._id || persistedMessage.sender);
+        const isManager = String(membership.community.owner) === String(socket.userId) ||
+          (membership.member?.roles || []).some((role) => ["owner", "admin", "moderator"].includes(role));
+        if (senderId !== String(socket.userId) && !isManager) return;
+        socket.to(`channel_${channelId}`).emit("community:message-edited", {
+          channelId, message: persistedMessage,
+        });
+      } catch (err) {
+        console.error("community:message-edited error:", err);
+      }
     });
 
-    socket.on("community:message-edited", (data) => {
-      const { channelId, message } = data;
-      socket.to(`channel_${channelId}`).emit("community:message-edited", {
-        channelId,
-        message,
-      });
+    socket.on("community:message-pinned", async (data) => {
+      try {
+        const { channelId, message } = data || {};
+        if (!channelId || !socket.userId || !message?._id ||
+            !socket.rooms.has(`channel_${channelId}`)) return;
+        const membership = await getCommunityChannelMembership(channelId, socket.userId);
+        if (!membership) return;
+        const isManager = String(membership.community.owner) === String(socket.userId) ||
+          (membership.member?.roles || []).some((role) => ["owner", "admin", "moderator"].includes(role));
+        if (!isManager) return;
+        const persistedMessage = await ChannelMessage.findOne({ _id: message._id, channel: channelId })
+          .populate("sender", "name userName profileImage")
+          .lean();
+        if (!persistedMessage) return;
+        socket.to(`channel_${channelId}`).emit("community:message-pinned", {
+          channelId,
+          message: persistedMessage,
+          isPinned: Boolean(persistedMessage.isPinned),
+        });
+      } catch (err) {
+        console.error("community:message-pinned error:", err);
+      }
     });
 
-    socket.on("community:message-pinned", (data) => {
-      const { channelId, message, isPinned } = data;
-      socket.to(`channel_${channelId}`).emit("community:message-pinned", {
-        channelId,
-        message,
-        isPinned,
-      });
-    });
-
-    socket.on("community:voice-presence-join", (data) => {
-      const { communityId, channelId, user } = data;
+    socket.on("community:voice-presence-join", async (data) => {
+      const { communityId, channelId } = data || {};
+      if (!communityId || !channelId || !socket.userId ||
+          !socket.rooms.has(`channel_${channelId}`)) return;
+      const membership = await getCommunityChannelMembership(channelId, socket.userId);
+      if (!membership || String(membership.community._id) !== String(communityId)) return;
       io.to(`community_${communityId}`).emit("community:voice-presence-updated", {
         communityId,
         channelId,
-        user,
+        user: {
+          _id: socket.userId,
+          userName: socket.userName || "Member",
+          name: socket.name || "",
+          profilePicture: socket.profilePicture || null,
+        },
         action: "join",
       });
     });
 
-    socket.on("community:voice-presence-leave", (data) => {
-      const { communityId, channelId, userId } = data;
+    socket.on("community:voice-presence-leave", async (data) => {
+      const { communityId, channelId } = data || {};
+      if (!communityId || !channelId || !socket.userId ||
+          !socket.rooms.has(`channel_${channelId}`)) return;
+      const membership = await getCommunityChannelMembership(channelId, socket.userId);
+      if (!membership || String(membership.community._id) !== String(communityId)) return;
       io.to(`community_${communityId}`).emit("community:voice-presence-updated", {
-        communityId,
-        channelId,
-        userId,
-        action: "leave",
+        communityId, channelId, userId: socket.userId, action: "leave",
       });
     });
-
 
     // =====================================================
     // REEL REALTIME EVENTS
     // =====================================================
-    socket.on("reel-like-toggle", (data) => {
-      const { reelId, userId, isLiked, likesCount } = data;
-      io.emit("reel-like-updated", { reelId, userId, isLiked, likesCount });
+    socket.on("reel-like-toggle", async (data) => {
+      try {
+        const { reelId } = data || {};
+        if (!reelId || !socket.userId) return;
+        const reel = await Reel.findById(reelId).select("likes");
+        if (!reel) return;
+        // Use the persisted post-API state and handshake identity; never echo client-supplied counts or user IDs.
+        const likes = reel.likes || [];
+        io.emit("reel-like-updated", {
+          reelId,
+          userId: socket.userId,
+          isLiked: likes.some((id) => String(id) === String(socket.userId)),
+          likesCount: likes.length,
+        });
+      } catch (err) {
+        console.error("reel-like-toggle error:", err);
+      }
     });
 
-    socket.on("reel-comment-send", (data) => {
-      const { reelId, comment } = data;
-      io.emit("reel-comment-updated", { reelId, comment });
+    // Reel comments are persisted through the REST API; never broadcast arbitrary client comment objects.
+    socket.on("reel-comment-send", () => {
+      socket.emit("reel:comment-event-rejected", {
+        code: "SERVER_OWNED_EVENT",
+        message: "Reel comments must be submitted through the authenticated API.",
+      });
     });
-
-
 
     // =====================================================
     // ROOM MANAGEMENT & DISCONNECT

@@ -94,17 +94,60 @@ export const recordCallLogMessage = async (session) => {
 // Initiate a Call Session (P2P, Group or Channel)
 export const initiateCall = async (req, res) => {
   try {
-    const { type, room, receiverId, conversationId, channelId } = req.body;
+    const { type, room, receiverId, conversationId, channelId } = req.body || {};
 
-    if (!type || !room) {
-      return res.status(400).json({ success: false, message: "Type and Room ID are required" });
+    if (typeof type !== "string" || typeof room !== "string" || !room.trim() || room.length > 160) {
+      return res.status(400).json({ success: false, message: "A valid call type and room ID are required" });
     }
 
-    // Normalize type to valid enum: "voice", "audio", "video", "group", "channel"
+    // Normalize type to valid enum: "voice", "audio", "video", "group", or "channel".
     const normalizedType = type === "audio" ? "voice" : type;
+    if (!["voice", "video", "group", "channel"].includes(normalizedType)) {
+      return res.status(400).json({ success: false, message: "Unsupported call type" });
+    }
 
-    // Check if there is already an active session in this room
-    let session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+    const cleanRoom = room.trim();
+    const validConversationId = conversationId && mongoose.Types.ObjectId.isValid(conversationId)
+      ? conversationId
+      : null;
+    const validChannelId = channelId && mongoose.Types.ObjectId.isValid(channelId)
+      ? channelId
+      : null;
+
+    if (conversationId && !validConversationId) {
+      return res.status(400).json({ success: false, message: "Invalid conversation ID" });
+    }
+    if (channelId && !validChannelId) {
+      return res.status(400).json({ success: false, message: "Invalid channel ID" });
+    }
+    if (receiverId && (!mongoose.Types.ObjectId.isValid(receiverId) || String(receiverId) === String(req.userId))) {
+      return res.status(400).json({ success: false, message: "Invalid call recipient" });
+    }
+
+    if (validConversationId) {
+      const conversation = await Conversation.findOne({
+        _id: validConversationId,
+        participants: req.userId,
+      }).select("_id participants");
+      if (!conversation) {
+        return res.status(403).json({ success: false, message: "You are not a participant in this conversation" });
+      }
+      if (receiverId && !conversation.participants.some((id) => String(id) === String(receiverId))) {
+        return res.status(403).json({ success: false, message: "Call recipient is not in this conversation" });
+      }
+    }
+
+    // Check if there is already an active session in this room.
+    let session = await CallSession.findOne({ room: cleanRoom, status: { $ne: "ended" } });
+
+    if (session) {
+      const isParticipant = session.participants.some((p) =>
+        String(p.user?._id || p.user) === String(req.userId)
+      );
+      if (!isParticipant) {
+        return res.status(403).json({ success: false, message: "You are not a participant in this call" });
+      }
+    }
 
     if (!session) {
       const participants = [
@@ -117,7 +160,7 @@ export const initiateCall = async (req, res) => {
       ];
 
       // Add receiver for 1-to-1 call
-      const isValidReceiver = receiverId && mongoose.Types.ObjectId.isValid(receiverId);
+      const isValidReceiver = Boolean(receiverId && mongoose.Types.ObjectId.isValid(receiverId));
       if (isValidReceiver) {
         participants.push({
           user: receiverId,
@@ -126,11 +169,8 @@ export const initiateCall = async (req, res) => {
         });
       }
 
-      const validConversationId = conversationId && mongoose.Types.ObjectId.isValid(conversationId) ? conversationId : null;
-      const validChannelId = channelId && mongoose.Types.ObjectId.isValid(channelId) ? channelId : null;
-
       session = await CallSession.create({
-        room,
+        room: cleanRoom,
         conversationId: validConversationId,
         channelId: validChannelId,
         type: normalizedType,
@@ -172,72 +212,45 @@ export const initiateCall = async (req, res) => {
 // Respond to Call Invitation (Accept/Reject/Busy)
 export const respondToCall = async (req, res) => {
   try {
-    const { room, response } = req.body; // response: "joined", "declined", "busy"
-    if (!room || !response) {
-      return res.status(400).json({ success: false, message: "Room and Response are required" });
+    const { room, response } = req.body || {};
+    const allowedResponses = ["joined", "declined", "busy", "cancelled", "left"];
+    if (typeof room !== "string" || !room.trim() || !allowedResponses.includes(response)) {
+      return res.status(400).json({ success: false, message: "Valid room and call response are required" });
     }
 
-    let session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+    const session = await CallSession.findOne({ room: room.trim(), status: { $ne: "ended" } });
     if (!session) {
-      session = await CallSession.findOne({ room });
+      return res.status(404).json({ success: false, message: "Active call session not found" });
     }
 
-    if (!session) {
-      // Auto-create active session if not found so call connects seamlessly
-      session = await CallSession.create({
-        room,
-        type: "video",
-        initiator: req.userId,
-        status: response === "joined" ? "active" : "ended",
-        participants: [
-          {
-            user: req.userId,
-            status: response === "joined" ? "joined" : "declined",
-            role: "listener",
-            joinedAt: new Date(),
-          },
-        ],
-      });
+    const participant = session.participants.find(
+      (p) => String(p.user?._id || p.user) === String(req.userId)
+    );
+    if (!participant) {
+      return res.status(403).json({ success: false, message: "You are not a participant in this call" });
+    }
+
+    const persistedResponse = response === "cancelled" ? "left" : response;
+    participant.status = persistedResponse;
+    if (persistedResponse === "joined") {
+      participant.joinedAt = new Date();
+      participant.leftAt = null;
+      session.status = "active";
     } else {
-      const participant = session.participants.find(
-        (p) => (p.user?._id || p.user)?.toString() === req.userId.toString()
-      );
-      if (participant) {
-        participant.status = response;
-        if (response === "joined") {
-          participant.joinedAt = new Date();
-          session.status = "active"; // transitions from ringing to active
-        } else {
-          participant.leftAt = new Date();
-        }
-      } else {
-        // If participant wasn't in array, add them
-        if (response === "joined") {
-          session.participants.push({
-            user: req.userId,
-            status: "joined",
-            role: "listener",
-            joinedAt: new Date(),
-          });
-          session.status = "active";
-        }
-      }
+      participant.leftAt = new Date();
+    }
 
-      // If all participants left or declined, mark ended
-      const activeParticipants = session.participants.filter(
-        (p) => p.status === "joined" || p.status === "ringing"
-      );
+    const activeParticipants = session.participants.filter(
+      (p) => p.status === "joined" || p.status === "ringing"
+    );
+    if (activeParticipants.length === 0 && session.type !== "channel") {
+      session.status = "ended";
+      session.endTime = new Date();
+    }
 
-      if (activeParticipants.length === 0 && session.type !== "channel") {
-        session.status = "ended";
-        session.endTime = new Date();
-      }
-
-      await session.save();
-
-      if (session.status === "ended") {
-        recordCallLogMessage(session).catch(() => null);
-      }
+    await session.save();
+    if (session.status === "ended") {
+      recordCallLogMessage(session).catch(() => null);
     }
 
     const populated = await CallSession.findById(session._id)
@@ -298,35 +311,58 @@ export const getActiveCall = async (req, res) => {
 // End call session manually
 export const endCall = async (req, res) => {
   try {
-    const { room } = req.body;
-    if (!room) {
+    const { room } = req.body || {};
+    if (typeof room !== "string" || !room.trim()) {
       return res.status(400).json({ success: false, message: "Room ID is required" });
     }
 
-    const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+    const session = await CallSession.findOne({ room: room.trim(), status: { $ne: "ended" } });
     if (!session) {
       return res.status(200).json({ success: true, message: "Call session already ended or not found" });
     }
 
-    session.status = "ended";
-    session.endTime = new Date();
+    const participant = session.participants.find(
+      (p) => String(p.user?._id || p.user) === String(req.userId)
+    );
+    if (!participant) {
+      return res.status(403).json({ success: false, message: "You are not a participant in this call" });
+    }
 
-    // Mark all connected participants as left
-    session.participants.forEach((p) => {
-      if (p.status === "joined" || p.status === "ringing") {
-        p.status = "left";
-        p.leftAt = new Date();
+    const isHost = String(session.initiator?._id || session.initiator) === String(req.userId) ||
+      participant.role === "host";
+    const isGroupCall = ["group", "channel"].includes(session.type);
+
+    // A member can leave a group call; only its host can end it for everyone.
+    if (isGroupCall && !isHost) {
+      participant.status = "left";
+      participant.leftAt = new Date();
+      const hasActiveParticipants = session.participants.some(
+        (p) => String(p.user?._id || p.user) !== String(req.userId) &&
+          (p.status === "joined" || p.status === "ringing")
+      );
+      if (!hasActiveParticipants) {
+        session.status = "ended";
+        session.endTime = new Date();
       }
-    });
+    } else {
+      session.status = "ended";
+      session.endTime = new Date();
+      session.participants.forEach((p) => {
+        if (p.status === "joined" || p.status === "ringing") {
+          p.status = "left";
+          p.leftAt = new Date();
+        }
+      });
+    }
 
     await session.save();
-
-    // Record call log to conversation
-    recordCallLogMessage(session).catch(() => null);
+    if (session.status === "ended") {
+      recordCallLogMessage(session).catch(() => null);
+    }
 
     return res.status(200).json({
       success: true,
-      message: "Call session ended",
+      message: session.status === "ended" ? "Call session ended" : "You left the call",
     });
   } catch (error) {
     console.error("endCall error:", error);
@@ -373,7 +409,19 @@ export const getTurnCredentials = async (req, res) => {
         credential: process.env.TURN_CREDENTIAL,
       });
     } else if (process.env.TURN_SERVER_DOMAIN && process.env.TURN_SECRET) {
-      const turnSecret = process.env.TURN_SECRET;
+      const turnSecret = process.env.TURN_SECRET.trim();
+      const isPlaceholderSecret =
+        /^(vybe_|your-|change.?me|replace.?me|placeholder|example|default)/i.test(turnSecret);
+      if (turnSecret.length < 32 || isPlaceholderSecret) {
+        console.error(
+          "[TURN] TURN_SERVER_DOMAIN is configured, but TURN_SECRET is weak or still a placeholder."
+        );
+        return res.status(503).json({
+          success: false,
+          message: "TURN service is misconfigured. Please configure a strong TURN_SECRET.",
+        });
+      }
+
       const turnDomain = process.env.TURN_SERVER_DOMAIN;
       const duration = 24 * 60 * 60; // 24 hours validity
       const unixTimestamp = Math.floor(Date.now() / 1000) + duration;

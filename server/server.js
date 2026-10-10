@@ -4,16 +4,8 @@ import http from "http";
 import connectDB from "./config/db.js";
 import app from "./app.js";
 import { initializeSocket } from "./socket.js";
+import { getAccessTokenSecret, getRefreshTokenSecret } from "./config/generateToken.js";
 import { archiveExpiredStories, purgeExpiredArchivedStories } from "./services/storyArchive.service.js";
-
-// Process Level Error Catchers for Runtime Stability
-process.on("uncaughtException", (error) => {
-  console.error("💥 UNCAUGHT EXCEPTION! Shutting down gracefully...", error);
-});
-
-process.on("unhandledRejection", (reason) => {
-  console.error("💥 UNHANDLED REJECTION! Detail:", reason);
-});
 
 const PORT = process.env.PORT || 8000;
 
@@ -23,6 +15,29 @@ const httpServer = http.createServer(app);
 // Initialize Socket.IO
 const io = initializeSocket(httpServer);
 
+// Fatal process errors leave application state uncertain. Stop accepting traffic,
+// close Socket.IO/HTTP connections, and exit non-zero so the process manager restarts us.
+let shuttingDownAfterFatalError = false;
+const shutdownAfterFatalError = (label, error) => {
+  console.error(`💥 ${label}; shutting down for a clean restart.`, error);
+
+  if (shuttingDownAfterFatalError) return;
+  shuttingDownAfterFatalError = true;
+
+  const forceExit = setTimeout(() => process.exit(1), 10_000);
+  io.close(() => {
+    clearTimeout(forceExit);
+    process.exit(1);
+  });
+};
+
+process.on("uncaughtException", (error) =>
+  shutdownAfterFatalError("UNCAUGHT EXCEPTION", error)
+);
+process.on("unhandledRejection", (reason) =>
+  shutdownAfterFatalError("UNHANDLED REJECTION", reason)
+);
+
 // Make io instance available globally
 app.locals.io = io;
 global.io = io;
@@ -30,6 +45,15 @@ global.io = io;
 // Ultra-fast parallelized bootstrap
 const startServer = async () => {
   const startTime = performance.now();
+
+  // Fail fast rather than start a server that issues/verifies tokens with insecure defaults.
+  try {
+    getAccessTokenSecret();
+    getRefreshTokenSecret();
+  } catch (error) {
+    console.error(`[startup] Invalid JWT configuration: ${error.message}`);
+    process.exit(1);
+  }
 
   // 1. Start HTTP Server immediately (zero-wait network readiness)
   httpServer.listen(PORT, () => {

@@ -1,4 +1,4 @@
-import { SmilePlus, MapPin, ExternalLink, Heart, CornerUpLeft, CornerUpRight, Pin, EllipsisVertical, Clock, Trash2, Phone, Copy, Send, CheckCircle2, Plus, X } from "lucide-react";
+import { SmilePlus, MapPin, ExternalLink, Heart, CornerUpLeft, CornerUpRight, Pin, EllipsisVertical, Clock, Trash2, Phone, Copy, Send, CheckCircle2, Plus, X, Globe, Languages, Sparkles } from "lucide-react";
 import moment from "moment";
 import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
@@ -87,6 +87,66 @@ const ReceiverMessage = ({
   const [declineReason, setDeclineReason] = useState("");
   const [declined, setDeclined] = useState(false);
   const [isDeclining, setIsDeclining] = useState(false);
+  const [translatedText, setTranslatedText] = useState(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+
+  const isInitiallyViewOnceOpened = Boolean(
+    message.isViewOnce &&
+    message.viewOnceOpenedBy?.some((v) => (v.user?._id || v.user)?.toString() === currentUserId?.toString())
+  );
+  const [isViewOnceOpened, setIsViewOnceOpened] = useState(isInitiallyViewOnceOpened);
+  const [openingViewOnce, setOpeningViewOnce] = useState(false);
+
+  const handleOpenViewOnce = async () => {
+    if (openingViewOnce || isViewOnceOpened) return;
+    try {
+      setOpeningViewOnce(true);
+      const res = await api.post(`/message/view-once/${message._id}/open`);
+      if (res.data?.success) {
+        setIsViewOnceOpened(true);
+        const item = res.data.media?.[0] || mediaList[0];
+        if (item) {
+          setLightboxData({ open: true, url: item.url, type: item.type || "image" });
+        }
+      }
+    } catch (err) {
+      if (err.response?.status === 410) {
+        setIsViewOnceOpened(true);
+        snackbar.info("This media has expired");
+      } else {
+        snackbar.error("Failed to open media");
+      }
+    } finally {
+      setOpeningViewOnce(false);
+    }
+  };
+
+  const handleTranslate = async () => {
+    if (translatedText) {
+      setTranslatedText(null);
+      return;
+    }
+    const rawText = message.content?.text;
+    if (!rawText || !rawText.trim()) return;
+
+    try {
+      setIsTranslating(true);
+      const res = await api.post("/ai/translate", {
+        text: rawText.trim(),
+        targetLang: "en",
+      });
+      if (res.data?.success && res.data.translatedText) {
+        setTranslatedText(res.data.translatedText);
+        snackbar.success("Message translated 🌐");
+      } else {
+        snackbar.info("No translation available");
+      }
+    } catch {
+      snackbar.error("Translation failed");
+    } finally {
+      setIsTranslating(false);
+    }
+  };
 
   // Dynamic Chat Typography State
   const [typography, setTypography] = useState(() => getChatTypography());
@@ -681,65 +741,90 @@ const ReceiverMessage = ({
         })()}
 
         {/* MEDIA */}
-        {mediaList.map((m, i) => {
-          if (m.type === "audio" || message.type === "voice") {
-            return null; // Rendered by VoiceNotePlayer
-          }
-          if (m.type === "sticker" || message.type === "sticker") {
-            const isAnimatedEmoji = m.url?.includes("Animated-Fluent-Emojis") || m.url?.includes(".webp") || m.category === "animated";
-            return (
-              <img
-                key={i}
-                src={m.url}
-                alt="Animated Expression"
-                className={`${isAnimatedEmoji ? "w-20 h-20 sm:w-24 sm:h-24 max-w-[90px] max-h-[90px]" : activeFont.stickerSizeClass || "w-20 h-20 sm:w-24 sm:h-24"} object-contain drop-shadow-xl select-none hover:scale-105 active:scale-95 transition-all duration-200 my-1 cursor-pointer`}
-                style={{
-                  width: isAnimatedEmoji ? "84px" : activeFont.stickerDimension,
-                  height: isAnimatedEmoji ? "84px" : activeFont.stickerDimension,
-                  maxWidth: isAnimatedEmoji ? "90px" : undefined,
-                  maxHeight: isAnimatedEmoji ? "90px" : undefined,
-                }}
-              />
-            );
-          }
-          if (m.type === "image" || m.type === "gif") {
-            return (
-              <img
-                key={i}
-                src={m.url}
-                onClick={(e) => { e.stopPropagation(); setLightboxData({ open: true, url: m.url, type: "image" }); }}
-                className="rounded-2xl max-h-[280px] w-full object-cover cursor-pointer hover:opacity-95 transition my-1 shadow-sm"
-                alt="Attachment"
-              />
-            );
-          }
-          if (m.type === "video") {
-            return (
-              <video
-                key={i}
-                controls
-                onClick={(e) => { e.stopPropagation(); setLightboxData({ open: true, url: m.url, type: "video" }); }}
-                className="rounded-2xl max-h-[300px] w-full cursor-pointer my-1 shadow-sm"
+        {message.isViewOnce ? (
+          <div className="my-1">
+            {isViewOnceOpened ? (
+              <div className="flex items-center gap-2.5 px-3.5 py-2 rounded-2xl bg-surface/40 border border-border/50 text-text-muted text-xs font-semibold select-none">
+                <div className="w-4 h-4 rounded-full border-2 border-border/80 flex items-center justify-center">
+                  <div className="w-1.5 h-1.5 rounded-full bg-border" />
+                </div>
+                <span>Opened</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleOpenViewOnce}
+                disabled={openingViewOnce}
+                className="flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-purple-500/20 via-pink-500/20 to-rose-500/20 hover:from-purple-500/30 hover:to-rose-500/30 border border-purple-500/40 text-purple-300 hover:text-white text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer select-none disabled:opacity-50"
               >
-                <source src={m.url} />
-              </video>
-            );
-          }
-          if (m.type === "document") {
-            return (
-              <a
-                key={i}
-                href={m.url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-sm underline text-text flex items-center gap-1.5 py-1 font-medium"
-              >
-                📄 {m.name || "Document"}
-              </a>
-            );
-          }
-          return null;
-        })}
+                <div className="w-5 h-5 rounded-full border-2 border-dashed border-purple-400 flex items-center justify-center animate-spin-slow">
+                  <Sparkles className="w-2.5 h-2.5 text-pink-400" />
+                </div>
+                <span>{openingViewOnce ? "Opening..." : "Photo (View once)"}</span>
+              </button>
+            )}
+          </div>
+        ) : (
+          mediaList.map((m, i) => {
+            if (m.type === "audio" || message.type === "voice") {
+              return null; // Rendered by VoiceNotePlayer
+            }
+            if (m.type === "sticker" || message.type === "sticker") {
+              const isAnimatedEmoji = m.url?.includes("Animated-Fluent-Emojis") || m.url?.includes(".webp") || m.category === "animated";
+              return (
+                <img
+                  key={i}
+                  src={m.url}
+                  alt="Animated Expression"
+                  className={`${isAnimatedEmoji ? "w-20 h-20 sm:w-24 sm:h-24 max-w-[90px] max-h-[90px]" : activeFont.stickerSizeClass || "w-20 h-20 sm:w-24 sm:h-24"} object-contain drop-shadow-xl select-none hover:scale-105 active:scale-95 transition-all duration-200 my-1 cursor-pointer`}
+                  style={{
+                    width: isAnimatedEmoji ? "84px" : activeFont.stickerDimension,
+                    height: isAnimatedEmoji ? "84px" : activeFont.stickerDimension,
+                    maxWidth: isAnimatedEmoji ? "90px" : undefined,
+                    maxHeight: isAnimatedEmoji ? "90px" : undefined,
+                  }}
+                />
+              );
+            }
+            if (m.type === "image" || m.type === "gif") {
+              return (
+                <img
+                  key={i}
+                  src={m.url}
+                  onClick={(e) => { e.stopPropagation(); setLightboxData({ open: true, url: m.url, type: "image" }); }}
+                  className="rounded-2xl max-h-[280px] w-full object-cover cursor-pointer hover:opacity-95 transition my-1 shadow-sm"
+                  alt="Attachment"
+                />
+              );
+            }
+            if (m.type === "video") {
+              return (
+                <video
+                  key={i}
+                  controls
+                  onClick={(e) => { e.stopPropagation(); setLightboxData({ open: true, url: m.url, type: "video" }); }}
+                  className="rounded-2xl max-h-[300px] w-full cursor-pointer my-1 shadow-sm"
+                >
+                  <source src={m.url} />
+                </video>
+              );
+            }
+            if (m.type === "document") {
+              return (
+                <a
+                  key={i}
+                  href={m.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm underline text-text flex items-center gap-1.5 py-1 font-medium"
+                >
+                  📄 {m.name || "Document"}
+                </a>
+              );
+            }
+            return null;
+          })
+        )}
 
         {/* TEXT */}
         {!(isContactRequest || isContactDecline || isContactCard) && (message.type === "text" || message.content?.text) && message.content?.text?.trim() && (
@@ -761,6 +846,37 @@ const ReceiverMessage = ({
               <span className="text-[10px] ml-1.5 opacity-70 italic">(edited)</span>
             )}
           </p>
+        )}
+
+        {/* INLINE AI TRANSLATION */}
+        {translatedText && (
+          <div className="mt-1.5 pt-1.5 border-t border-border/40 text-[11px] leading-relaxed opacity-95 italic bg-surface/40 p-1.5 rounded-lg">
+            <div className="flex items-center justify-between gap-2 mb-0.5 not-italic">
+              <span className="text-[10px] font-bold text-primary flex items-center gap-1">
+                <Globe className="w-3 h-3" /> Translation:
+              </span>
+              <button
+                type="button"
+                onClick={() => setTranslatedText(null)}
+                className="text-[10px] text-text-muted hover:text-text cursor-pointer"
+              >
+                Hide
+              </button>
+            </div>
+            <p className="text-inherit">{translatedText}</p>
+          </div>
+        )}
+
+        {!(isContactRequest || isContactDecline || isContactCard) && message.content?.text?.trim() && !translatedText && (
+          <button
+            type="button"
+            onClick={handleTranslate}
+            disabled={isTranslating}
+            className="text-[10px] text-text-muted hover:text-primary transition flex items-center gap-1 mt-0.5 cursor-pointer disabled:opacity-50 select-none"
+          >
+            <Globe className="w-2.5 h-2.5" />
+            <span>{isTranslating ? "Translating..." : "See translation"}</span>
+          </button>
         )}
 
         {/* TIME */}
@@ -881,6 +997,17 @@ const ReceiverMessage = ({
             >
               <Pin size={15} strokeWidth={2.2} className="text-text-secondary" /> {message.isPinned ? "Unpin" : "Pin"}
             </button>
+            {message.content?.text?.trim() && (
+              <button
+                onClick={() => {
+                  handleTranslate();
+                  setShowOptions(false);
+                }}
+                className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-surface-hover w-full text-left text-text hover:text-primary transition-colors cursor-pointer font-medium"
+              >
+                <Globe size={15} strokeWidth={2.2} className="text-text-secondary" /> {translatedText ? "Hide Translation" : "Translate Message"}
+              </button>
+            )}
             <div className="border-t border-border/60 my-1" />
             <button
               onClick={() => {

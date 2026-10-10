@@ -1,5 +1,49 @@
 import mongoose from "mongoose";
 
+const payoutEntrySchema = new mongoose.Schema(
+  {
+    amount: {
+      type: Number,
+      required: true,
+    },
+    date: {
+      type: Date,
+      default: Date.now,
+    },
+    status: {
+      type: String,
+      enum: ["pending", "pending_review", "processing", "paid", "rejected"],
+      default: "pending_review",
+    },
+    utrNumber: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    settlementNotes: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    paymentMethod: {
+      type: String,
+      default: "manual_bank_transfer",
+    },
+    currency: {
+      type: String,
+      default: "INR",
+    },
+    processedAt: {
+      type: Date,
+    },
+    processedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  },
+  { _id: true, timestamps: true }
+);
+
 const monetizationSchema = new mongoose.Schema(
   {
     creator: {
@@ -26,13 +70,7 @@ const monetizationSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
-    payoutHistory: [
-      {
-        amount: Number,
-        date: { type: Date, default: Date.now },
-        status: { type: String, default: "paid" },
-      },
-    ],
+    payoutHistory: [payoutEntrySchema],
   },
   { timestamps: true }
 );

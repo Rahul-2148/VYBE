@@ -12,7 +12,7 @@ const normalizeSameSite = (value, fallback = "lax") => {
 };
 
 const buildBaseCookieOptions = () => {
-  const secure = parseBoolean(process.env.COOKIE_SECURE, false);
+  const secure = parseBoolean(process.env.COOKIE_SECURE, process.env.NODE_ENV === "production");
   const sameSiteFallback = secure ? "none" : "lax";
   const sameSite = normalizeSameSite(process.env.COOKIE_SAME_SITE, sameSiteFallback);
 
@@ -59,7 +59,9 @@ export const getClearCookieOptions = () => ({
 
 const buildAdminCookieOptions = () => ({
   ...buildBaseCookieOptions(),
-  path: "/api/v1/admin", // Scoped to admin API routes only
+  // Socket.IO handshakes use /socket.io rather than /api/v1/admin.
+  // The admin_* names keep sessions isolated; Path must allow both API and socket requests.
+  path: "/",
 });
 
 // Admin Access Token Cookie (7 Days)
