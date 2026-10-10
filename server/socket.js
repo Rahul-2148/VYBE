@@ -222,18 +222,33 @@ const broadcastPresenceToContacts = async (io, userId, isOnline) => {
 let ioInstance = null;
 
 export const initializeSocket = (httpServer) => {
+  const socketAllowedOrigins = (
+    process.env.SOCKET_CORS_ORIGINS ||
+    process.env.CORS_ORIGINS ||
+    process.env.CLIENT_URL ||
+    ""
+  )
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const isDevelopment = process.env.NODE_ENV !== "production";
+  const isLocalDevelopmentOrigin = (origin) =>
+    /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin);
+
   const io = new Server(httpServer, {
     cors: {
       origin: (origin, callback) => {
+        // Non-browser clients can omit Origin. Browser origins must match exactly.
+        if (!origin || socketAllowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
         if (
-          !origin ||
-          /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin) ||
-          (process.env.CLIENT_URL && origin === process.env.CLIENT_URL) ||
-          (process.env.SOCKET_CORS_ORIGINS && process.env.SOCKET_CORS_ORIGINS.includes(origin))
+          isDevelopment &&
+          (socketAllowedOrigins.length === 0 || isLocalDevelopmentOrigin(origin))
         ) {
           return callback(null, true);
         }
-        return callback(null, true); // Dev-friendly fallback
+        return callback(new Error("Not allowed by Socket.IO CORS policy"));
       },
       methods: ["GET", "POST"],
       credentials: true,
@@ -279,7 +294,8 @@ export const initializeSocket = (httpServer) => {
         const userId = socket.handshake.auth?.userId || socket.handshake.query?.userId;
         if (userId && process.env.NODE_ENV !== "production") {
           console.warn(`⚠️ Dev Fallback: socket connect for userId: ${userId}`);
-          socket.userId = userId;
+          socket.authenticatedUserId = String(userId);
+          socket.userId = socket.authenticatedUserId;
           return next();
         }
         return next(new Error("Authentication token is required for socket connection"));
@@ -310,7 +326,8 @@ export const initializeSocket = (httpServer) => {
         }
       }
 
-      socket.userId = decoded.userId;
+      socket.authenticatedUserId = String(decoded.userId);
+      socket.userId = socket.authenticatedUserId;
       next();
     } catch (err) {
       return next(new Error("Authentication error: " + err.message));
@@ -350,26 +367,32 @@ export const initializeSocket = (httpServer) => {
     // Explicit User ID Registration from client to guarantee 100% active socket mapping
     socket.on("register-user", async (data) => {
       const rawId = data?.userId || data?._id || data;
-      const targetUid = (rawId?._id || rawId?.id || rawId)?.toString();
-      if (targetUid) {
-        const isAlreadyBound = socket.userId === targetUid && activeUsers.get(targetUid)?.has(socket.id);
-        if (!isAlreadyBound) {
-          if (socket.userId && socket.userId !== targetUid) {
-            removeUserSocket(socket.userId, socket.id);
-            socket.leave(getUserRoom(socket.userId));
-          }
-          socket.userId = targetUid;
-          addUserSocket(targetUid, socket.id);
-          socket.join(getUserRoom(targetUid));
-          console.log(`🔗 Explicit user registration: Socket ${socket.id} bound to User ${targetUid} (Total sockets: ${getUserSocketCount(targetUid)})`);
+      const requestedUid = (rawId?._id || rawId?.id || rawId)?.toString();
+      const authenticatedUid = socket.authenticatedUserId;
 
-          persistPresence(targetUid, true).catch(() => null);
-          broadcastPresenceToContacts(io, targetUid, true);
-        }
-
-        const onlineContacts = await getOnlineContactsForUser(targetUid);
-        socket.emit("online-users-list", { onlineUsers: onlineContacts });
+      if (!authenticatedUid || !requestedUid) return;
+      if (requestedUid !== authenticatedUid) {
+        console.warn(
+          `🛡️ Blocked socket identity reassignment: authenticated user ${authenticatedUid} tried to register as ${requestedUid}`
+        );
+        return;
       }
+
+      // Re-register only the authenticated principal; a client cannot change socket.userId.
+      const isAlreadyBound =
+        socket.userId === authenticatedUid &&
+        activeUsers.get(authenticatedUid)?.has(socket.id);
+
+      if (!isAlreadyBound) {
+        socket.userId = authenticatedUid;
+        addUserSocket(authenticatedUid, socket.id);
+        socket.join(getUserRoom(authenticatedUid));
+        persistPresence(authenticatedUid, true).catch(() => null);
+        broadcastPresenceToContacts(io, authenticatedUid, true);
+      }
+
+      const onlineContacts = await getOnlineContactsForUser(authenticatedUid);
+      socket.emit("online-users-list", { onlineUsers: onlineContacts });
     });
 
     // Client requests current online contacts list
@@ -389,20 +412,24 @@ export const initializeSocket = (httpServer) => {
       socket.emit("user-presence-updated", { userId: socket.userId, status, lastSeen: lastSeen || new Date() });
     });
 
-    // Direct notification relay
-    socket.on("send-notification", async (data) => {
-      const { recipientId, type, payload } = data || {};
-      if (!recipientId) return;
-      const notifData = payload || { type, senderId: socket.userId, createdAt: new Date() };
-      io.to(getUserRoom(recipientId)).emit("notification-received", { notification: notifData });
-      io.to(getUserRoom(recipientId)).emit("new-notification", notifData);
-      io.to(getUserRoom(recipientId)).emit("notification:received", notifData);
+    // Notifications must be emitted by trusted server-side controllers after authorization.
+    // Never relay a client-supplied recipient/payload directly into another user's notification stream.
+    socket.on("send-notification", () => {
+      socket.emit("notification:rejected", {
+        code: "SERVER_OWNED_EVENT",
+        message: "Notifications must be created through an authorized server action.",
+      });
     });
 
     // Send conversation reaction
     socket.on("send-reaction", async (data) => {
       const { conversationId, type, targetId } = data || {};
-      if (!conversationId) return;
+      if (!conversationId || !socket.userId) return;
+      if (!(await isConversationParticipant(conversationId, socket.userId))) {
+        console.warn(`🛡️ Blocked unauthorized send-reaction by ${socket.userId}`);
+        return;
+      }
+      if (!["like", "love", "laugh", "wow", "sad", "angry", "heart"].includes(type)) return;
       socket.to(`conversation_${conversationId}`).emit("reaction-received", {
         conversationId,
         type,
@@ -622,8 +649,12 @@ export const initializeSocket = (httpServer) => {
     // Real-time Chat Theme Update (Instagram / WhatsApp style)
     socket.on("chat:theme-update", async (data) => {
       try {
-        const { conversationId, theme, systemMessage } = data;
-        if (!conversationId) return;
+        const { conversationId, theme, systemMessage } = data || {};
+        if (!conversationId || !socket.userId) return;
+        if (!(await isConversationParticipant(conversationId, socket.userId)) {
+          console.warn(`🛡️ Blocked unauthorized chat:theme-update by ${socket.userId}`);
+          return;
+        }
 
         socket.to(`conversation_${conversationId}`).emit("chat:theme-updated", {
           conversationId,
