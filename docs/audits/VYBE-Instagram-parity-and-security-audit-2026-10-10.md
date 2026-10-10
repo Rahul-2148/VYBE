@@ -63,3 +63,27 @@ Before claiming parity, run a checklist against the target Instagram mobile/web 
 - Mobile/desktop visual review records screenshots at representative widths and tests accessibility, keyboard navigation, reduced motion, loading/empty/error states.
 - A versioned feature-parity checklist is signed off against the explicitly chosen Instagram client/version; unavailable or intentionally different features are documented.
 
+
+
+## Additional high-risk issues found and addressed during continued review
+
+14. **Socket.IO identity spoofing and unsafe relay events.** Client-controlled `register-user` previously could assign a socket to another user's room. Notification relay and several messaging/Reel events trusted client payloads directly. Socket identity is now pinned to the authenticated handshake principal; direct client notification relay is rejected; message and Reel events verify persisted state before announcing it.
+15. **Unauthorized call/meeting room operations.** Arbitrary call-room joins, media signals, chat relays, host moderation, recording indicators, and several meeting controls lacked adequate membership/role checks. Call events now require call-session participation and room membership; meeting events require a registered attendee and enforce host/co-host permissions for recording, pinning, ending and breakout controls. Breakout rooms must exist in the active server-side session.
+16. **Private live audience bypasses.** The REST API previously listed close-friends streams and exposed details/replays/questions without checking the audience configuration. Active listings, details, replay access and Q&A submissions now enforce the host's close-friends list; Socket.IO joins already apply the same audience check.
+17. **Live Q&A schema mismatch.** Controllers pushed into `LiveStream.questions`, but the Mongoose schema did not define that field. A typed questions array now exists, so submit/display flows can persist their state instead of failing with an undefined-array error.
+18. **Direct-message IDOR and destructive side effects.** Message reads previously cleaned up disappearing messages before validating conversation membership; other API paths could mark messages seen, reset unread counts, query shared media/pinned messages, or forward by message ID without proving source membership. Authorization now occurs before reads/cleanup, voice-note uploads, read-receipt mutations, and forwarding. Forwarding is capped at 10 target conversations and the counter reflects actual successful forwards.
+19. **Community channel access gaps.** The pinned-message endpoint returned records without validating channel/community access; reactions and edits also lacked current membership checks. Those endpoints now validate membership and payload bounds, and deletion events are emitted from the authorized REST handler rather than trusting a client-generated delete broadcast.
+20. **Private live replay leakage.** Close-friends visibility now applies to active stream discovery, stream detail, replay retrieval and live Q&A—not just the WebSocket room join.
+
+These fixes are static code changes with CI syntax/build regression coverage. They have **not** been exercised against production data or verified with multi-account browser E2E tests, so they must be reviewed and tested in a staging environment before deployment.
+
+## Current Instagram product baseline used for parity review
+
+A parity checklist needs a dated target because Instagram differs by region, device and rollout cohort. As of 10 October 2026, the audit checked the following official Meta announcements as feature baselines (not as a claim that every feature is available to every account):
+
+- **DM scheduled messages, translation, pinned content, and group-chat QR invites:** Meta's February 2025 announcement: https://about.fb.com/news/2025/02/new-instagram-dm-features-stay-connected/
+- **Instagram Map and Reels Friends tab:** Meta's August 2025 connection/features announcement: https://about.fb.com/news/2025/08/new-instagram-features-help-you-connect/
+- **Instagram Map rollout in India and explicit sharing indicators:** https://about.fb.com/news/2025/10/now-in-india-instagram-rolls-out-map-feature-to-help-people-connect-with-friends/
+- **Instants disappearing photo flow (announced May 2026):** https://about.fb.com/news/2026/05/instants-share-in-the-moment/
+
+A repository search found related but not equivalent VYBE implementations (generic message search, AI/caption translation, location-tagged content, Reel repost, Stories/vanish-style messages). It did not establish the exact DM scheduling/translation/QR flows, Reels Friends activity tab, opt-in friend location map and sharing indicators, or the Instants capture/open/expiry/archive lifecycle. Treat these as **parity work not yet demonstrated by source inspection**, and verify against the chosen Instagram app/version and region before adding final requirements.
