@@ -20,6 +20,10 @@ test("JWT signing rejects missing secrets and signs with configured secrets", ()
       /REFRESH_TOKEN_SECRET/
     );
 
+    process.env.JWT_SECRET = "your-strong-random-64-character-jwt-secret-key-here";
+    assert.throws(() => generateAccessToken("user-1", "session-1"), /placeholder value/);
+    delete process.env.JWT_SECRET;
+
     process.env.JWT_SECRET = "a".repeat(64);
     process.env.REFRESH_TOKEN_SECRET = "b".repeat(64);
 
