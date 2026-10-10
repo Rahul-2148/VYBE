@@ -3,7 +3,7 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import QRCode from "qrcode";
 import uploadOnCloudinary from "../config/cloudinary.js";
-import { generateAccessToken, generateRefreshToken } from "../config/generateToken.js";
+import { generateAccessToken, generateRefreshToken, getRefreshTokenSecret } from "../config/generateToken.js";
 import {
   getAccessTokenCookieOptions,
   getRefreshTokenCookieOptions,
@@ -545,7 +545,7 @@ export const refreshToken = async (req, res) => {
       });
     }
 
-    const refreshSecret = process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET || "vybe_super_secret_refresh_key_2026";
+    const refreshSecret = getRefreshTokenSecret();
     let decoded;
 
     try {
