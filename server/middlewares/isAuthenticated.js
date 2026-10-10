@@ -53,7 +53,7 @@ const isAuthenticated = async (req, res, next) => {
         const refreshDecoded = jwt.verify(rawRefreshToken, refreshSecret);
         if (refreshDecoded && refreshDecoded.userId && refreshDecoded.sessionId) {
           const session = await Session.findById(refreshDecoded.sessionId);
-          if (session && !session.isRevoked) {
+          if (session && !session.isRevoked && String(session.user) === String(refreshDecoded.userId)) {
             const incomingHash = crypto.createHash("sha256").update(rawRefreshToken).digest("hex");
 
             if (incomingHash === session.refreshTokenHash) {
@@ -118,7 +118,7 @@ const isAuthenticated = async (req, res, next) => {
     // Verify Session validity if sessionId exists in token
     if (decoded.sessionId) {
       const activeSession = await Session.findById(decoded.sessionId);
-      if (!activeSession || activeSession.isRevoked) {
+      if (!activeSession || activeSession.isRevoked || String(activeSession.user) !== String(decoded.userId)) {
         return res.status(401).json({
           success: false,
           error: true,
