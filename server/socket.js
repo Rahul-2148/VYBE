@@ -287,8 +287,8 @@ export const initializeSocket = (httpServer) => {
 
       const secret = getAccessTokenSecret();
       const decoded = jwt.verify(jwtToken, secret);
-      if (!decoded || !decoded.userId) {
-        return next(new Error("Invalid authentication token"));
+      if (!decoded || !decoded.userId || !decoded.sessionId) {
+        return next(new Error("Invalid authentication token or missing session"));
       }
 
       if (decoded.sessionId) {
