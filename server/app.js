@@ -37,6 +37,8 @@ import { setSecurityHeaders } from "./middlewares/securityHeaders.js";
 import { apiRateLimiter } from "./middlewares/rateLimiter.js";
 
 const app = express();
+// Honor forwarded client IPs only when deployment config confirms one trusted proxy.
+if (process.env.TRUST_PROXY === "1") app.set("trust proxy", 1);
 const allowedOrigins = (process.env.CORS_ORIGINS || process.env.CLIENT_URL || "")
   .split(",")
   .map((origin) => origin.trim())
