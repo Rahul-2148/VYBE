@@ -1,9 +1,24 @@
 import jwt from "jsonwebtoken";
 
+const requireSecret = (name, fallbackName = null) => {
+  const secret = process.env[name] || (fallbackName ? process.env[fallbackName] : "");
+  if (!secret || !secret.trim()) {
+    throw new Error(
+      `Missing required environment variable: ${name}`
+    );
+  }
+  if (secret.length < 32) {
+    throw new Error(
+      `${name} must be at least 32 characters long`
+    );
+  }
+  return secret;
+};
+
 export const generateAccessToken = (userId, sessionId) => {
   return jwt.sign(
     { userId, sessionId },
-    process.env.JWT_SECRET || "vybe_super_secret_jwt_key_2026",
+    requireSecret("JWT_SECRET"),
     { expiresIn: "7d" }
   );
 };
@@ -11,12 +26,12 @@ export const generateAccessToken = (userId, sessionId) => {
 export const generateRefreshToken = (userId, sessionId) => {
   return jwt.sign(
     { userId, sessionId },
-    process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET || "vybe_super_secret_refresh_key_2026",
+    requireSecret("REFRESH_TOKEN_SECRET"),
     { expiresIn: "30d" }
   );
 };
 
-// Legacy compatibility helper for single token requests
+// Legacy compatibility helper for single token requests.
 const generateToken = (userId, sessionId = null) => {
   return generateAccessToken(userId, sessionId);
 };
