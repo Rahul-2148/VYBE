@@ -1018,13 +1018,29 @@ export const initializeSocket = (httpServer) => {
     });
 
     // Live Q&A Box
-    socket.on("live:new-question", (data) => {
-      const { streamId, question } = data;
-      if (!streamId) return;
-      io.to(`live_${streamId}`).emit("live:question-received", {
-        streamId,
-        question,
-      });
+    socket.on("live:new-question", async (data) => {
+      try {
+        const { streamId, question } = data || {};
+        const room = streamId ? `live_${streamId}` : "";
+        if (!socket.userId || !room || !socket.rooms.has(room) ||
+            typeof question?.text !== "string" || !question.text.trim() || question.text.length > 1000) return;
+        const live = await LiveStream.findOne({ _id: streamId, isLive: true }).select("_id");
+        if (!live) return;
+        io.to(room).emit("live:question-received", {
+          streamId,
+          question: {
+            id: `${Date.now()}_${socket.id}`,
+            text: question.text.trim(),
+            author: socket.userName || "Viewer",
+            userId: socket.userId,
+            upvotes: 0,
+            isAnswered: false,
+            createdAt: new Date(),
+          },
+        });
+      } catch (err) {
+        console.error("live:new-question error:", err);
+      }
     });
 
     socket.on("live:display-question", async (data) => {
