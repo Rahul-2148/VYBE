@@ -10,6 +10,7 @@ export const StoryMediaRenderer = ({
   mediaLoading = false,
   onLoadedData,
   onVideoEnd,
+  onProgress,
   imgRef,
 }) => {
   if (!story) return null;
@@ -54,6 +55,7 @@ export const StoryMediaRenderer = ({
           isMuted={isMuted}
           onLoadedData={onLoadedData}
           onEnded={onVideoEnd}
+          onProgress={onProgress}
         />
       ) : (
         /* 4. Image Story Mode */

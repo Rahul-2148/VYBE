@@ -29,6 +29,9 @@ import {
   updateHighlightCover,
   reorderHighlights,
   deleteHighlightCollection,
+  addStoryToHighlight,
+  removeStoryFromHighlight,
+  editHighlightCollection,
 } from "../services/storyHighlight.service.js";
 
 // 1. Upload Story Controller
@@ -748,7 +751,97 @@ export const getHighlightsByUsername = async (req, res) => {
         },
       });
 
-    res.status(200).json({ success: true, highlights });
+    const cleanedHighlights = highlights.map((h) => {
+      const hObj = h.toObject();
+      hObj.stories = (hObj.stories || []).filter(Boolean);
+      return hObj;
+    });
+
+    res.status(200).json({ success: true, highlights: cleanedHighlights });
+  } catch (err) {
+    res.status(500).json({ success: false, error: true, message: err.message });
+  }
+};
+
+export const addStoryToHighlightController = async (req, res) => {
+  try {
+    const { highlightId } = req.params;
+    const { storyId } = req.body;
+    const authorId = req.userId;
+
+    if (!storyId) {
+      return res.status(400).json({ success: false, message: "Story ID is required" });
+    }
+
+    const highlight = await addStoryToHighlight(highlightId, authorId, storyId);
+    res.status(200).json({ success: true, highlight, message: "Story added to highlight ✨" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: true, message: err.message });
+  }
+};
+
+export const removeStoryFromHighlightController = async (req, res) => {
+  try {
+    const { highlightId, storyId } = req.params;
+    const authorId = req.userId;
+
+    const highlight = await removeStoryFromHighlight(highlightId, authorId, storyId);
+    res.status(200).json({ success: true, highlight, message: "Story removed from highlight" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: true, message: err.message });
+  }
+};
+
+export const editHighlightController = async (req, res) => {
+  try {
+    const { highlightId } = req.params;
+    const { title, category } = req.body;
+    const authorId = req.userId;
+
+    const highlight = await editHighlightCollection(highlightId, authorId, {
+      title,
+      coverFile: req.file,
+      category,
+    });
+    res.status(200).json({ success: true, highlight, message: "Highlight updated ✨" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: true, message: err.message });
+  }
+};
+
+export const getAllMyStories = async (req, res) => {
+  try {
+    const userId = req.userId;
+
+    // 1. Active unexpired stories
+    const activeStories = await Story.find({
+      author: userId,
+      isArchived: false,
+      $or: [
+        { expiresAt: { $gt: new Date() } },
+        { expiresAt: { $exists: false } },
+        { expiresAt: null },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .populate("author", "userName profileImage name")
+      .populate("viewers", "userName profileImage name");
+
+    // 2. Archived stories
+    const archivedStories = await Story.find({
+      author: userId,
+      isArchived: true,
+    })
+      .sort({ createdAt: -1 })
+      .populate("author", "userName profileImage name")
+      .populate("viewers", "userName profileImage name");
+
+    res.status(200).json({
+      success: true,
+      activeStories,
+      archivedStories,
+      stories: [...activeStories, ...archivedStories],
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: true, message: err.message });
   }

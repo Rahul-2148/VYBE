@@ -12,6 +12,8 @@ export const StoryViewerDock = ({
   onReactEmoji,
   onToggleLike,
   onOpenShare,
+  onFocus,
+  onBlur,
 }) => {
   return (
     <div
@@ -43,6 +45,8 @@ export const StoryViewerDock = ({
             type="text"
             placeholder="Send message..."
             value={replyText}
+            onFocus={onFocus}
+            onBlur={onBlur}
             onChange={(e) => onReplyChange(e.target.value)}
             className="w-full bg-transparent text-xs text-white placeholder:text-white/60 outline-none"
           />

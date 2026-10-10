@@ -74,3 +74,64 @@ export const deleteHighlightCollection = async (highlightId, authorId) => {
   await Highlight.findByIdAndDelete(highlightId);
   return { success: true, message: "Highlight collection deleted" };
 };
+
+export const addStoryToHighlight = async (highlightId, authorId, storyId) => {
+  const highlight = await Highlight.findOne({ _id: highlightId, author: authorId });
+  if (!highlight) {
+    throw new Error("Highlight not found or unauthorized");
+  }
+
+  const storyIdStr = storyId.toString();
+  const alreadyExists = (highlight.stories || []).some((sid) => sid.toString() === storyIdStr);
+  if (!alreadyExists) {
+    highlight.stories.push(storyId);
+
+    if (!highlight.coverImage?.url) {
+      const storyObj = await Story.findById(storyId);
+      if (storyObj?.media?.url) {
+        highlight.coverImage = { url: storyObj.media.url, public_id: "" };
+      }
+    }
+
+    await highlight.save();
+  }
+
+  return await Highlight.findById(highlight._id).populate("stories");
+};
+
+export const removeStoryFromHighlight = async (highlightId, authorId, storyId) => {
+  const highlight = await Highlight.findOne({ _id: highlightId, author: authorId });
+  if (!highlight) {
+    throw new Error("Highlight not found or unauthorized");
+  }
+
+  const storyIdStr = storyId.toString();
+  highlight.stories = (highlight.stories || []).filter((sid) => sid.toString() !== storyIdStr);
+  await highlight.save();
+
+  return await Highlight.findById(highlight._id).populate("stories");
+};
+
+export const editHighlightCollection = async (highlightId, authorId, { title, coverFile, category }) => {
+  const highlight = await Highlight.findOne({ _id: highlightId, author: authorId });
+  if (!highlight) {
+    throw new Error("Highlight not found or unauthorized");
+  }
+
+  if (title) highlight.title = title.trim();
+  if (category) highlight.category = category;
+
+  if (coverFile) {
+    if (highlight.coverImage?.public_id) {
+      try {
+        await deleteFromCloudinary(highlight.coverImage.public_id);
+      } catch {}
+    }
+    const uploaded = await uploadOnCloudinary(coverFile.path, "VYBE/highlights");
+    highlight.coverImage = { url: uploaded.url, public_id: uploaded.public_id };
+  }
+
+  await highlight.save();
+  return await Highlight.findById(highlight._id).populate("stories");
+};
+

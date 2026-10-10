@@ -46,12 +46,14 @@ import AboutAccountModal from "../components/AboutAccountModal";
 import DraftsModal from "../components/DraftsModal";
 import VerifiedBadge from "../components/VerifiedBadge";
 import StoryMusicPickerModal from "../components/StoryMusicPickerModal";
-import RenderErrorBoundary from "../components/RenderErrorBoundary";
 import dp from "../assets/dp3.png";
 import { useTheme } from "../lib/themeContext";
 import { setProfileData, setUserData } from "../redux/features/userSlice";
-import { setSelectedChatUser } from "../redux/features/messageSlice";
-import { useGetUserFullProfileQuery, useGetUserHighlightsQuery } from "../redux/api/apiSlice";
+import {
+  useGetUserFullProfileQuery,
+  useGetUserHighlightsQuery,
+  useGetUserStoriesQuery,
+} from "../redux/api/apiSlice";
 import api from "../lib/axios";
 
 const PROFILE_TABS = [
@@ -357,9 +359,21 @@ const Profile = () => {
   const { data: fetchedProfile, refetch: refetchProfile } = useGetUserFullProfileQuery(effectiveUserName, {
     skip: !effectiveUserName,
   });
-  const { data: fetchedHighlights } = useGetUserHighlightsQuery(effectiveUserName, {
+  const { data: fetchedHighlights, refetch: refetchHighlights } = useGetUserHighlightsQuery(effectiveUserName, {
     skip: !effectiveUserName,
   });
+
+  const { data: userStoriesData } = useGetUserStoriesQuery(profileData?.user?._id, {
+    skip: !profileData?.user?._id,
+  });
+  const activeUserStories = userStoriesData?.stories || [];
+  const currentUserId = userData?.user?._id;
+  const hasUnseenStory = activeUserStories.some(
+    (s) => !s.viewers?.some((v) => (v?._id?.toString() || v?.toString()) === currentUserId?.toString())
+  );
+  const hasCloseFriendsStory = activeUserStories.some(
+    (s) => s.visibleTo === "closeFriends"
+  );
 
   useEffect(() => {
     if (fetchedProfile) {
@@ -380,7 +394,10 @@ const Profile = () => {
     if (refetchProfile) {
       await refetchProfile();
     }
-  }, [refetchProfile]);
+    if (refetchHighlights) {
+      await refetchHighlights();
+    }
+  }, [refetchProfile, refetchHighlights]);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -613,31 +630,69 @@ const Profile = () => {
           <section className="rounded-[2rem] border border-border bg-surface/90 p-4 shadow-xl shadow-black/10 backdrop-blur-sm sm:p-6">
             <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
               <div className="flex items-start gap-5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isOwnProfile) {
-                      setShowDPOptions(true);
-                    } else {
-                      const isPrivate = profileData?.user?.accountType === "private";
-                      if (!isPrivate || isFollowing) {
-                        setShowDpView(true);
+                <div className="relative group shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (activeUserStories.length > 0) {
+                        navigate("/story", {
+                          state: {
+                            stories: activeUserStories,
+                            author: profileData?.user,
+                          },
+                        });
+                      } else if (isOwnProfile) {
+                        setShowDPOptions(true);
                       } else {
-                        snackbar.error("This account is private. Follow this account to view their profile picture.");
+                        const isPrivate = profileData?.user?.accountType === "private";
+                        if (!isPrivate || isFollowing) {
+                          setShowDpView(true);
+                        } else {
+                          snackbar.error("This account is private. Follow this account to view their profile picture.");
+                        }
                       }
+                    }}
+                    className={`relative rounded-full p-[3px] transition-transform duration-200 hover:scale-105 active:scale-95 cursor-pointer block ${
+                      activeUserStories.length > 0
+                        ? hasCloseFriendsStory
+                          ? "bg-gradient-to-tr from-[#25d366] via-[#10b981] to-[#059669] shadow-lg shadow-emerald-500/25 animate-badge-glow"
+                          : hasUnseenStory
+                          ? "bg-gradient-to-tr from-[#f09433] via-[#dc2743] to-[#bc1888] shadow-lg shadow-pink-500/25 animate-instagram-glow"
+                          : "border-2 border-zinc-700/80 bg-transparent opacity-85"
+                        : "border border-zinc-800 bg-zinc-900"
+                    }`}
+                    title={
+                      activeUserStories.length > 0
+                        ? `View @${profileData?.user?.userName}'s story`
+                        : "Profile Picture"
                     }
-                  }}
-                  className="group relative h-24 w-24 overflow-hidden rounded-full border border-zinc-800 bg-zinc-900 p-1 transition hover:border-rose-500 sm:h-32 sm:w-32 cursor-pointer"
-                >
-                  <img
-                    src={profileData?.user?.profileImage?.url || dp}
-                    alt=""
-                    className="h-full w-full rounded-full object-cover"
-                  />
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition group-hover:opacity-100 backdrop-blur-sm">
-                    <span className="rounded-full bg-white/20 backdrop-blur px-2.5 py-1 text-[10px] font-bold text-white border border-white/10">View</span>
-                  </div>
-                </button>
+                  >
+                    <div className="h-24 w-24 sm:h-32 sm:w-32 rounded-full overflow-hidden border-2 border-surface bg-zinc-900 p-0.5">
+                      <img
+                        src={profileData?.user?.profileImage?.url || dp}
+                        alt=""
+                        className="h-full w-full rounded-full object-cover"
+                      />
+                    </div>
+                  </button>
+
+                  {/* Quick DP view/change button badge */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isOwnProfile) {
+                        setShowDPOptions(true);
+                      } else {
+                        setShowDpView(true);
+                      }
+                    }}
+                    className="absolute bottom-0 right-0 bg-black/85 hover:bg-black text-white text-[10px] font-bold px-2 py-0.5 rounded-full border border-white/20 backdrop-blur-md shadow-md hover:scale-110 transition cursor-pointer"
+                    title={isOwnProfile ? "Change profile photo" : "View profile photo"}
+                  >
+                    DP
+                  </button>
+                </div>
                 <div className="flex-1 space-y-3">
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -999,18 +1054,42 @@ const Profile = () => {
               </button>
             )}
 
-            {highlights.map((hl) => (
-              <button
-                key={hl._id}
-                onClick={() => hl.stories?.length > 0 && navigate("/story", { state: { stories: hl.stories } })}
-                className="flex w-[84px] shrink-0 flex-col items-center gap-2 cursor-pointer"
-              >
-                <div className="rounded-full bg-gradient-to-tr from-pink-500 via-rose-500 to-purple-600 p-[2px] shadow-lg shadow-rose-500/20">
-                  <img src={hl.coverImage?.url || dp} alt="" className="h-20 w-20 rounded-full border-2 border-surface object-cover" />
-                </div>
-                <span className="w-full truncate text-center text-[11px] font-medium text-text">{hl.title}</span>
-              </button>
-            ))}
+            {highlights.map((hl) => {
+              const validStories = (hl.stories || []).filter(Boolean);
+              return (
+                <button
+                  key={hl._id}
+                  onClick={() => {
+                    if (validStories.length > 0) {
+                      navigate("/story", {
+                        state: {
+                          stories: validStories,
+                          highlightTitle: hl.title,
+                          highlightId: hl._id,
+                          isHighlight: true,
+                          author: profileData?.user,
+                        },
+                      });
+                    } else {
+                      snackbar.info("No stories found in this highlight");
+                    }
+                  }}
+                  className="flex w-[84px] shrink-0 flex-col items-center gap-2 cursor-pointer group"
+                  title={hl.title}
+                >
+                  <div className="rounded-full bg-gradient-to-tr from-pink-500 via-rose-500 to-purple-600 p-[2px] shadow-lg shadow-rose-500/20 group-hover:scale-105 transition-transform duration-200">
+                    <img
+                      src={hl.coverImage?.url || dp}
+                      alt=""
+                      className="h-20 w-20 rounded-full border-2 border-surface object-cover bg-zinc-900"
+                    />
+                  </div>
+                  <span className="w-full truncate text-center text-[11px] font-medium text-text group-hover:text-rose-500 transition-colors">
+                    {hl.title}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </section>
         )}
@@ -1126,7 +1205,16 @@ const Profile = () => {
         <StoryHighlighterModal
           isOpen={showHighlighterModal}
           onClose={() => setShowHighlighterModal(false)}
-          onSuccess={() => handleProfile()}
+          onSuccess={(newHl) => {
+            handleProfile();
+            refetchHighlights?.();
+            if (newHl) {
+              setHighlights((prev) => [
+                newHl,
+                ...prev.filter((h) => h._id !== newHl._id),
+              ]);
+            }
+          }}
         />
       )}
 

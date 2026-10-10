@@ -19,6 +19,7 @@ export const StoryHeaderHUD = ({
   isCloseFriends = false,
   timeAgo = "now",
   music = null,
+  highlightTitle = null,
   isMuted = false,
   isPaused = false,
   onToggleMute,
@@ -73,8 +74,13 @@ export const StoryHeaderHUD = ({
             </span>
           </div>
 
-          {/* Close Friends or Music pill */}
-          <div className="flex items-center gap-2 mt-0.5">
+          {/* Close Friends, Highlight or Music pill */}
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            {highlightTitle && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/20 border border-white/30 text-white text-[9.5px] font-bold tracking-wide backdrop-blur-md shadow-xs">
+                <span>{highlightTitle}</span>
+              </span>
+            )}
             {isCloseFriends && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#25d366]/20 border border-[#25d366]/40 text-[#25d366] text-[9px] font-extrabold uppercase tracking-wider backdrop-blur-xs">
                 <Star className="w-2.5 h-2.5 fill-current" />

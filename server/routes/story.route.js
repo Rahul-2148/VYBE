@@ -17,7 +17,11 @@ import {
   getCloseFriends,
   clearAllCloseFriends,
   getStoryArchive,
+  getAllMyStories,
   createHighlight,
+  addStoryToHighlightController,
+  removeStoryFromHighlightController,
+  editHighlightController,
   updateCover,
   setHighlightOrder,
   getHighlightsByUsername,
@@ -36,6 +40,7 @@ const storyRouter = express.Router();
 // Primary Story Operations
 storyRouter.post("/upload", isAuthenticated, upload.single("media"), uploadStory);
 storyRouter.get("/feed", isAuthenticated, getStoriesFeed);
+storyRouter.get("/my-stories/all", isAuthenticated, getAllMyStories);
 storyRouter.get("/user/:userId", isAuthenticated, getUserStories);
 storyRouter.post("/view/:storyId", isAuthenticated, viewStory);
 storyRouter.post("/like/:storyId", isAuthenticated, toggleStoryLike);
@@ -66,7 +71,11 @@ storyRouter.delete("/close-friends/clear", isAuthenticated, clearAllCloseFriends
 
 // Story Archive & Highlights
 storyRouter.get("/archive", isAuthenticated, getStoryArchive);
+storyRouter.post("/highlight", isAuthenticated, upload.single("coverImage"), createHighlight);
 storyRouter.post("/highlight/create", isAuthenticated, upload.single("coverImage"), createHighlight);
+storyRouter.post("/highlight/:highlightId/add-story", isAuthenticated, addStoryToHighlightController);
+storyRouter.delete("/highlight/:highlightId/story/:storyId", isAuthenticated, removeStoryFromHighlightController);
+storyRouter.patch("/highlight/:highlightId", isAuthenticated, upload.single("coverImage"), editHighlightController);
 storyRouter.post("/highlight/cover/:highlightId", isAuthenticated, upload.single("coverImage"), updateCover);
 storyRouter.post("/highlight/reorder", isAuthenticated, setHighlightOrder);
 storyRouter.get("/highlight/user/:userName", isAuthenticated, getHighlightsByUsername);

@@ -70,11 +70,19 @@ export const StoryCard = () => {
   const [feed, setFeed] = useState(() => {
     if (location.state?.stories && location.state.stories.length > 0) {
       const storiesList = location.state.stories;
+      const highlightAuthor =
+        location.state?.author ||
+        storiesList[0]?.author ||
+        { userName: location.state?.highlightTitle || "Highlight" };
+      const isCurrent =
+        location.state?.isOwnProfile ??
+        (highlightAuthor?._id?.toString() === userData?.user?._id?.toString() ||
+          highlightAuthor?.userName === userData?.user?.userName);
       return [
         {
-          author: storiesList[0]?.author || { userName: "Highlight" },
+          author: highlightAuthor,
           stories: storiesList,
-          isCurrentUser: storiesList[0]?.author?._id === userData?.user?._id,
+          isCurrentUser: isCurrent,
         },
       ];
     }
@@ -175,12 +183,21 @@ export const StoryCard = () => {
     }
   }, [initialized, reduxFeed, location.state?.initialUserIndex, getFirstUnseenIndex]);
 
+  const isHighlight = Boolean(
+    location.state?.isHighlight ||
+    location.state?.highlightId ||
+    location.state?.highlightTitle
+  );
+  const highlightId = location.state?.highlightId || null;
+  const highlightTitle = location.state?.highlightTitle || null;
+
   const activeGroup = feed[currentUserIndex] || null;
   const storiesList = activeGroup?.stories || [];
   const story = storiesList[currentStoryIndex] || null;
   const isOwnStory =
-    story?.author?._id === userData?.user?._id ||
-    story?.author?.userName === userData?.user?.userName;
+    story?.author?._id?.toString() === userData?.user?._id?.toString() ||
+    story?.author?.userName === userData?.user?.userName ||
+    (isHighlight && Boolean(activeGroup?.isCurrentUser));
 
   // Sync Likes & Media Loading State
   useEffect(() => {
@@ -312,10 +329,12 @@ export const StoryCard = () => {
     if (currentStoryIndex > 0) {
       setCurrentStoryIndex((prev) => prev - 1);
       setProgress(0);
-    } else {
+    } else if (currentUserIndex > 0) {
       handlePrevUser();
+    } else {
+      setProgress(0);
     }
-  }, [currentStoryIndex, handlePrevUser]);
+  }, [currentStoryIndex, currentUserIndex, handlePrevUser]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -555,6 +574,35 @@ export const StoryCard = () => {
     }
   };
 
+  const handleRemoveFromHighlight = async () => {
+    if (!story?._id || !highlightId) return;
+    setShowOptionsMenu(false);
+    try {
+      const res = await api.delete(`/story/highlight/${highlightId}/story/${story._id}`);
+      if (res.data?.success) {
+        snackbar.success("Removed from highlight");
+        if (storiesList.length > 1) {
+          setFeed((prev) => {
+            const next = [...prev];
+            if (next[currentUserIndex]) {
+              next[currentUserIndex].stories = next[currentUserIndex].stories.filter(
+                (s) => s._id !== story._id
+              );
+            }
+            return next;
+          });
+          setCurrentStoryIndex((prev) => Math.max(0, prev - 1));
+          setProgress(0);
+        } else {
+          navigate(-1);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      snackbar.error(err.response?.data?.message || "Failed to remove from highlight");
+    }
+  };
+
   if (!story) {
     return (
       <div className="fixed inset-0 bg-black z-50 flex items-center justify-center text-white">
@@ -606,6 +654,7 @@ export const StoryCard = () => {
             mediaLoading={mediaLoading}
             onLoadedData={() => setMediaLoading(false)}
             onVideoEnd={handleNextStory}
+            onProgress={(p) => setProgress(p)}
             imgRef={imgRef}
           />
         </div>
@@ -649,11 +698,12 @@ export const StoryCard = () => {
           />
 
           <StoryHeaderHUD
-            author={story.author}
+            author={story.author?._id ? story.author : (activeGroup?.author || story.author)}
             isOwnStory={isOwnStory}
             isCloseFriends={isCloseFriends}
             timeAgo={timeAgo}
             music={story.music}
+            highlightTitle={highlightTitle}
             isMuted={isMuted}
             isPaused={isPaused}
             onToggleMute={() => setIsMuted((m) => !m)}
@@ -684,6 +734,8 @@ export const StoryCard = () => {
               onReactEmoji={handleEmojiReaction}
               onToggleLike={handleToggleLike}
               onOpenShare={() => setShowShareSheet(true)}
+              onFocus={() => setIsPaused(true)}
+              onBlur={() => setIsPaused(false)}
             />
           )}
         </div>
@@ -704,6 +756,15 @@ export const StoryCard = () => {
 
             {isOwnStory ? (
               <>
+                {isHighlight && highlightId && (
+                  <button
+                    onClick={handleRemoveFromHighlight}
+                    className="w-full flex items-center gap-3 p-3 rounded-2xl hover:bg-amber-500/10 text-amber-400 font-semibold text-xs transition cursor-pointer"
+                  >
+                    <Bookmark className="w-4 h-4" />
+                    <span>Remove from this Highlight</span>
+                  </button>
+                )}
                 <button
                   onClick={handleDeleteStory}
                   className="w-full flex items-center gap-3 p-3 rounded-2xl hover:bg-red-500/10 text-red-500 font-semibold text-xs transition cursor-pointer"

@@ -131,6 +131,10 @@ export const deleteStoryWithMedia = async (storyId, authorId) => {
   await User.findByIdAndUpdate(authorId, {
     $pull: { stories: storyId },
   });
+  await Highlight.updateMany(
+    { stories: storyId },
+    { $pull: { stories: storyId } }
+  ).catch(() => null);
   await Story.findByIdAndDelete(storyId);
   return { success: true, message: "Story permanently deleted" };
 };

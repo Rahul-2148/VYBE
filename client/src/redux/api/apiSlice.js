@@ -253,6 +253,16 @@ export const apiSlice = createApi({
       providesTags: (result, error, userName) => [{ type: "Story", id: userName }],
     }),
 
+    getUserStories: builder.query({
+      query: (userId) => ({ url: `/story/user/${userId}` }),
+      providesTags: (result, error, userId) => [{ type: "Story", id: userId }],
+    }),
+
+    getAllMyStories: builder.query({
+      query: () => ({ url: "/story/my-stories/all" }),
+      providesTags: ["Story"],
+    }),
+
     deleteStory: builder.mutation({
       query: (storyId) => ({
         url: `/story/${storyId}`,
@@ -263,9 +273,26 @@ export const apiSlice = createApi({
 
     createHighlight: builder.mutation({
       query: (data) => ({
-        url: "/story/highlight",
+        url: "/story/highlight/create",
         method: "POST",
         data,
+      }),
+      invalidatesTags: ["Story", "User"],
+    }),
+
+    addStoryToHighlight: builder.mutation({
+      query: ({ highlightId, storyId }) => ({
+        url: `/story/highlight/${highlightId}/add-story`,
+        method: "POST",
+        data: { storyId },
+      }),
+      invalidatesTags: ["Story", "User"],
+    }),
+
+    removeStoryFromHighlight: builder.mutation({
+      query: ({ highlightId, storyId }) => ({
+        url: `/story/highlight/${highlightId}/story/${storyId}`,
+        method: "DELETE",
       }),
       invalidatesTags: ["Story", "User"],
     }),
@@ -362,8 +389,12 @@ export const {
 
   // Story hooks
   useGetStoriesFeedQuery,
+  useGetUserStoriesQuery,
+  useGetAllMyStoriesQuery,
   useDeleteStoryMutation,
   useCreateHighlightMutation,
+  useAddStoryToHighlightMutation,
+  useRemoveStoryFromHighlightMutation,
   useDeleteHighlightMutation,
 
   // Notification hooks
