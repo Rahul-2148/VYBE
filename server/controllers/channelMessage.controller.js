@@ -2,6 +2,7 @@ import { ChannelMessage } from "../models/channelMessage.model.js";
 import { Channel } from "../models/channel.model.js";
 import { Community } from "../models/community.model.js";
 import uploadOnCloudinary from "../config/cloudinary.js";
+import { io } from "../socket.js";
 
 // 1. Fetch channel messages history
 export const getChannelMessages = async (req, res) => {
@@ -203,6 +204,14 @@ export const deleteChannelMessage = async (req, res) => {
     }
 
     await ChannelMessage.findByIdAndDelete(messageId);
+
+    // Emit only after the API has authenticated the caller and authorized deletion.
+    // Client-originated community:message-deleted broadcasts are not trusted.
+    io?.to(`channel_${channelId}`).emit("community:message-deleted", {
+      channelId,
+      messageId,
+      deletedBy: req.userId.toString(),
+    });
 
     return res.status(200).json({
       success: true,
