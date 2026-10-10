@@ -202,10 +202,16 @@ export const deleteChannelMessage = async (req, res) => {
     }
 
     const community = await Community.findById(message.community);
-    const member = community?.members.find((m) => m.user.toString() === req.userId.toString());
-    const isOwner = community?.owner.toString() === req.userId.toString();
-    const isAdmin = member?.roles.includes("admin") || member?.roles.includes("moderator");
-    const isSender = message.sender.toString() === req.userId.toString();
+    if (!community) {
+      return res.status(404).json({ success: false, message: "Community not found" });
+    }
+    const member = community.members.find((m) => String(m.user) === String(req.userId));
+    if (!member) {
+      return res.status(403).json({ success: false, message: "You must be a current community member to delete channel messages" });
+    }
+    const isOwner = String(community.owner) === String(req.userId);
+    const isAdmin = member.roles.includes("admin") || member.roles.includes("moderator") || member.roles.includes("owner");
+    const isSender = String(message.sender) === String(req.userId);
 
     if (!isSender && !isOwner && !isAdmin) {
       return res.status(403).json({ success: false, message: "Permission denied to delete this message" });
