@@ -14,6 +14,8 @@ import { createAdapter } from "@socket.io/redis-adapter";
 import { CallSession } from "./models/callSession.model.js";
 import { Meeting } from "./models/meeting.model.js";
 import { LiveStream } from "./models/liveStream.model.js";
+import { ChannelMessage } from "./models/channelMessage.model.js";
+import { Reel } from "./models/reel.model.js";
 import { recordCallLogMessage } from "./controllers/call.controller.js";
 
 const parseRawCookie = (cookieStr) => {
@@ -157,6 +159,77 @@ const isConversationParticipant = async (conversationId, userId) => {
   } catch (err) {
     console.error("[socket auth helper] isConversationParticipant error:", err);
     return false;
+  }
+};
+
+const getCommunityChannelMembership = async (channelId, userId) => {
+  try {
+    if (!channelId || !userId) return null;
+    const channel = await Channel.findById(channelId).select("community type");
+    if (!channel) return null;
+    const community = await Community.findById(channel.community).select("owner members roles");
+    if (!community) return null;
+    const member = community.members.find((item) => String(item.user) === String(userId));
+    if (!member) return null;
+    return { channel, community, member };
+  } catch (err) {
+    console.error("[socket auth helper] community membership check failed:", err.message);
+    return null;
+  }
+};
+
+const isSocketInCallRoom = (socket, room) =>
+  Boolean(room && socket.rooms.has(room) && socketCallRooms.get(socket.id)?.has(room));
+
+const isSocketInMeeting = (socket, meetingId) =>
+  Boolean(meetingId && socketMeetingRooms.get(socket.id)?.has(String(meetingId).trim().toLowerCase()));
+
+const getMeetingAccess = async (meetingId, userId) => {
+  try {
+    if (!meetingId || !userId) return null;
+    const normalizedId = String(meetingId).trim().toLowerCase();
+    const meeting = await Meeting.findOne({ meetingId: normalizedId }).select(
+      "host status settings participants hiddenFor"
+    );
+    if (!meeting || meeting.status === "ended") return null;
+    if (meeting.hiddenFor?.some((id) => String(id) === String(userId))) return null;
+    const participant = meeting.participants.find((item) => String(item.user) === String(userId));
+    const isHost = String(meeting.host) === String(userId);
+    const isCoHost = participant?.role === "co-host" && participant.status !== "kicked";
+    return { meeting, participant, isHost, isCoHost };
+  } catch (err) {
+    console.error("[socket auth helper] meeting access check failed:", err.message);
+    return null;
+  }
+};
+
+const getLiveStreamForHost = async (streamId, userId) => {
+  try {
+    if (!streamId || !userId) return null;
+    return await LiveStream.findOne({
+      _id: streamId,
+      host: userId,
+      isLive: true,
+    });
+  } catch (err) {
+    console.error("[socket auth helper] live host check failed:", err.message);
+    return null;
+  }
+};
+
+const getCallSessionForParticipant = async (room, userId) => {
+  try {
+    if (!room || !userId) return null;
+    const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+    if (!session) return null;
+    const participant = session.participants.find(
+      (item) => String(item.user) === String(userId) &&
+        !["declined", "left", "busy"].includes(item.status)
+    );
+    return participant ? { session, participant } : null;
+  } catch (err) {
+    console.error("[socket auth helper] call session membership check failed:", err.message);
+    return null;
   }
 };
 
