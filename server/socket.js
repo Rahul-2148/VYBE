@@ -1608,8 +1608,45 @@ export const initializeSocket = (httpServer) => {
         const { meetingId, userName: payloadUserName, name: payloadName, profilePicture: payloadAvatar } = data || {};
         if (!meetingId) return;
 
+        if (typeof meetingId !== "string" || !socket.userId) {
+          socket.emit("meeting:error", { message: "A valid meeting ID and authenticated account are required" });
+          return;
+        }
         const normalizedMeetingId = meetingId.trim().toLowerCase();
+        if (!normalizedMeetingId || normalizedMeetingId.length > 120) return;
         const roomName = `meeting_${normalizedMeetingId}`;
+
+        // Only an existing, non-ended meeting can be joined; honor locks and kicked participants.
+        const access = await getMeetingAccess(normalizedMeetingId, socket.userId);
+        if (!access) {
+          socket.emit("meeting:error", { message: "Meeting not found or access denied" });
+          return;
+        }
+        const { meeting, participant, isHost, isCoHost } = access;
+        if (participant?.status === "kicked") {
+          socket.emit("meeting:error", { message: "You have been removed from this meeting" });
+          return;
+        }
+        if (meeting.settings?.isLocked && !isHost && !isCoHost && !participant) {
+          socket.emit("meeting:error", { message: "This meeting is locked" });
+          return;
+        }
+        if (participant) {
+          participant.status = "joined";
+          participant.leftAt = null;
+          participant.joinedAt = new Date();
+          if (isHost) participant.role = "host";
+        } else {
+          meeting.participants.push({
+            user: socket.userId,
+            role: "participant",
+            status: "joined",
+            joinedAt: new Date(),
+            leftAt: null,
+          });
+        }
+        if (meeting.status === "waiting") meeting.status = "active";
+        await meeting.save();
 
         socket.join(roomName);
 
@@ -1695,14 +1732,14 @@ export const initializeSocket = (httpServer) => {
       }
     });
 
-    socket.on("meeting:signal", (data) => {
-      const { toSocketId, toUserId, meetingId, signal, fromMetadata } = data;
-      if (!signal) return;
+    socket.on("meeting:signal", async (data) => {
+      const { toSocketId, toUserId, meetingId, signal } = data || {};
+      if (!meetingId || !signal || !isSocketInMeeting(socket, meetingId)) return;
 
       const payload = {
         fromSocketId: socket.id,
         fromUserId: socket.userId,
-        fromMetadata: fromMetadata || {
+        fromMetadata: {
           userId: socket.userId,
           userName: socket.userName,
           name: socket.name,
@@ -1710,68 +1747,70 @@ export const initializeSocket = (httpServer) => {
         },
         signal,
       };
+      const roomName = `meeting_${String(meetingId).trim().toLowerCase()}`;
+      const roomSockets = await io.in(roomName).fetchSockets();
 
       if (toSocketId) {
-        io.to(toSocketId).emit("meeting:signal-received", payload);
+        const target = roomSockets.find((candidate) => candidate.id === toSocketId);
+        if (target) io.to(toSocketId).emit("meeting:signal-received", payload);
+        return;
       }
-
-      const targetUid = toUserId || toSocketId;
-      if (targetUid && activeUsers.has(targetUid.toString())) {
-        for (const sId of activeUsers.get(targetUid.toString())) {
-          if (sId !== socket.id && sId !== toSocketId) {
-            io.to(sId).emit("meeting:signal-received", payload);
+      if (toUserId) {
+        for (const target of roomSockets) {
+          if (String(target.userId) === String(toUserId) && target.id !== socket.id) {
+            io.to(target.id).emit("meeting:signal-received", payload);
           }
         }
+        return;
       }
-
-      if (!toSocketId && !toUserId && meetingId) {
-        socket.to(`meeting_${meetingId.toLowerCase()}`).emit("meeting:signal-received", payload);
-      }
+      socket.to(roomName).emit("meeting:signal-received", payload);
     });
 
     socket.on("meeting:action", (data) => {
-      const { meetingId, ...actionPayload } = data;
-      if (!meetingId) return;
-      socket.to(`meeting_${meetingId.toLowerCase()}`).emit("meeting:action-broadcast", {
+      const { meetingId, ...actionPayload } = data || {};
+      if (!meetingId || !isSocketInMeeting(socket, meetingId)) return;
+      const allowedActions = ["mute", "video", "screen", "hand", "raise-hand", "lower-hand", "reaction"];
+      if (actionPayload.action && !allowedActions.includes(actionPayload.action)) return;
+      socket.to(`meeting_${String(meetingId).trim().toLowerCase()}`).emit("meeting:action-broadcast", {
+        ...actionPayload,
         userId: socket.userId,
         socketId: socket.id,
-        ...actionPayload,
       });
     });
 
     socket.on("meeting:caption", (data) => {
-      const { meetingId, text, isFinal, id, speakerId, speakerName, speakerAvatar, language } = data || {};
-      if (!meetingId || !text) return;
-      const roomName = `meeting_${meetingId.toLowerCase()}`;
+      const { meetingId, text, isFinal, id, language } = data || {};
+      if (!meetingId || typeof text !== "string" || !text.trim() || text.length > 2000 ||
+          !isSocketInMeeting(socket, meetingId)) return;
+      const roomName = `meeting_${String(meetingId).trim().toLowerCase()}`;
       socket.to(roomName).emit("meeting:caption-received", {
         id: id || `caption_${socket.id}_${Date.now()}`,
-        speakerId: speakerId || socket.userId || socket.id,
-        speakerName: speakerName || socket.userName || "Participant",
-        speakerAvatar: speakerAvatar || socket.profilePicture || null,
-        text: typeof text === "string" ? text.trim() : "",
+        speakerId: socket.userId,
+        speakerName: socket.userName || "Participant",
+        speakerAvatar: socket.profilePicture || null,
+        text: text.trim(),
         isFinal: Boolean(isFinal),
-        language: language || "en-US",
+        language: typeof language === "string" ? language.slice(0, 24) : "en-US",
         timestamp: Date.now(),
       });
     });
 
     socket.on("meeting:chat-message", (data) => {
-      const { meetingId, text, id, senderName, senderAvatar, replyTo, file, attachments } = data;
-      if (!meetingId || (!text && !file && (!attachments || attachments.length === 0))) return;
+      const { meetingId, text, id, replyTo, file, attachments } = data || {};
+      if (!meetingId || !isSocketInMeeting(socket, meetingId)) return;
+      if ((!text && !file && (!Array.isArray(attachments) || attachments.length === 0)) ||
+          (typeof text === "string" && text.length > 5000) ||
+          (Array.isArray(attachments) && attachments.length > 10)) return;
 
-      const roomName = `meeting_${meetingId.toLowerCase()}`;
-      if (!socket.rooms.has(roomName)) {
-        socket.join(roomName);
-      }
-
+      const roomName = `meeting_${String(meetingId).trim().toLowerCase()}`;
       socket.to(roomName).emit("meeting:chat-message-received", {
         id: id || Date.now().toString(),
-        from: socket.userId || socket.id,
-        senderName: senderName || socket.userName || "Participant",
-        senderAvatar: senderAvatar || socket.profilePicture || null,
-        text: text || "",
+        from: socket.userId,
+        senderName: socket.userName || "Participant",
+        senderAvatar: socket.profilePicture || null,
+        text: typeof text === "string" ? text : "",
         file: file || null,
-        attachments: attachments || (file ? [file] : []),
+        attachments: Array.isArray(attachments) ? attachments : (file ? [file] : []),
         replyTo: replyTo || null,
         pinned: false,
         reactions: {},
@@ -1779,70 +1818,73 @@ export const initializeSocket = (httpServer) => {
       });
     });
 
-    socket.on("meeting:chat-reaction", (data) => {
-      const { meetingId, messageId, emoji, senderName } = data;
-      if (!meetingId || !messageId || !emoji) return;
-
-      io.to(`meeting_${meetingId.toLowerCase()}`).emit("meeting:chat-reaction-received", {
+    socket.on("meeting:chat-reaction", async (data) => {
+      const { meetingId, messageId, emoji } = data || {};
+      if (!meetingId || !messageId || typeof emoji !== "string" || emoji.length > 12 ||
+          !isSocketInMeeting(socket, meetingId)) return;
+      const roomName = `meeting_${String(meetingId).trim().toLowerCase()}`;
+      io.to(roomName).emit("meeting:chat-reaction-received", {
         messageId,
         emoji,
-        userId: socket.userId || socket.id,
-        senderName: senderName || socket.userName || "Participant",
-      });
-    });
-
-    socket.on("meeting:pin-message", (data) => {
-      const { meetingId, messageId, pinned } = data;
-      if (!meetingId || !messageId) return;
-
-      io.to(`meeting_${meetingId.toLowerCase()}`).emit("meeting:message-pinned", {
-        messageId,
-        pinned: Boolean(pinned),
-        pinnedBy: socket.userId || socket.id,
-      });
-    });
-
-    socket.on("meeting:reaction", (data) => {
-      const { meetingId, emoji, leftPercent, driftX } = data;
-      if (!meetingId || !emoji) return;
-
-      io.to(`meeting_${meetingId.toLowerCase()}`).emit("meeting:reaction-received", {
-        emoji,
-        leftPercent,
-        driftX,
-        senderId: socket.userId || socket.id,
+        userId: socket.userId,
         senderName: socket.userName || "Participant",
       });
     });
 
-    socket.on("meeting:recording-status", (data) => {
-      const { meetingId, isRecording } = data;
-      if (!meetingId) return;
+    socket.on("meeting:pin-message", async (data) => {
+      const { meetingId, messageId, pinned } = data || {};
+      if (!meetingId || !messageId || !isSocketInMeeting(socket, meetingId)) return;
+      const access = await getMeetingAccess(meetingId, socket.userId);
+      if (!access || (!access.isHost && !access.isCoHost)) return;
+      io.to(`meeting_${String(meetingId).trim().toLowerCase()}`).emit("meeting:message-pinned", {
+        messageId,
+        pinned: Boolean(pinned),
+        pinnedBy: socket.userId,
+      });
+    });
 
-      io.to(`meeting_${meetingId.toLowerCase()}`).emit("meeting:recording-status-changed", {
+    socket.on("meeting:reaction", (data) => {
+      const { meetingId, emoji, leftPercent, driftX } = data || {};
+      if (!meetingId || typeof emoji !== "string" || emoji.length > 12 ||
+          !isSocketInMeeting(socket, meetingId)) return;
+      socket.to(`meeting_${String(meetingId).trim().toLowerCase()}`).emit("meeting:reaction-received", {
+        emoji,
+        leftPercent: Number.isFinite(leftPercent) ? Math.max(0, Math.min(100, leftPercent)) : 50,
+        driftX: Number.isFinite(driftX) ? Math.max(-100, Math.min(100, driftX)) : 0,
+        senderId: socket.userId,
+        senderName: socket.userName || "Participant",
+      });
+    });
+
+    socket.on("meeting:recording-status", async (data) => {
+      const { meetingId, isRecording } = data || {};
+      if (!meetingId || !isSocketInMeeting(socket, meetingId)) return;
+      const access = await getMeetingAccess(meetingId, socket.userId);
+      if (!access || (!access.isHost && !access.isCoHost)) return;
+      io.to(`meeting_${String(meetingId).trim().toLowerCase()}`).emit("meeting:recording-status-changed", {
         isRecording: Boolean(isRecording),
-        startedBy: socket.userId || socket.id,
-        startedByName: socket.userName || data.userName || "Participant",
+        startedBy: socket.userId,
+        startedByName: socket.userName || "Participant",
       });
     });
 
     socket.on("meeting:host-control", async (data) => {
-      const { meetingId, targetUserId, targetSocketId, action } = data;
-      if (!meetingId || !action) return;
-
-      const roomName = `meeting_${meetingId.toLowerCase()}`;
-      console.log(`🛡️ [Vybe Meet Host Action] ${action} in meeting ${meetingId} by ${socket.userId}`);
-
+      const { meetingId, targetUserId, targetSocketId, action } = data || {};
+      if (!meetingId || !action || !isSocketInMeeting(socket, meetingId)) return;
+      const normalizedId = String(meetingId).trim().toLowerCase();
+      const access = await getMeetingAccess(normalizedId, socket.userId);
+      if (!access || (!access.isHost && !access.isCoHost)) {
+        console.warn(`🛡️ Blocked unauthorized meeting host action ${action} by ${socket.userId}`);
+        return;
+      }
+      const roomName = `meeting_${normalizedId}`;
       if (action === "end-meeting") {
-        io.to(roomName).emit("meeting:ended", {
-          meetingId,
-          endedBy: socket.userId,
-        });
-
-        Meeting.findOneAndUpdate(
-          { meetingId: meetingId.toLowerCase() },
+        if (!access.isHost) return;
+        await Meeting.findOneAndUpdate(
+          { meetingId: normalizedId, host: socket.userId, status: { $ne: "ended" } },
           { status: "ended", endTime: new Date() }
-        ).catch(() => null);
+        );
+        io.to(roomName).emit("meeting:ended", { meetingId: normalizedId, endedBy: socket.userId });
       } else {
         io.to(roomName).emit("meeting:host-action-received", {
           moderatorId: socket.userId,
@@ -1854,25 +1896,21 @@ export const initializeSocket = (httpServer) => {
     });
 
     socket.on("meeting:leave-room", async (data) => {
-      const { meetingId } = data;
-      if (!meetingId) return;
-
-      const normalizedId = meetingId.toLowerCase();
+      const { meetingId } = data || {};
+      if (!meetingId || !isSocketInMeeting(socket, meetingId)) return;
+      const normalizedId = String(meetingId).trim().toLowerCase();
       const roomName = `meeting_${normalizedId}`;
-
       socket.leave(roomName);
       socketMeetingRooms.get(socket.id)?.delete(normalizedId);
-
       socket.to(roomName).emit("meeting:peer-left", {
         userId: socket.userId,
         socketId: socket.id,
       });
-
       if (socket.userId) {
         try {
           await Meeting.findOneAndUpdate(
             { meetingId: normalizedId, "participants.user": socket.userId },
-            { $set: { "participants.$.leftAt": new Date() } }
+            { $set: { "participants.$.leftAt": new Date(), "participants.$.status": "left" } }
           );
         } catch (err) {
           console.error("meeting:leave-room error:", err);
