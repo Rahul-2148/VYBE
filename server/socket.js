@@ -2019,9 +2019,9 @@ export const initializeSocket = (httpServer) => {
         if (!meetingId || !rooms || !Array.isArray(rooms)) return;
         const normalizedId = meetingId.toLowerCase();
 
-        // Verify host authorization server-side
-        const meeting = await Meeting.findOne({ meetingId: normalizedId }).select("host").lean();
-        const isHost = meeting && socket.userId && meeting.host.toString() === socket.userId.toString();
+        // Verify host authorization and confirm the caller is in the parent meeting.
+        const access = await getMeetingAccess(normalizedId, socket.userId);
+        const isHost = access?.isHost && isSocketInMeeting(socket, normalizedId);
         if (!isHost) {
           console.warn(`🛡️ Blocked unauthorized breakout-start by socket ${socket.id} (user: ${socket.userId})`);
           return;
@@ -2062,32 +2062,42 @@ export const initializeSocket = (httpServer) => {
     socket.on("meeting:breakout-join-room", async (data) => {
       try {
         const { meetingId, roomId } = data || {};
-        if (!meetingId || !roomId) return;
-        const normalizedId = meetingId.toLowerCase();
-        const breakoutRoomName = `meeting_${normalizedId}_breakout_${roomId}`;
+        if (!meetingId || !roomId || !socket.userId || !isSocketInMeeting(socket, meetingId)) return;
+        const normalizedId = String(meetingId).trim().toLowerCase();
+        const breakoutSession = meetingBreakoutSessions.get(normalizedId);
+        if (!breakoutSession || breakoutSession.status !== "active") {
+          socket.emit("meeting:error", { message: "No active breakout session exists" });
+          return;
+        }
+        const breakoutRoom = breakoutSession.rooms.find((room) => String(room.id) === String(roomId));
+        if (!breakoutRoom) {
+          socket.emit("meeting:error", { message: "Breakout room not found" });
+          return;
+        }
+        const access = await getMeetingAccess(normalizedId, socket.userId);
+        if (!access || access.participant?.status === "kicked") return;
+        const assignedIds = Array.isArray(breakoutRoom.participants)
+          ? breakoutRoom.participants.map((item) => String(item?._id || item?.userId || item?.user || item))
+          : [];
+        if (assignedIds.length > 0 && !assignedIds.includes(String(socket.userId)) &&
+            !access.isHost && !access.isCoHost) {
+          socket.emit("meeting:error", { message: "You are not assigned to this breakout room" });
+          return;
+        }
 
-        // Join breakout sub-room
+        const safeRoomId = String(roomId).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
+        const breakoutRoomName = `meeting_${normalizedId}_breakout_${safeRoomId}`;
         socket.join(breakoutRoomName);
 
-        // Fetch other members in this breakout room
         const roomSockets = await io.in(breakoutRoomName).fetchSockets();
-        const members = roomSockets
-          .filter((s) => s.id !== socket.id)
-          .map((s) => ({
-            socketId: s.id,
-            userId: s.userId || null,
-            userName: s.userName || "Participant",
-            name: s.name || "",
-            profilePicture: s.profilePicture || null,
-          }));
-
-        socket.emit("meeting:breakout-room-members", {
-          meetingId: normalizedId,
-          roomId,
-          members,
-        });
-
-        // Notify existing members in this breakout room
+        const members = roomSockets.filter((member) => member.id !== socket.id).map((member) => ({
+          socketId: member.id,
+          userId: member.userId || null,
+          userName: member.userName || "Participant",
+          name: member.name || "",
+          profilePicture: member.profilePicture || null,
+        }));
+        socket.emit("meeting:breakout-room-members", { meetingId: normalizedId, roomId, members });
         socket.to(breakoutRoomName).emit("meeting:breakout-peer-joined", {
           socketId: socket.id,
           userId: socket.userId,
@@ -2095,8 +2105,6 @@ export const initializeSocket = (httpServer) => {
           name: socket.name || "",
           profilePicture: socket.profilePicture || null,
         });
-
-        console.log(`🚪 [Vybe Meet] @${socket.userName || socket.id} entered breakout sub-room "${breakoutRoomName}"`);
       } catch (err) {
         console.error("meeting:breakout-join-room error:", err);
       }
@@ -2104,10 +2112,11 @@ export const initializeSocket = (httpServer) => {
 
     socket.on("meeting:breakout-leave-room", (data) => {
       const { meetingId, roomId } = data || {};
-      if (!meetingId || !roomId) return;
-      const normalizedId = meetingId.toLowerCase();
-      const breakoutRoomName = `meeting_${normalizedId}_breakout_${roomId}`;
-
+      if (!meetingId || !roomId || !socket.userId || !isSocketInMeeting(socket, meetingId)) return;
+      const normalizedId = String(meetingId).trim().toLowerCase();
+      const safeRoomId = String(roomId).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
+      const breakoutRoomName = `meeting_${normalizedId}_breakout_${safeRoomId}`;
+      if (!socket.rooms.has(breakoutRoomName)) return;
       socket.leave(breakoutRoomName);
       socket.to(breakoutRoomName).emit("meeting:breakout-peer-left", {
         socketId: socket.id,
