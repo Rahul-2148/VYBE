@@ -583,7 +583,12 @@ export const refreshToken = async (req, res) => {
 
     const session = await Session.findById(decoded.sessionId);
 
-    if (!session || session.isRevoked || session.user.toString() !== decoded.userId.toString()) {
+    if (
+      !session ||
+      session.isRevoked ||
+      session.user.toString() !== decoded.userId.toString() ||
+      (session.expiresAt && new Date(session.expiresAt).getTime() <= Date.now())
+    ) {
       res.clearCookie("accessToken", getClearCookieOptions());
       res.clearCookie("refreshToken", getClearCookieOptions());
       res.clearCookie("token", getClearCookieOptions());
