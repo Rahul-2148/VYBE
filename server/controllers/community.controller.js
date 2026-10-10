@@ -157,6 +157,16 @@ export const getExploreCommunities = async (req, res) => {
   try {
     const { category, search, sort = "popular", page = 1, limit = 20 } = req.query;
     const query = { isPrivate: false };
+    const pageNumber = Math.max(1, Number.parseInt(page, 10) || 1);
+    const limitNumber = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 20));
+
+    if (category && category !== "All") {
+      query.category = category;
+    }
+
+    if (typeof search === "string" && search.trim()) {
+      const safeSearch = search.trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, "\\    const { category, search, sort = "popular", page = 1, limit = 20 } = req.query;
+    const query = { isPrivate: false };
 
     if (category && category !== "All") {
       query.category = category;
@@ -164,6 +174,9 @@ export const getExploreCommunities = async (req, res) => {
 
     if (search && search.trim()) {
       const regex = new RegExp(search.trim(), "i");
+      query.$or = [{ name: regex }, { description: regex }, { tags: regex }];
+    }");
+      const regex = new RegExp(safeSearch, "i");
       query.$or = [{ name: regex }, { description: regex }, { tags: regex }];
     }
 
@@ -175,15 +188,15 @@ export const getExploreCommunities = async (req, res) => {
     const communities = await Community.find(query)
       .populate("owner", "name userName profileImage")
       .sort(sortOptions)
-      .skip((Number(page) - 1) * Number(limit))
-      .limit(Number(limit));
+      .skip((pageNumber - 1) * limitNumber)
+      .limit(limitNumber);
 
     return res.status(200).json({
       success: true,
       communities,
       total,
-      page: Number(page),
-      totalPages: Math.ceil(total / Number(limit)),
+      page: pageNumber,
+      totalPages: Math.ceil(total / limitNumber),
     });
   } catch (error) {
     console.error("getExploreCommunities error:", error);
