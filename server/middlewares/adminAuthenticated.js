@@ -126,6 +126,16 @@ const isAdminAuthenticated = async (req, res, next) => {
       });
     }
 
+    // Admin tokens must be bound to a database session so revocation and ownership checks cannot be bypassed.
+    if (!decoded.sessionId) {
+      return res.status(401).json({
+        success: false,
+        error: true,
+        code: "SESSION_INVALID",
+        message: "Admin authentication session is missing. Please sign in again.",
+      });
+    }
+
     // Verify session validity
     if (decoded.sessionId) {
       const activeSession = await Session.findById(decoded.sessionId);
