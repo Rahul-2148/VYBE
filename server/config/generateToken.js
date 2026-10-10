@@ -1,24 +1,23 @@
 import jwt from "jsonwebtoken";
 
-const requireSecret = (name, fallbackName = null) => {
-  const secret = process.env[name] || (fallbackName ? process.env[fallbackName] : "");
+const requireSecret = (name) => {
+  const secret = process.env[name];
   if (!secret || !secret.trim()) {
-    throw new Error(
-      `Missing required environment variable: ${name}`
-    );
+    throw new Error(`Missing required environment variable: ${name}`);
   }
   if (secret.length < 32) {
-    throw new Error(
-      `${name} must be at least 32 characters long`
-    );
+    throw new Error(`${name} must be at least 32 characters long`);
   }
   return secret;
 };
 
+export const getAccessTokenSecret = () => requireSecret("JWT_SECRET");
+export const getRefreshTokenSecret = () => requireSecret("REFRESH_TOKEN_SECRET");
+
 export const generateAccessToken = (userId, sessionId) => {
   return jwt.sign(
     { userId, sessionId },
-    requireSecret("JWT_SECRET"),
+    getAccessTokenSecret(),
     { expiresIn: "7d" }
   );
 };
@@ -26,7 +25,7 @@ export const generateAccessToken = (userId, sessionId) => {
 export const generateRefreshToken = (userId, sessionId) => {
   return jwt.sign(
     { userId, sessionId },
-    requireSecret("REFRESH_TOKEN_SECRET"),
+    getRefreshTokenSecret(),
     { expiresIn: "30d" }
   );
 };
