@@ -651,7 +651,7 @@ export const initializeSocket = (httpServer) => {
       try {
         const { conversationId, theme, systemMessage } = data || {};
         if (!conversationId || !socket.userId) return;
-        if (!(await isConversationParticipant(conversationId, socket.userId)) {
+        if (!(await isConversationParticipant(conversationId, socket.userId))) {
           console.warn(`🛡️ Blocked unauthorized chat:theme-update by ${socket.userId}`);
           return;
         }
