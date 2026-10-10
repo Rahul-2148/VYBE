@@ -6,6 +6,7 @@ import { Conversation } from "./models/conversation.model.js";
 import { parseCookie } from "cookie";
 import * as cookie from "cookie";
 import jwt from "jsonwebtoken";
+import { getAccessTokenSecret } from "./config/generateToken.js";
 import { Channel } from "./models/channel.model.js";
 import { Community } from "./models/community.model.js";
 import Redis from "ioredis";
@@ -284,20 +285,28 @@ export const initializeSocket = (httpServer) => {
         return next(new Error("Authentication token is required for socket connection"));
       }
 
-      const secret = process.env.JWT_SECRET || "vybe_super_secret_jwt_key_2026";
+      const secret = getAccessTokenSecret();
       const decoded = jwt.verify(jwtToken, secret);
       if (!decoded || !decoded.userId) {
         return next(new Error("Invalid authentication token"));
       }
 
       if (decoded.sessionId) {
+        let session;
         try {
-          const session = await Session.findById(decoded.sessionId);
-          if (session && session.isRevoked) {
-            return next(new Error("Session has been revoked or expired"));
-          }
+          session = await Session.findById(decoded.sessionId);
         } catch (dbErr) {
-          console.warn("[socket auth] Session check DB notice (non-fatal):", dbErr.message);
+          console.error("[socket auth] Session validation failed:", dbErr.message);
+          return next(new Error("Unable to validate authentication session"));
+        }
+
+        if (
+          !session ||
+          session.isRevoked ||
+          String(session.user) !== String(decoded.userId) ||
+          (session.expiresAt && new Date(session.expiresAt).getTime() <= Date.now())
+        ) {
+          return next(new Error("Session has been revoked, expired, or does not match this account"));
         }
       }
 
