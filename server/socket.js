@@ -1049,146 +1049,179 @@ export const initializeSocket = (httpServer) => {
     // ENTERPRISE WEBRTC CALL SIGNALING & LIFECYCLE
     // =====================================================
     socket.on("call:invite", async (data) => {
-      const { room, userToCall, targetUserId: explicitTargetId, type, callerName, callerAvatar, conversationId } = data;
-      const targetUserId = (explicitTargetId || userToCall?._id || userToCall?.id || userToCall?.user?._id || userToCall)?.toString();
-      if (!targetUserId) {
-        console.warn(`[call:invite] Missing targetUserId from caller ${socket.userId}`);
-        return;
-      }
-      const recipientRoom = getUserRoom(targetUserId);
+      try {
+        const { room, userToCall, targetUserId: explicitTargetId, type, callerName, callerAvatar, conversationId } = data || {};
+        const targetUserId = (explicitTargetId || userToCall?._id || userToCall?.id || userToCall?.user?._id || userToCall)?.toString();
+        if (!socket.userId || !room || !targetUserId || targetUserId === String(socket.userId)) return;
 
-      console.log(`📞 [call:invite] User ${socket.userId} calling ${targetUserId} in room ${room} (recipient sockets: ${getUserSocketCount(targetUserId)})`);
+        // The REST endpoint creates the canonical session first. Only the initiator may
+        // invite the receiver recorded in that session.
+        const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+        if (!session || String(session.initiator) !== String(socket.userId)) {
+          console.warn(`🛡️ Blocked call invite from non-initiator ${socket.userId} for room ${room}`);
+          return;
+        }
+        const callerIsParticipant = session.participants.some((p) => String(p.user) === String(socket.userId));
+        const targetIsParticipant = session.participants.some((p) => String(p.user) === targetUserId);
+        if (!callerIsParticipant || !targetIsParticipant) return;
+        if (session.conversationId && conversationId && String(session.conversationId) !== String(conversationId)) return;
+        if (!session.participants.some((p) => String(p.user) === targetUserId && ["ringing", "joined"].includes(p.status))) return;
 
-      let resolvedAvatar = callerAvatar || socket.profilePicture || "";
-      let resolvedCallerName = callerName || socket.userName || "User";
+        const recipientRoom = getUserRoom(targetUserId);
+        let resolvedAvatar = socket.profilePicture || "";
+        let resolvedCallerName = socket.userName || "User";
+        if ((!resolvedAvatar || !resolvedCallerName) && socket.userId) {
+          try {
+            const u = await User.findById(socket.userId).select("userName name profileImage profilePicture").lean();
+            if (u) {
+              resolvedCallerName = u.userName || u.name || resolvedCallerName;
+              resolvedAvatar = u.profileImage?.url || (typeof u.profileImage === "string" ? u.profileImage : u.profilePicture?.url || u.profilePicture || "");
+              socket.profilePicture = resolvedAvatar;
+              socket.userName = resolvedCallerName;
+            }
+          } catch (e) {}
+        }
 
-      if ((!resolvedAvatar || !resolvedCallerName) && socket.userId) {
-        try {
-          const u = await User.findById(socket.userId).select("userName name profileImage profilePicture").lean();
-          if (u) {
-            resolvedCallerName = u.userName || u.name || resolvedCallerName;
-            resolvedAvatar = u.profileImage?.url || (typeof u.profileImage === "string" ? u.profileImage : u.profilePicture?.url || u.profilePicture || "");
-            socket.profilePicture = resolvedAvatar;
-            socket.userName = resolvedCallerName;
-          }
-        } catch (e) {}
-      }
+        const invitePayload = {
+          room,
+          from: String(socket.userId),
+          callerName: resolvedCallerName,
+          callerAvatar: resolvedAvatar,
+          type: type || session.type || "video",
+          conversationId: session.conversationId ? String(session.conversationId) : null,
+        };
 
-      const invitePayload = {
-        room,
-        from: (socket.userId || "").toString(),
-        callerName: resolvedCallerName,
-        callerAvatar: resolvedAvatar,
-        type: type || "video",
-        conversationId,
-      };
-
-      // 1. Emit invite to recipient room, excluding caller's socket
-      socket.to(recipientRoom).emit("call:invite-received", invitePayload);
-
-      // 2. Also emit directly to every active socket of recipient, excluding caller's socket
-      const recipientSockets = activeUsers.get(targetUserId);
-      if (recipientSockets && recipientSockets.size > 0) {
-        for (const sockId of recipientSockets) {
-          if (sockId !== socket.id) {
-            io.to(sockId).emit("call:invite-received", invitePayload);
+        io.to(recipientRoom).emit("call:invite-received", invitePayload);
+        const recipientSockets = activeUsers.get(targetUserId);
+        if (recipientSockets) {
+          for (const sockId of recipientSockets) {
+            if (sockId !== socket.id) io.to(sockId).emit("call:invite-received", invitePayload);
           }
         }
+        socket.emit("call:status", { room, status: recipientSockets?.size ? "ringing" : "calling" });
+      } catch (err) {
+        console.error("call:invite error:", err);
       }
-
-      const isOnline = getUserSocketCount(targetUserId) > 0;
-      socket.emit("call:status", { room, status: isOnline ? "ringing" : "calling" });
     });
 
     socket.on("call:respond", async (data) => {
-      const { room, response, to, targetUserId: explicitTargetId } = data; // response: "joined", "declined", "busy", "accepted", "cancelled"
-      const targetUserId = (explicitTargetId || to?._id || to?.id || to?.user?._id || to)?.toString();
-      if (!targetUserId) return;
+      try {
+        const { room, response, to, targetUserId: explicitTargetId } = data || {};
+        const targetUserId = (explicitTargetId || to?._id || to?.id || to?.user?._id || to)?.toString();
+        const allowedResponses = ["accepted", "joined", "declined", "busy", "cancelled"];
+        if (!socket.userId || !room || !targetUserId || !allowedResponses.includes(response)) return;
 
-      console.log(`📞 [call:respond] User ${socket.userId} responded ${response} to ${targetUserId} in room ${room}`);
+        const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+        if (!session) return;
+        const ownParticipant = session.participants.find((p) => String(p.user) === String(socket.userId));
+        const targetParticipant = session.participants.find((p) => String(p.user) === targetUserId);
+        if (!ownParticipant || !targetParticipant || targetUserId === String(socket.userId)) {
+          console.warn(`🛡️ Blocked unauthorized call response for room ${room}`);
+          return;
+        }
 
-      const responsePayload = {
-        room,
-        response,
-        from: (socket.userId || "").toString(),
-      };
-
-      socket.to(getUserRoom(targetUserId)).emit("call:response-received", responsePayload);
-
-      const targetSockets = activeUsers.get(targetUserId);
-      if (targetSockets && targetSockets.size > 0) {
-        for (const sockId of targetSockets) {
-          if (sockId !== socket.id) {
-            io.to(sockId).emit("call:response-received", responsePayload);
+        const responsePayload = { room, response, from: String(socket.userId) };
+        io.to(getUserRoom(targetUserId)).emit("call:response-received", responsePayload);
+        const targetSockets = activeUsers.get(targetUserId);
+        if (targetSockets) {
+          for (const sockId of targetSockets) {
+            if (sockId !== socket.id) io.to(sockId).emit("call:response-received", responsePayload);
           }
         }
+      } catch (err) {
+        console.error("call:respond error:", err);
       }
     });
 
     // In-call invitation ("Add People" to live call)
     socket.on("call:invite-user", async (data) => {
-      const { room, targetUserId: rawTargetId, type, conversationId } = data || {};
-      const targetUserId = (rawTargetId?._id || rawTargetId?.id || rawTargetId)?.toString();
-      if (!room || !targetUserId) return;
+      try {
+        const { room, targetUserId: rawTargetId, type, conversationId } = data || {};
+        const targetUserId = (rawTargetId?._id || rawTargetId?.id || rawTargetId)?.toString();
+        if (!socket.userId || !room || !targetUserId || targetUserId === String(socket.userId)) return;
+        if (!isSocketInCallRoom(socket, room)) return;
 
-      console.log(`📞 [call:invite-user] User ${socket.userId} inviting ${targetUserId} to live call room ${room}`);
+        const session = await CallSession.findOne({ room, status: { $ne: "ended" } });
+        const callerIsParticipant = session?.participants.some((p) =>
+          String(p.user) === String(socket.userId) && ["joined", "ringing"].includes(p.status)
+        );
+        if (!session || !callerIsParticipant) return;
+        if (!["group", "channel"].includes(session.type)) {
+          socket.emit("call:error", { message: "Adding participants is only available for group/channel calls" });
+          return;
+        }
 
-      let callerName = socket.name || socket.userName || "Vybe User";
-      let callerAvatar = socket.profilePicture || null;
-      if (socket.userId) {
-        try {
-          const u = await User.findById(socket.userId).select("name userName profileImage").lean();
-          if (u) {
-            callerName = u.name || u.userName || callerName;
-            callerAvatar = u.profileImage?.url || (typeof u.profileImage === "string" ? u.profileImage : callerAvatar);
-          }
-        } catch (e) {}
-      }
-
-      const invitePayload = {
-        room,
-        from: (socket.userId || "").toString(),
-        callerName,
-        callerAvatar,
-        type: type || "video",
-        conversationId,
-        isGroupInvite: true,
-      };
-
-      // 1. Emit to recipient personal room
-      socket.to(getUserRoom(targetUserId)).emit("call:invite-received", invitePayload);
-
-      // 2. Emit to all active socket connections of recipient
-      const recipientSockets = activeUsers.get(targetUserId);
-      if (recipientSockets) {
-        for (const sockId of recipientSockets) {
-          if (sockId !== socket.id) {
-            io.to(sockId).emit("call:invite-received", invitePayload);
+        const targetUser = await User.findById(targetUserId).select("_id").lean();
+        if (!targetUser) return;
+        const effectiveConversationId = session.conversationId ? String(session.conversationId) : null;
+        if (effectiveConversationId) {
+          const isConversationMember = await isConversationParticipant(effectiveConversationId, targetUserId);
+          if (!isConversationMember) {
+            socket.emit("call:error", { message: "The invited user is not a participant in this conversation" });
+            return;
           }
         }
+        const existing = session.participants.find((p) => String(p.user) === targetUserId);
+        if (!existing) {
+          session.participants.push({ user: targetUserId, status: "ringing", role: "listener" });
+          await session.save();
+        } else if (["left", "declined", "busy", "disconnected"].includes(existing.status)) {
+          existing.status = "ringing";
+          existing.leftAt = null;
+          await session.save();
+        }
+
+        const caller = await User.findById(socket.userId).select("name userName profileImage").lean();
+        const invitePayload = {
+          room,
+          from: String(socket.userId),
+          callerName: caller?.name || caller?.userName || socket.userName || "VYBE User",
+          callerAvatar: caller?.profileImage?.url || socket.profilePicture || null,
+          type: type || session.type || "video",
+          conversationId: effectiveConversationId,
+          isGroupInvite: true,
+        };
+
+        io.to(getUserRoom(targetUserId)).emit("call:invite-received", invitePayload);
+        const recipientSockets = activeUsers.get(targetUserId);
+        if (recipientSockets) {
+          for (const sockId of recipientSockets) {
+            if (sockId !== socket.id) io.to(sockId).emit("call:invite-received", invitePayload);
+          }
+        }
+      } catch (err) {
+        console.error("call:invite-user error:", err);
       }
     });
 
     // Floating reaction emojis broadcast (WhatsApp / Instagram Live call reactions)
     socket.on("call:send-reaction", (data) => {
-      const { room, emoji, userName, userId } = data || {};
-      if (!room || !emoji) return;
+      const { room, emoji } = data || {};
+      if (!room || typeof emoji !== "string" || emoji.length > 12 || !isSocketInCallRoom(socket, room)) return;
 
       io.to(room).emit("call:reaction-received", {
         emoji,
-        userName: userName || socket.userName || "User",
-        userId: userId || socket.userId,
+        userName: socket.userName || "User",
+        userId: socket.userId,
         id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       });
     });
 
     socket.on("call:join-room", async (data) => {
-      const { room, userId: payloadUserId, userName: payloadUserName, name: payloadName, profilePicture: payloadProfilePicture } = data || {};
-      if (!room) return;
+      const { room, userName: payloadUserName, name: payloadName, profilePicture: payloadProfilePicture } = data || {};
+      if (!room || !socket.userId || typeof room !== "string" || room.length > 180) return;
+
+      // Validate room membership before joining, rather than trusting a client-supplied room ID.
+      if (!room.startsWith("channel_")) {
+        const authorized = await getCallSessionForParticipant(room, socket.userId);
+        if (!authorized) {
+          socket.emit("call:error", { message: "You are not authorized to join this call" });
+          return;
+        }
+      }
 
       cancelRoomTeardown(room);
 
-      if (payloadUserId && !socket.userId) socket.userId = payloadUserId;
       if (payloadUserName) socket.userName = payloadUserName;
       if (payloadName) socket.name = payloadName;
       if (payloadProfilePicture) socket.profilePicture = payloadProfilePicture;
