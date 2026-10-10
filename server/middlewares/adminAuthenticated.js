@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { Session } from "../models/session.model.js";
-import { generateAccessToken, generateRefreshToken } from "../config/generateToken.js";
+import { generateAccessToken, generateRefreshToken, getAccessTokenSecret, getRefreshTokenSecret } from "../config/generateToken.js";
 import {
   getAdminAccessTokenCookieOptions,
   getAdminRefreshTokenCookieOptions,
@@ -29,7 +29,7 @@ const isAdminAuthenticated = async (req, res, next) => {
       token = req.headers.authorization.split(" ")[1];
     }
 
-    const secret = process.env.JWT_SECRET || "vybe_super_secret_jwt_key_2026";
+    const secret = getAccessTokenSecret();
     let decoded = null;
 
     if (token) {
@@ -58,10 +58,7 @@ const isAdminAuthenticated = async (req, res, next) => {
         });
       }
 
-      const refreshSecret =
-        process.env.REFRESH_TOKEN_SECRET ||
-        process.env.JWT_SECRET ||
-        "vybe_super_secret_refresh_key_2026";
+      const refreshSecret = getRefreshTokenSecret();
 
       try {
         const refreshDecoded = jwt.verify(rawRefreshToken, refreshSecret);
@@ -161,10 +158,11 @@ const isAdminAuthenticated = async (req, res, next) => {
     req.userId = decoded.userId;
     next();
   } catch (error) {
+    console.error("[admin auth middleware] Request authentication failed:", error.message);
     return res.status(500).json({
       success: false,
       error: true,
-      message: `Admin authentication middleware error: ${error.message}`,
+      message: "Admin authentication could not be completed. Please try again.",
     });
   }
 };
