@@ -4,6 +4,7 @@ import http from "http";
 import connectDB from "./config/db.js";
 import app from "./app.js";
 import { initializeSocket } from "./socket.js";
+import { getAccessTokenSecret, getRefreshTokenSecret } from "./config/generateToken.js";
 import { archiveExpiredStories, purgeExpiredArchivedStories } from "./services/storyArchive.service.js";
 
 // Process Level Error Catchers for Runtime Stability
@@ -30,6 +31,15 @@ global.io = io;
 // Ultra-fast parallelized bootstrap
 const startServer = async () => {
   const startTime = performance.now();
+
+  // Fail fast rather than start a server that issues/verifies tokens with insecure defaults.
+  try {
+    getAccessTokenSecret();
+    getRefreshTokenSecret();
+  } catch (error) {
+    console.error(`[startup] Invalid JWT configuration: ${error.message}`);
+    process.exit(1);
+  }
 
   // 1. Start HTTP Server immediately (zero-wait network readiness)
   httpServer.listen(PORT, () => {
