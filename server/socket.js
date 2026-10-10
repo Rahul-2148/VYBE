@@ -948,11 +948,9 @@ export const initializeSocket = (httpServer) => {
 
         const user = await User.findById(socket.userId).select("userName name profileImage isVerified").lean();
         const commentPayload = {
-          _id: `${Date.now()}_${socket.id}`,
           user: socket.userId,
           userName: user?.userName || user?.name || "Viewer",
           userAvatar: user?.profileImage?.url || user?.profilePicture || "",
-          isVerified: Boolean(user?.isVerified),
           text: comment.text.trim(),
           createdAt: new Date(),
         };
@@ -962,7 +960,11 @@ export const initializeSocket = (httpServer) => {
           { new: true }
         );
         if (!live) return;
-        io.to(room).emit("live-comment-received", { streamId, comment: commentPayload });
+
+        // Let Mongoose generate the embedded comment ObjectId; the old custom string ID
+        // could not be cast to the schema's default ObjectId and caused comment persistence failures.
+        const storedComment = live.comments[live.comments.length - 1];
+        io.to(room).emit("live-comment-received", { streamId, comment: storedComment });
       } catch (err) {
         console.error("send-live-comment error:", err);
       }
