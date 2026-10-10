@@ -545,17 +545,25 @@ export const getMessages = async (req, res) => {
   try {
     const userId = req.userId;
     const { conversationId } = req.params;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 30;
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 30));
 
-    // Automatically delete seen vanish messages in this conversation
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({ message: "Invalid conversation ID" });
+    }
+
+    const conversation = await Conversation.findById(conversationId).select("participants");
+    if (!conversation || !conversation.participants.some((p) => String(p) === String(userId))) {
+      return res.status(403).json({ message: "Not authorized to access this conversation" });
+    }
+
+    // Only run expiring-message cleanup after confirming this user can access the conversation.
     await Message.deleteMany({
       conversation: conversationId,
       "disappear.afterSeen": true,
       status: "seen",
     });
-
-    if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const before = req.query.before;
     let filter = {
@@ -596,8 +604,20 @@ export const getSharedMedia = async (req, res) => {
     const userId = req.userId;
     const { conversationId } = req.params;
     const { mediaType } = req.query; // "image", "video", "file", "document", "link", "audio", "voice"
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
+
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({ message: "Invalid conversation ID" });
+    }
+    const authorizedConversation = await Conversation.findOne({
+      _id: conversationId,
+      participants: userId,
+    }).select("_id");
+    if (!authorizedConversation) {
+      return res.status(403).json({ message: "Not authorized to access this conversation" });
+    }
 
     let convFilter = conversationId;
     if (mongoose.Types.ObjectId.isValid(conversationId)) {
@@ -717,12 +737,25 @@ export const editMessage = async (req, res) => {
   try {
     const userId = req.userId;
     const { messageId } = req.params;
-    const { text } = req.body;
+    const text = req.body?.text;
 
+    if (!userId || typeof text !== "string" || !text.trim() || text.length > 5000) {
+      return res.status(400).json({ message: "A valid message text is required" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: "Invalid message ID" });
+    }
     const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ message: "Message not found" });
+    const conversationForEdit = await Conversation.findOne({
+      _id: message.conversation,
+      participants: userId,
+    }).select("participants");
+    if (!conversationForEdit) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
 
-    if (message.sender.toString() !== userId.toString()) {
+    if (String(message.sender) !== String(userId)) {
       return res.status(403).json({ message: "Not allowed" });
     }
 
@@ -850,12 +883,21 @@ export const markMessageAsSeen = async (req, res) => {
   try {
     const userId = req.userId;
     const { messageId } = req.params;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: "Invalid message ID" });
+    }
 
     const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ message: "Message not found" });
+    const conversation = await Conversation.findOne({
+      _id: message.conversation,
+      participants: userId,
+    }).select("_id");
+    if (!conversation) return res.status(403).json({ message: "Not authorized" });
 
     const alreadySeen = message.seenBy.some((s) =>
-      (s.user || s).toString() === userId.toString()
+      String(s.user?._id || s.user || s) === String(userId)
     );
 
     if (!alreadySeen) {
@@ -893,8 +935,11 @@ export const reactMessage = async (req, res) => {
     const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ success: false, message: "Message not found" });
 
-    const conversation = await Conversation.findById(message.conversation);
-    if (conversation && !conversation.participants.some((p) => (p?._id || p?.id || p)?.toString() === userId?.toString())) {
+    const conversation = await Conversation.findOne({
+      _id: message.conversation,
+      participants: userId,
+    }).select("participants");
+    if (!conversation) {
       return res.status(403).json({ success: false, message: "Not authorized" });
     }
 
@@ -957,6 +1002,16 @@ export const reactMessage = async (req, res) => {
 export const getPinnedMessages = async (req, res) => {
   try {
     const { conversationId } = req.params;
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({ message: "Invalid conversation ID" });
+    }
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      participants: userId,
+    }).select("_id");
+    if (!conversation) return res.status(403).json({ message: "Not authorized" });
 
     const messages = await Message.find({
       conversation: conversationId,
