@@ -115,6 +115,16 @@ const isAuthenticated = async (req, res, next) => {
       });
     }
 
+    // Authenticated tokens must be bound to a database session so revocation/ownership checks cannot be bypassed.
+    if (!decoded.sessionId) {
+      return res.status(401).json({
+        success: false,
+        error: true,
+        code: "SESSION_INVALID",
+        message: "Authentication session is missing. Please sign in again.",
+      });
+    }
+
     // Verify Session validity if sessionId exists in token
     if (decoded.sessionId) {
       const activeSession = await Session.findById(decoded.sessionId);
