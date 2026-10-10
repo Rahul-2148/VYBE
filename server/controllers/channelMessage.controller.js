@@ -156,6 +156,14 @@ export const toggleMessageReaction = async (req, res) => {
     if (!message) {
       return res.status(404).json({ success: false, message: "Message not found" });
     }
+    const community = await Community.findById(message.community).select("members isPrivate");
+    const isMember = community?.members.some((m) => String(m.user) === String(req.userId));
+    if (!community || !isMember) {
+      return res.status(403).json({ success: false, message: "Only community members can react to channel messages" });
+    }
+    if (typeof emoji !== "string" || !emoji.trim() || emoji.length > 32) {
+      return res.status(400).json({ success: false, message: "A valid emoji reaction is required" });
+    }
 
     const existingIndex = message.reactions.findIndex(
       (r) => r.user.toString() === req.userId.toString() && r.emoji === emoji
@@ -262,6 +270,15 @@ export const togglePinMessage = async (req, res) => {
 export const getPinnedMessages = async (req, res) => {
   try {
     const { channelId } = req.params;
+    if (!req.userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+    const channel = await Channel.findById(channelId).select("community");
+    if (!channel) return res.status(404).json({ success: false, message: "Channel not found" });
+    const community = await Community.findById(channel.community).select("members isPrivate");
+    if (!community) return res.status(404).json({ success: false, message: "Community not found" });
+    const isMember = community.members.some((m) => String(m.user) === String(req.userId));
+    if (community.isPrivate && !isMember) {
+      return res.status(403).json({ success: false, message: "Access denied. Not a member of this private community" });
+    }
     const messages = await ChannelMessage.find({ channel: channelId, isPinned: true })
       .populate("sender", "name userName profileImage")
       .sort({ createdAt: -1 });
@@ -288,6 +305,14 @@ export const editChannelMessage = async (req, res) => {
     const message = await ChannelMessage.findOne({ _id: messageId, channel: channelId });
     if (!message) {
       return res.status(404).json({ success: false, message: "Message not found" });
+    }
+    const community = await Community.findById(message.community).select("members");
+    const isMember = community?.members.some((m) => String(m.user) === String(req.userId));
+    if (!community || !isMember) {
+      return res.status(403).json({ success: false, message: "Only current community members can edit channel messages" });
+    }
+    if (typeof text !== "string" || !text.trim() || text.length > 5000) {
+      return res.status(400).json({ success: false, message: "Text must be 1-5000 characters" });
     }
 
     if (message.sender.toString() !== req.userId.toString()) {
