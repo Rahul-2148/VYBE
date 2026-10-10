@@ -758,29 +758,29 @@ export const initializeSocket = (httpServer) => {
     // =====================================================
     socket.on("start-live-stream", async (data) => {
       try {
-        const { streamId, title } = data;
-        if (!streamId) return;
+        const { streamId } = data || {};
+        if (!streamId || !socket.userId) return;
 
+        const stream = await getLiveStreamForHost(streamId, socket.userId);
+        if (!stream) {
+          console.warn(`🛡️ Blocked start-live-stream by non-host ${socket.userId}`);
+          return;
+        }
         socket.join(`live_${streamId}`);
 
-        // Broadcast to followers that creator went LIVE
-        if (socket.userId) {
-          const hostUser = await User.findById(socket.userId).select("userName name profileImage followers");
-          if (hostUser && hostUser.followers?.length > 0) {
-            hostUser.followers.forEach((fId) => {
-              const fIdStr = fId.toString();
-              if (getUserSocketCount(fIdStr) > 0) {
-                io.to(getUserRoom(fIdStr)).emit("live:creator-started", {
-                  streamId,
-                  title: title || "Live Video",
-                  host: {
-                    _id: hostUser._id,
-                    userName: hostUser.userName,
-                    name: hostUser.name,
-                    profileImage: hostUser.profileImage,
-                  },
-                });
-              }
+        const hostUser = await User.findById(socket.userId).select("userName name profileImage followers").lean();
+        for (const followerId of hostUser?.followers || []) {
+          const follower = String(followerId);
+          if (getUserSocketCount(follower) > 0) {
+            io.to(getUserRoom(follower)).emit("live:creator-started", {
+              streamId,
+              title: stream.title || "Live Video",
+              host: {
+                _id: hostUser._id,
+                userName: hostUser.userName,
+                name: hostUser.name,
+                profileImage: hostUser.profileImage,
+              },
             });
           }
         }
@@ -791,53 +791,53 @@ export const initializeSocket = (httpServer) => {
 
     socket.on("join-live-stream", async (data) => {
       try {
-        const { streamId } = data;
-        if (!streamId) return;
+        const { streamId } = data || {};
+        if (!streamId || !socket.userId) return;
 
-        socket.join(`live_${streamId}`);
-
-        let viewerInfo = {
-          socketId: socket.id,
-          userId: socket.userId || null,
-          userName: socket.userName || "Viewer",
-          userAvatar: socket.profilePicture || "",
-        };
-
-        if (socket.userId) {
-          const u = await User.findById(socket.userId).select("userName name profileImage isVerified").lean();
-          if (u) {
-            viewerInfo.userName = u.userName || u.name || viewerInfo.userName;
-            viewerInfo.userAvatar = u.profileImage?.url || u.profilePicture || "";
+        const live = await LiveStream.findById(streamId).select("host isLive audience viewers peakViewers totalUniqueViewers");
+        if (!live || !live.isLive) {
+          socket.emit("live:error", { message: "This live stream is no longer available" });
+          return;
+        }
+        if (String(live.host) !== String(socket.userId) && live.audience === "close_friends") {
+          const host = await User.findById(live.host).select("closeFriends").lean();
+          const isCloseFriend = (host?.closeFriends || []).some((id) => String(id) === String(socket.userId));
+          if (!isCloseFriend) {
+            socket.emit("live:error", { message: "This live stream is limited to close friends" });
+            return;
           }
         }
 
-        // Update LiveStream in DB
-        let currentViewerCount = 1;
-        try {
-          const live = await LiveStream.findById(streamId);
-          if (live && live.isLive) {
-            if (socket.userId && !live.viewers.some((v) => v.toString() === socket.userId.toString())) {
-              live.viewers.push(socket.userId);
-            }
-            if (live.viewers.length > live.peakViewers) {
-              live.peakViewers = live.viewers.length;
-            }
-            live.totalUniqueViewers = Math.max(live.totalUniqueViewers || 1, live.viewers.length);
-            await live.save();
-            currentViewerCount = live.viewers.length;
-          }
-        } catch (e) {}
+        socket.join(`live_${streamId}`);
+        let viewerInfo = {
+          socketId: socket.id,
+          userId: socket.userId,
+          userName: socket.userName || "Viewer",
+          userAvatar: socket.profilePicture || "",
+        };
+        const user = await User.findById(socket.userId).select("userName name profileImage isVerified").lean();
+        if (user) {
+          viewerInfo.userName = user.userName || user.name || viewerInfo.userName;
+          viewerInfo.userAvatar = user.profileImage?.url || user.profilePicture || "";
+          viewerInfo.isVerified = Boolean(user.isVerified);
+        }
 
-        viewerInfo.viewerCount = currentViewerCount;
+        if (!live.viewers.some((id) => String(id) === String(socket.userId))) {
+          live.viewers.push(socket.userId);
+        }
+        live.peakViewers = Math.max(live.peakViewers || 1, live.viewers.length);
+        live.totalUniqueViewers = Math.max(live.totalUniqueViewers || 1, live.viewers.length);
+        await live.save();
 
-        // Notify room that new viewer joined
+        viewerInfo.viewerCount = live.viewers.length;
         socket.to(`live_${streamId}`).emit("live-viewer-joined", viewerInfo);
         io.to(`live_${streamId}`).emit("live:viewer-count-updated", {
           streamId,
-          viewerCount: currentViewerCount,
+          viewerCount: live.viewers.length,
         });
       } catch (err) {
         console.error("join-live-stream error:", err);
+        socket.emit("live:error", { message: "Unable to join this live stream" });
       }
     });
 
@@ -875,11 +875,16 @@ export const initializeSocket = (httpServer) => {
     });
 
     // WebRTC Signaling Relay for Live Stream (Host <-> Viewer / Co-Host)
-    socket.on("live:signal", (data) => {
-      const { toSocketId, signal } = data;
-      if (!toSocketId || !signal) return;
+    socket.on("live:signal", async (data) => {
+      const { streamId, toSocketId, signal } = data || {};
+      const room = streamId ? `live_${streamId}` : "";
+      if (!room || !toSocketId || !signal || !socket.rooms.has(room)) return;
+      const roomSockets = await io.in(room).fetchSockets();
+      if (!roomSockets.some((candidate) => candidate.id === toSocketId)) return;
       io.to(toSocketId).emit("live:signal-received", {
+        streamId,
         fromSocketId: socket.id,
+        fromUserId: socket.userId,
         signal,
       });
     });
@@ -887,58 +892,50 @@ export const initializeSocket = (httpServer) => {
     // Live Comments
     socket.on("send-live-comment", async (data) => {
       try {
-        const { streamId, comment } = data;
-        if (!streamId || !comment) return;
+        const { streamId, comment } = data || {};
+        const room = streamId ? `live_${streamId}` : "";
+        if (!socket.userId || !room || !socket.rooms.has(room) ||
+            typeof comment?.text !== "string" || !comment.text.trim() || comment.text.length > 1000) return;
 
-        let commentPayload = {
-          _id: new Date().getTime().toString(),
+        const user = await User.findById(socket.userId).select("userName name profileImage isVerified").lean();
+        const commentPayload = {
+          _id: `${Date.now()}_${socket.id}`,
           user: socket.userId,
-          userName: socket.userName || comment.user || "Viewer",
-          userAvatar: socket.profilePicture || comment.userAvatar || "",
-          text: comment.text,
+          userName: user?.userName || user?.name || "Viewer",
+          userAvatar: user?.profileImage?.url || user?.profilePicture || "",
+          isVerified: Boolean(user?.isVerified),
+          text: comment.text.trim(),
           createdAt: new Date(),
         };
-
-        if (socket.userId) {
-          const u = await User.findById(socket.userId).select("userName name profileImage isVerified").lean();
-          if (u) {
-            commentPayload.userName = u.userName || u.name;
-            commentPayload.userAvatar = u.profileImage?.url || u.profilePicture || "";
-            commentPayload.isVerified = u.isVerified;
-          }
-        }
-
-        // Persist comment in database asynchronously
-        LiveStream.findByIdAndUpdate(streamId, {
-          $push: { comments: commentPayload },
-          $inc: { "stats.totalComments": 1 },
-        }).catch(() => null);
-
-        io.to(`live_${streamId}`).emit("live-comment-received", {
-          streamId,
-          comment: commentPayload,
-        });
+        const live = await LiveStream.findOneAndUpdate(
+          { _id: streamId, isLive: true, commentsDisabled: { $ne: true } },
+          { $push: { comments: commentPayload }, $inc: { "stats.totalComments": 1 } },
+          { new: true }
+        );
+        if (!live) return;
+        io.to(room).emit("live-comment-received", { streamId, comment: commentPayload });
       } catch (err) {
         console.error("send-live-comment error:", err);
       }
     });
 
     // Live Heart Burst Reactions
-    socket.on("send-live-heart", (data) => {
+    socket.on("send-live-heart", async (data) => {
       try {
-        const { streamId, reactionType = "heart", count = 1 } = data;
-        if (!streamId) return;
-
-        // Increment stats asynchronously
-        LiveStream.findByIdAndUpdate(streamId, {
-          $inc: { "stats.totalHearts": count },
-        }).catch(() => null);
-
-        socket.to(`live_${streamId}`).emit("live-heart-received", {
-          streamId,
-          fromUserId: socket.userId,
-          reactionType,
-          count,
+        const { streamId, reactionType = "heart", count = 1 } = data || {};
+        const room = streamId ? `live_${streamId}` : "";
+        if (!socket.userId || !room || !socket.rooms.has(room)) return;
+        const safeCount = Number.isInteger(count) ? Math.max(1, Math.min(10, count)) : 1;
+        const allowedReactions = ["heart", "fire", "clap", "laugh", "wow"];
+        const safeReaction = allowedReactions.includes(reactionType) ? reactionType : "heart";
+        const live = await LiveStream.findOneAndUpdate(
+          { _id: streamId, isLive: true },
+          { $inc: { "stats.totalHearts": safeCount } },
+          { new: true }
+        ).select("_id");
+        if (!live) return;
+        socket.to(room).emit("live-heart-received", {
+          streamId, fromUserId: socket.userId, reactionType: safeReaction, count: safeCount,
         });
       } catch (err) {
         console.error("send-live-heart error:", err);
@@ -948,13 +945,27 @@ export const initializeSocket = (httpServer) => {
     // Live Pinned Comments
     socket.on("live:pin-comment", async (data) => {
       try {
-        const { streamId, comment } = data;
-        if (!streamId) return;
-        io.to(`live_${streamId}`).emit("live:pinned-comment-updated", {
-          streamId,
-          pinnedComment: comment,
-        });
-      } catch (err) {}
+        const { streamId, comment } = data || {};
+        const live = await getLiveStreamForHost(streamId, socket.userId);
+        if (!live) return;
+        let pinnedComment = null;
+        if (comment) {
+          const commentId = String(comment._id || comment.id || "");
+          const existing = live.comments.find((item) => String(item._id) === commentId);
+          if (!existing) return;
+          pinnedComment = {
+            user: existing.user,
+            userName: existing.userName,
+            text: existing.text,
+            pinnedAt: new Date(),
+          };
+        }
+        live.pinnedComment = pinnedComment;
+        await live.save();
+        io.to(`live_${streamId}`).emit("live:pinned-comment-updated", { streamId, pinnedComment });
+      } catch (err) {
+        console.error("live:pin-comment error:", err);
+      }
     });
 
     // Live Q&A Box
@@ -967,19 +978,24 @@ export const initializeSocket = (httpServer) => {
       });
     });
 
-    socket.on("live:display-question", (data) => {
-      const { streamId, question } = data;
-      if (!streamId) return;
+    socket.on("live:display-question", async (data) => {
+      const { streamId, question } = data || {};
+      if (!(await getLiveStreamForHost(streamId, socket.userId))) return;
+      if (question && (typeof question.text !== "string" || question.text.length > 1000)) return;
       io.to(`live_${streamId}`).emit("live:question-displayed", {
         streamId,
-        question, // null to hide, or question object to display
+        question: question ? { ...question, userId: undefined, hostId: socket.userId } : null,
       });
     });
 
     // Co-Host Dual Screen Live Signaling
-    socket.on("live:cohost-request", (data) => {
-      const { streamId, hostSocketId } = data;
-      if (!hostSocketId) return;
+    socket.on("live:cohost-request", async (data) => {
+      const { streamId, hostSocketId } = data || {};
+      const room = streamId ? `live_${streamId}` : "";
+      if (!socket.userId || !room || !socket.rooms.has(room) || !hostSocketId) return;
+      const live = await LiveStream.findOne({ _id: streamId, isLive: true }).select("host");
+      const target = io.sockets.sockets.get(hostSocketId);
+      if (!live || !target || String(target.userId) !== String(live.host)) return;
       io.to(hostSocketId).emit("live:cohost-request-received", {
         streamId,
         guestSocketId: socket.id,
@@ -989,54 +1005,65 @@ export const initializeSocket = (httpServer) => {
       });
     });
 
-    socket.on("live:cohost-accept", (data) => {
-      const { streamId, guestSocketId, guestUser } = data;
-      if (!guestSocketId) return;
-
-      io.to(guestSocketId).emit("live:cohost-accepted", {
+    socket.on("live:cohost-accept", async (data) => {
+      const { streamId, guestSocketId } = data || {};
+      const live = await getLiveStreamForHost(streamId, socket.userId);
+      const guest = guestSocketId ? io.sockets.sockets.get(guestSocketId) : null;
+      const room = streamId ? `live_${streamId}` : "";
+      if (!live || !guest || !guest.userId || !guest.rooms.has(room)) return;
+      live.coHost = guest.userId;
+      await live.save();
+      io.to(guestSocketId).emit("live:cohost-accepted", { streamId, hostSocketId: socket.id });
+      io.to(room).emit("live:cohost-joined", {
         streamId,
-        hostSocketId: socket.id,
-      });
-
-      io.to(`live_${streamId}`).emit("live:cohost-joined", {
-        streamId,
-        coHost: guestUser,
+        coHost: { _id: guest.userId, userName: guest.userName, profileImage: guest.profilePicture },
       });
     });
 
-    socket.on("live:cohost-leave", (data) => {
-      const { streamId } = data;
-      if (!streamId) return;
-      io.to(`live_${streamId}`).emit("live:cohost-ended", { streamId });
+    socket.on("live:cohost-leave", async (data) => {
+      const { streamId } = data || {};
+      const live = await LiveStream.findOne({ _id: streamId, isLive: true }).select("host coHost");
+      if (!live) return;
+      const isHost = String(live.host) === String(socket.userId);
+      const isCoHost = live.coHost && String(live.coHost) === String(socket.userId);
+      if (!isHost && !isCoHost) return;
+      if (isCoHost) {
+        live.coHost = null;
+        await live.save();
+      }
+      io.to(`live_${streamId}`).emit("live:cohost-ended", { streamId, endedBy: socket.userId });
     });
 
     // Host Friendly Wave
-    socket.on("live:wave", (data) => {
-      const { targetSocketId, targetUserName } = data;
-      if (!targetSocketId) return;
+    socket.on("live:wave", async (data) => {
+      const { streamId, targetSocketId } = data || {};
+      const room = streamId ? `live_${streamId}` : "";
+      if (!room || !socket.userId || !socket.rooms.has(room) || !targetSocketId) return;
+      const target = await io.in(room).fetchSockets();
+      if (!target.some((candidate) => candidate.id === targetSocketId)) return;
       io.to(targetSocketId).emit("live:wave-received", {
-        fromUserName: socket.userName || "Host",
+        fromUserId: socket.userId,
+        fromUserName: socket.userName || "Viewer",
       });
     });
 
     // End Live Stream Broadcast
     socket.on("end-live-stream", async (data) => {
       try {
-        const { streamId, stats } = data;
-        if (!streamId) return;
-
+        const { streamId } = data || {};
+        const live = await getLiveStreamForHost(streamId, socket.userId);
+        if (!live) return;
+        live.isLive = false;
+        live.endedAt = new Date();
+        await live.save();
         io.to(`live_${streamId}`).emit("live-stream-ended", {
           streamId,
-          stats: stats || {},
+          stats: {
+            totalHearts: live.stats?.totalHearts || 0,
+            totalComments: live.stats?.totalComments || 0,
+          },
         });
-
-        // Broadcast to all that creator has ended live
-        if (socket.userId) {
-          io.emit("live:creator-ended", {
-            streamId,
-            hostId: socket.userId,
-          });
-        }
+        io.emit("live:creator-ended", { streamId, hostId: socket.userId });
       } catch (err) {
         console.error("end-live-stream error:", err);
       }
