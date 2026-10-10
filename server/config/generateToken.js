@@ -1,12 +1,17 @@
 import jwt from "jsonwebtoken";
 
 const requireSecret = (name) => {
-  const secret = process.env[name];
-  if (!secret || !secret.trim()) {
+  const value = process.env[name];
+  const secret = typeof value === "string" ? value.trim() : "";
+
+  if (!secret) {
     throw new Error(`Missing required environment variable: ${name}`);
   }
   if (secret.length < 32) {
     throw new Error(`${name} must be at least 32 characters long`);
+  }
+  if (/^(your-|change.?me|replace.?me|placeholder|example|default)/i.test(secret)) {
+    throw new Error(`${name} still contains a placeholder value; configure a cryptographically random secret`);
   }
   return secret;
 };
