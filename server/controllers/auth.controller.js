@@ -80,8 +80,13 @@ const getOrCreateDeviceGroupId = (req, res) => {
     deviceGroupId = crypto.randomBytes(16).toString("hex");
     res.cookie("deviceGroupId", deviceGroupId, {
       httpOnly: true,
-      secure: process.env.COOKIE_SECURE === "true" || false,
-      sameSite: process.env.COOKIE_SAME_SITE || "lax",
+      secure:
+        process.env.COOKIE_SECURE === undefined
+          ? process.env.NODE_ENV === "production"
+          : process.env.COOKIE_SECURE === "true",
+      sameSite:
+        process.env.COOKIE_SAME_SITE ||
+        (process.env.NODE_ENV === "production" ? "none" : "lax"),
       maxAge: 365 * 24 * 60 * 60 * 1000,
       path: "/",
     });
