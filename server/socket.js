@@ -2133,112 +2133,187 @@ export const initializeSocket = (httpServer) => {
 
     socket.on("community:send-message", async (data) => {
       try {
-        const { channelId, message } = data;
-        const channel = await Channel.findById(channelId);
-        if (!channel) return;
-        const community = await Community.findById(channel.community);
-        if (!community) return;
-        const isMember = community.members.some((m) => m.user.toString() === socket.userId?.toString());
-        if (!isMember) {
-          console.warn(`🛡️ Blocked unauthorized community:send-message: User ${socket.userId} to channel ${channelId}`);
-          return;
-        }
+        const { channelId, message } = data || {};
+        if (!socket.userId || !channelId || !message?._id ||
+            !socket.rooms.has(`channel_${channelId}`)) return;
+        const membership = await getCommunityChannelMembership(channelId, socket.userId);
+        if (!membership) return;
 
-        // Broadcast to other users in this channel room
+        const persistedMessage = await ChannelMessage.findOne({
+          _id: message._id,
+          channel: channelId,
+          sender: socket.userId,
+        })
+          .populate("sender", "name userName profileImage")
+          .populate({ path: "replyTo", populate: { path: "sender", select: "name userName profileImage" } })
+          .lean();
+        if (!persistedMessage) return;
+
         socket.to(`channel_${channelId}`).emit("community:message-received", {
           channelId,
-          message,
+          message: persistedMessage,
         });
       } catch (err) {
         console.error("community:send-message error:", err);
       }
     });
 
-    socket.on("community:typing", (data) => {
-      const { channelId, userName } = data;
+    socket.on("community:typing", async (data) => {
+      const { channelId } = data || {};
+      if (!channelId || !socket.userId || !socket.rooms.has(`channel_${channelId}`)) return;
+      if (!(await getCommunityChannelMembership(channelId, socket.userId))) return;
       socket.to(`channel_${channelId}`).emit("community:user-typing", {
         channelId,
         userId: socket.userId,
-        userName,
+        userName: socket.userName || "Member",
       });
     });
 
-    socket.on("community:stop-typing", (data) => {
-      const { channelId } = data;
+    socket.on("community:stop-typing", async (data) => {
+      const { channelId } = data || {};
+      if (!channelId || !socket.userId || !socket.rooms.has(`channel_${channelId}`)) return;
+      if (!(await getCommunityChannelMembership(channelId, socket.userId))) return;
       socket.to(`channel_${channelId}`).emit("community:user-stop-typing", {
         channelId,
         userId: socket.userId,
       });
     });
 
-    socket.on("community:message-reaction", (data) => {
-      const { channelId, message } = data;
-      socket.to(`channel_${channelId}`).emit("community:reaction-updated", {
-        channelId,
-        message,
+    socket.on("community:message-reaction", async (data) => {
+      try {
+        const { channelId, message } = data || {};
+        if (!channelId || !socket.userId || !message?._id ||
+            !socket.rooms.has(`channel_${channelId}`)) return;
+        if (!(await getCommunityChannelMembership(channelId, socket.userId))) return;
+        const persistedMessage = await ChannelMessage.findOne({ _id: message._id, channel: channelId })
+          .populate("sender", "name userName profileImage")
+          .populate("reactions.user", "name userName profileImage")
+          .lean();
+        if (!persistedMessage) return;
+        socket.to(`channel_${channelId}`).emit("community:reaction-updated", {
+          channelId, message: persistedMessage,
+        });
+      } catch (err) {
+        console.error("community:message-reaction error:", err);
+      }
+    });
+
+    // Deletion broadcasts are emitted by the authorized REST controller after deletion succeeds.
+    // Ignore client-originated deletion events because the row no longer exists to verify here.
+    socket.on("community:message-deleted", () => {
+      socket.emit("community:event-rejected", {
+        code: "SERVER_OWNED_EVENT",
+        message: "Message deletion events are emitted by the server after permission checks.",
       });
     });
 
-    socket.on("community:message-deleted", (data) => {
-      const { channelId, messageId } = data;
-      socket.to(`channel_${channelId}`).emit("community:message-deleted", {
-        channelId,
-        messageId,
-      });
+    socket.on("community:message-edited", async (data) => {
+      try {
+        const { channelId, message } = data || {};
+        if (!channelId || !socket.userId || !message?._id ||
+            !socket.rooms.has(`channel_${channelId}`)) return;
+        const membership = await getCommunityChannelMembership(channelId, socket.userId);
+        if (!membership) return;
+        const persistedMessage = await ChannelMessage.findOne({ _id: message._id, channel: channelId })
+          .populate("sender", "name userName profileImage")
+          .populate("reactions.user", "name userName profileImage")
+          .lean();
+        if (!persistedMessage) return;
+        const senderId = String(persistedMessage.sender?._id || persistedMessage.sender);
+        const isManager = String(membership.community.owner) === String(socket.userId) ||
+          (membership.member?.roles || []).some((role) => ["owner", "admin", "moderator"].includes(role));
+        if (senderId !== String(socket.userId) && !isManager) return;
+        socket.to(`channel_${channelId}`).emit("community:message-edited", {
+          channelId, message: persistedMessage,
+        });
+      } catch (err) {
+        console.error("community:message-edited error:", err);
+      }
     });
 
-    socket.on("community:message-edited", (data) => {
-      const { channelId, message } = data;
-      socket.to(`channel_${channelId}`).emit("community:message-edited", {
-        channelId,
-        message,
-      });
+    socket.on("community:message-pinned", async (data) => {
+      try {
+        const { channelId, message } = data || {};
+        if (!channelId || !socket.userId || !message?._id ||
+            !socket.rooms.has(`channel_${channelId}`)) return;
+        const membership = await getCommunityChannelMembership(channelId, socket.userId);
+        if (!membership) return;
+        const isManager = String(membership.community.owner) === String(socket.userId) ||
+          (membership.member?.roles || []).some((role) => ["owner", "admin", "moderator"].includes(role));
+        if (!isManager) return;
+        const persistedMessage = await ChannelMessage.findOne({ _id: message._id, channel: channelId })
+          .populate("sender", "name userName profileImage")
+          .lean();
+        if (!persistedMessage) return;
+        socket.to(`channel_${channelId}`).emit("community:message-pinned", {
+          channelId,
+          message: persistedMessage,
+          isPinned: Boolean(persistedMessage.isPinned),
+        });
+      } catch (err) {
+        console.error("community:message-pinned error:", err);
+      }
     });
 
-    socket.on("community:message-pinned", (data) => {
-      const { channelId, message, isPinned } = data;
-      socket.to(`channel_${channelId}`).emit("community:message-pinned", {
-        channelId,
-        message,
-        isPinned,
-      });
-    });
-
-    socket.on("community:voice-presence-join", (data) => {
-      const { communityId, channelId, user } = data;
+    socket.on("community:voice-presence-join", async (data) => {
+      const { communityId, channelId } = data || {};
+      if (!communityId || !channelId || !socket.userId ||
+          !socket.rooms.has(`channel_${channelId}`)) return;
+      const membership = await getCommunityChannelMembership(channelId, socket.userId);
+      if (!membership || String(membership.community._id) !== String(communityId)) return;
       io.to(`community_${communityId}`).emit("community:voice-presence-updated", {
         communityId,
         channelId,
-        user,
+        user: {
+          _id: socket.userId,
+          userName: socket.userName || "Member",
+          name: socket.name || "",
+          profilePicture: socket.profilePicture || null,
+        },
         action: "join",
       });
     });
 
-    socket.on("community:voice-presence-leave", (data) => {
-      const { communityId, channelId, userId } = data;
+    socket.on("community:voice-presence-leave", async (data) => {
+      const { communityId, channelId } = data || {};
+      if (!communityId || !channelId || !socket.userId ||
+          !socket.rooms.has(`channel_${channelId}`)) return;
+      const membership = await getCommunityChannelMembership(channelId, socket.userId);
+      if (!membership || String(membership.community._id) !== String(communityId)) return;
       io.to(`community_${communityId}`).emit("community:voice-presence-updated", {
-        communityId,
-        channelId,
-        userId,
-        action: "leave",
+        communityId, channelId, userId: socket.userId, action: "leave",
       });
     });
-
 
     // =====================================================
     // REEL REALTIME EVENTS
     // =====================================================
-    socket.on("reel-like-toggle", (data) => {
-      const { reelId, userId, isLiked, likesCount } = data;
-      io.emit("reel-like-updated", { reelId, userId, isLiked, likesCount });
+    socket.on("reel-like-toggle", async (data) => {
+      try {
+        const { reelId } = data || {};
+        if (!reelId || !socket.userId) return;
+        const reel = await Reel.findById(reelId).select("likes");
+        if (!reel) return;
+        // Use the persisted post-API state and handshake identity; never echo client-supplied counts or user IDs.
+        const likes = reel.likes || [];
+        io.emit("reel-like-updated", {
+          reelId,
+          userId: socket.userId,
+          isLiked: likes.some((id) => String(id) === String(socket.userId)),
+          likesCount: likes.length,
+        });
+      } catch (err) {
+        console.error("reel-like-toggle error:", err);
+      }
     });
 
-    socket.on("reel-comment-send", (data) => {
-      const { reelId, comment } = data;
-      io.emit("reel-comment-updated", { reelId, comment });
+    // Reel comments are persisted through the REST API; never broadcast arbitrary client comment objects.
+    socket.on("reel-comment-send", () => {
+      socket.emit("reel:comment-event-rejected", {
+        code: "SERVER_OWNED_EVENT",
+        message: "Reel comments must be submitted through the authenticated API.",
+      });
     });
-
-
 
     // =====================================================
     // ROOM MANAGEMENT & DISCONNECT
