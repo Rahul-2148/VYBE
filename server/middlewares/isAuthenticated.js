@@ -118,7 +118,12 @@ const isAuthenticated = async (req, res, next) => {
     // Verify Session validity if sessionId exists in token
     if (decoded.sessionId) {
       const activeSession = await Session.findById(decoded.sessionId);
-      if (!activeSession || activeSession.isRevoked || String(activeSession.user) !== String(decoded.userId)) {
+      if (
+        !activeSession ||
+        activeSession.isRevoked ||
+        String(activeSession.user) !== String(decoded.userId) ||
+        (activeSession.expiresAt && new Date(activeSession.expiresAt).getTime() <= Date.now())
+      ) {
         return res.status(401).json({
           success: false,
           error: true,
