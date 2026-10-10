@@ -21,8 +21,13 @@ const getOrCreateDeviceGroupId = (req, res) => {
     deviceGroupId = crypto.randomBytes(16).toString("hex");
     res.cookie("deviceGroupId", deviceGroupId, {
       httpOnly: true,
-      secure: process.env.COOKIE_SECURE === "true" || false,
-      sameSite: process.env.COOKIE_SAME_SITE || "lax",
+      secure:
+        process.env.COOKIE_SECURE === undefined
+          ? process.env.NODE_ENV === "production"
+          : process.env.COOKIE_SECURE === "true",
+      sameSite:
+        process.env.COOKIE_SAME_SITE ||
+        (process.env.NODE_ENV === "production" ? "none" : "lax"),
       maxAge: 365 * 24 * 60 * 60 * 1000,
       path: "/",
     });
@@ -145,13 +150,23 @@ export const googleAuth = async (req, res) => {
 // STEP 2: Complete Signup with chosen username
 export const googleAuthComplete = async (req, res) => {
   try {
-    const { name, email, picture, userName } = req.body;
+    const { name, email, picture, userName } = req.body || {};
+    if (typeof name !== "string" || !name.trim() || typeof email !== "string" || !email.trim()) {
+      return res.status(400).json({ message: "Google account name and email are required" });
+    }
 
-    if (!userName)
+    if (typeof userName !== "string" || !userName.trim())
       return res.status(400).json({ message: "Username required" });
 
     const cleanUserName = userName.trim().toLowerCase();
-    const existing = await User.findOne({ userName: { $regex: new RegExp("^" + cleanUserName + "$", "i") } });
+    if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(cleanUserName)) {
+      return res.status(400).json({
+        message: "Username must be 3-30 characters and contain only letters, numbers, dots, hyphens, or underscores",
+      });
+    }
+    const existing = await User.findOne({
+      userName: { $regex: new RegExp("^" + cleanUserName + "$", "i") },
+    });
     if (existing)
       return res.status(400).json({ message: "Username already exists" });
 
