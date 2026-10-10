@@ -1083,7 +1083,7 @@ export const sendOtp = async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ success: false, error: true, message: "User not found" });
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+    const otp = crypto.randomInt(100000, 1000000).toString(); // 6-digit OTP
     const otpExpiresAt = Date.now() + 15 * 60 * 1000; // 15 mins
     const token = crypto.randomBytes(32).toString("hex");
 
