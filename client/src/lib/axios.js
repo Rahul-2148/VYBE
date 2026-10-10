@@ -1,20 +1,27 @@
 import axios from "axios";
 
 const getApiBaseUrl = () => {
-  const envUrl = import.meta.env.VITE_SERVER_URL;
+  const envUrl = (import.meta.env.VITE_SERVER_URL || "").trim().replace(/\\/+$/, "");
+
+  // LAN development can target the API on the same machine running the Vite dev server.
   if (
+    import.meta.env.DEV &&
     typeof window !== "undefined" &&
-    window.location.hostname &&
-    window.location.hostname !== "localhost" &&
-    window.location.hostname !== "127.0.0.1"
+    /^\\d+\\.\\d+\\.\\d+\\.\\d+$/.test(window.location.hostname)
   ) {
-    if (/^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname)) {
-      return `http://${window.location.hostname}:8000/api/v1`;
-    }
+    return `http://${window.location.hostname}:8000/api/v1`;
   }
+
   if (envUrl) {
     return `${envUrl}/api/v1`;
   }
+
+  if (import.meta.env.PROD) {
+    throw new Error(
+      "VYBE configuration error: set VITE_SERVER_URL to the backend origin before building the production client."
+    );
+  }
+
   return "http://localhost:8000/api/v1";
 };
 
