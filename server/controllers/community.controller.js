@@ -165,17 +165,15 @@ export const getExploreCommunities = async (req, res) => {
     }
 
     if (typeof search === "string" && search.trim()) {
-      const safeSearch = search.trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, "\\    const { category, search, sort = "popular", page = 1, limit = 20 } = req.query;
-    const query = { isPrivate: false };
-
-    if (category && category !== "All") {
-      query.category = category;
-    }
-
-    if (search && search.trim()) {
-      const regex = new RegExp(search.trim(), "i");
-      query.$or = [{ name: regex }, { description: regex }, { tags: regex }];
-    }");
+      const regexSpecials = ".*+?^${}()|[]";
+      const escapeChar = String.fromCharCode(92);
+      const safeSearch = Array.from(search.trim().slice(0, 100))
+        .map((character) =>
+          character === escapeChar || regexSpecials.includes(character)
+            ? escapeChar + character
+            : character
+        )
+        .join("");
       const regex = new RegExp(safeSearch, "i");
       query.$or = [{ name: regex }, { description: regex }, { tags: regex }];
     }
