@@ -99,16 +99,34 @@ export const signUp = async (req, res) => {
   try {
     const { name, email, password, userName } = req.body || {};
 
-    if (!name || !email || !password || !userName) {
+    if (
+      typeof name !== "string" ||
+      typeof email !== "string" ||
+      typeof password !== "string" ||
+      typeof userName !== "string" ||
+      !name.trim() ||
+      !email.trim() ||
+      !password ||
+      !userName.trim()
+    ) {
       return res.status(400).json({
         success: false,
         error: true,
-        message: "Name, email, password, and username are required",
+        message: "Name, email, password, and username are required as valid strings",
       });
     }
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanUserName = userName.trim().toLowerCase();
+
+    // Validate before interpolating the username into a case-insensitive regex query.
+    if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(cleanUserName)) {
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Username must be 3-30 characters and contain only letters, numbers, dots, hyphens, or underscores",
+      });
+    }
 
     if (!isValidEmailAddress(cleanEmail)) {
       return res.status(400).json({
