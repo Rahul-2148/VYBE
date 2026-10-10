@@ -18,6 +18,7 @@ import { LiveStream } from "./models/liveStream.model.js";
 import { ChannelMessage } from "./models/channelMessage.model.js";
 import { Reel } from "./models/reel.model.js";
 import { recordCallLogMessage } from "./controllers/call.controller.js";
+import { canAccessChannel } from "./utils/communityPermissionHelper.js";
 
 const parseRawCookie = (cookieStr) => {
   if (!cookieStr) return {};
@@ -166,12 +167,13 @@ const isConversationParticipant = async (conversationId, userId) => {
 const getCommunityChannelMembership = async (channelId, userId) => {
   try {
     if (!channelId || !userId) return null;
-    const channel = await Channel.findById(channelId).select("community type");
+    const channel = await Channel.findById(channelId).select("community type isPrivate allowedRoles");
     if (!channel) return null;
     const community = await Community.findById(channel.community).select("owner members roles");
     if (!community) return null;
     const member = community.members.find((item) => String(item.user) === String(userId));
     if (!member) return null;
+    if (!canAccessChannel(community, channel, userId)) return null;
     return { channel, community, member };
   } catch (err) {
     console.error("[socket auth helper] community membership check failed:", err.message);
@@ -1345,6 +1347,12 @@ export const initializeSocket = (httpServer) => {
             socket.emit("call:error", { message: "You are not a member of this community" });
             return;
           }
+
+          if (!canAccessChannel(community, channel, socket.userId)) {
+            console.error(`🛡️ Access Denied: User ${socket.userId} lacks role to join private channel room ${channelId}`);
+            socket.emit("call:error", { message: "You do not have permission to access this channel" });
+            return;
+          }
         } catch (err) {
           socket.emit("call:error", { message: "Permission check failed: " + err.message });
           return;
@@ -2201,7 +2209,8 @@ export const initializeSocket = (httpServer) => {
     // =====================================================
     socket.on("community:join-channel", async (data) => {
       try {
-        const { channelId } = data;
+        const { channelId } = data || {};
+        if (!channelId || !socket.userId) return;
         const channel = await Channel.findById(channelId);
         if (!channel) return;
         const community = await Community.findById(channel.community);
@@ -2209,6 +2218,10 @@ export const initializeSocket = (httpServer) => {
         const isMember = community.members.some((m) => m.user.toString() === socket.userId?.toString());
         if (!isMember) {
           console.warn(`🛡️ Blocked unauthorized community:join-channel: User ${socket.userId} to channel ${channelId}`);
+          return;
+        }
+        if (!canAccessChannel(community, channel, socket.userId)) {
+          console.warn(`🛡️ Blocked private community:join-channel: User ${socket.userId} to channel ${channelId}`);
           return;
         }
 

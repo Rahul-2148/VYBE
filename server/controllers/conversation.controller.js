@@ -347,15 +347,20 @@ export const removeCoAdmin = async (req, res) => {
   }
 };
 
-/* ================= INVITE LINK ================= */
+/* ================= INVITE LINK & QR CODE ================= */
 export const createInviteLink = async (req, res) => {
   try {
     const { conversationId } = req.params;
     const userId = req.userId;
 
     const conversation = await Conversation.findById(conversationId);
-    if (!isAdmin(conversation, userId))
-      return res.status(403).json({ message: "Admin only" });
+    if (!conversation || !conversation.isGroup) {
+      return res.status(404).json({ success: false, message: "Group conversation not found" });
+    }
+
+    if (!isAdmin(conversation, userId)) {
+      return res.status(403).json({ success: false, message: "Admin only" });
+    }
 
     const token = crypto.randomBytes(20).toString("hex");
 
@@ -366,12 +371,51 @@ export const createInviteLink = async (req, res) => {
 
     await conversation.save();
 
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+
     res.json({
       success: true,
-      link: `${process.env.FRONTEND_URL}/invite/${token}`,
+      token,
+      expiresAt: conversation.invite.expiresAt,
+      link: `${frontendUrl}/join-group/${token}`,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const getGroupInviteInfo = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const conversation = await Conversation.findOne({
+      "invite.token": token,
+      "invite.expiresAt": { $gt: Date.now() },
+    })
+      .select("groupName groupImage participants description")
+      .populate("participants", "userName profileImage name");
+
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: "Invalid or expired group invite" });
+    }
+
+    const isMember = conversation.participants.some(
+      (p) => (p._id || p).toString() === req.userId.toString()
+    );
+
+    res.json({
+      success: true,
+      group: {
+        id: conversation._id,
+        groupName: conversation.groupName,
+        groupImage: conversation.groupImage,
+        description: conversation.description,
+        memberCount: conversation.participants.length,
+        members: conversation.participants.slice(0, 5),
+        isMember,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -385,17 +429,30 @@ export const joinViaInvite = async (req, res) => {
       "invite.expiresAt": { $gt: Date.now() },
     });
 
-    if (!conversation) return res.status(400).json({ message: "Invalid invite" });
+    if (!conversation) return res.status(400).json({ success: false, message: "Invalid or expired invite" });
 
-    if (!conversation.participants.some((p) => p.toString() === userId)) {
+    const isAlreadyMember = conversation.participants.some((p) => p.toString() === userId.toString());
+    if (!isAlreadyMember) {
       conversation.participants.push(userId);
-      conversation.unreadCount.set(userId, 0);
+      if (typeof conversation.unreadCount?.set === "function") {
+        conversation.unreadCount.set(userId.toString(), 0);
+      }
       await conversation.save();
+
+      // System announcement
+      await Message.create({
+        conversation: conversation._id,
+        sender: userId,
+        type: "system",
+        content: { text: "joined via invite link" },
+        systemEvent: "member_added",
+        systemEventData: { targetUser: userId },
+      });
     }
 
     res.json({ success: true, conversationId: conversation._id });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 

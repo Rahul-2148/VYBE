@@ -8,12 +8,14 @@ import cron from "node-cron";
 import { cleanupExpiredMessages } from "./utils/cronJob/cleanupDisappearingMessages.js";
 import { cleanupExpiredStories } from "./utils/cronJob/storyCleanup.js";
 import { cleanupExpiredPremiumPayments } from "./utils/cronJob/premiumPaymentCleanup.js";
+import { runScheduledMessagesDispatcher } from "./utils/cronJob/dispatchScheduledJob.js";
 import { errorMiddleware } from "./utils/errorHandler.js";
 
 // Cron jobs
 cron.schedule("*/1 * * * *", cleanupExpiredMessages); // every 1 min
 cron.schedule("*/30 * * * * *", cleanupExpiredStories); // every 30 sec
 cron.schedule("*/5 * * * *", cleanupExpiredPremiumPayments); // every 5 min
+cron.schedule("*/30 * * * * *", runScheduledMessagesDispatcher); // dispatch scheduled DMs every 30 sec
 
 // Import routes
 import authRouter from "./routes/auth.route.js";

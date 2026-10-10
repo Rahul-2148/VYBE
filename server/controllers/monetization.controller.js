@@ -121,7 +121,7 @@ const fetchRazorpayResource = async (resourcePath) => {
 };
 
 const verifyGatewayPaymentState = async ({ orderId, paymentId, expectedAmount, expectedCurrency }) => {
-  const payment = await fetchRazorpayResource(`payments/${paymentId}`);
+  let payment = await fetchRazorpayResource(`payments/${paymentId}`);
 
   if (payment?.order_id !== orderId) {
     throw new Error("Payment order mismatch");
@@ -135,8 +135,32 @@ const verifyGatewayPaymentState = async ({ orderId, paymentId, expectedAmount, e
     throw new Error("Payment currency mismatch");
   }
 
-  if (!["authorized", "captured"].includes(payment?.status)) {
-    throw new Error("Payment is not captured yet");
+  // If status is authorized, explicitly attempt gateway capture
+  if (payment?.status === "authorized") {
+    const keyId = process.env.RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+    try {
+      const captureRes = await fetch(`https://api.razorpay.com/v1/payments/${paymentId}/capture`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString("base64")}`,
+        },
+        body: JSON.stringify({
+          amount: expectedAmount,
+          currency: expectedCurrency || "INR",
+        }),
+      });
+      if (captureRes.ok) {
+        payment = await captureRes.json();
+      }
+    } catch (captureErr) {
+      console.warn("Gateway capture attempt failed:", captureErr.message);
+    }
+  }
+
+  if (payment?.status !== "captured") {
+    throw new Error(`Payment is in unconfirmed state: ${payment?.status || "unknown"}. Only captured payments grant entitlements.`);
   }
 
   return payment;
@@ -200,6 +224,9 @@ export const createPremiumOrder = async (req, res) => {
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
     if (!keyId || !keySecret) {
+      if (process.env.NODE_ENV === "production") {
+        return res.status(503).json({ success: false, message: "Payment gateway is not configured for production transactions" });
+      }
       usingMock = true;
     } else {
       try {
@@ -214,7 +241,10 @@ export const createPremiumOrder = async (req, res) => {
           },
         });
       } catch (err) {
-        console.warn("Razorpay order creation failed, falling back to mock mode:", err.message);
+        if (process.env.NODE_ENV === "production") {
+          return res.status(502).json({ success: false, message: `Payment gateway error: ${err.message}` });
+        }
+        console.warn("Razorpay order creation failed, falling back to mock mode in dev:", err.message);
         usingMock = true;
       }
     }
@@ -276,15 +306,25 @@ export const verifyPremiumPayment = async (req, res) => {
       return res.status(400).json({ success: false, message: "Incomplete payment payload" });
     }
 
-    const isMock = razorpay_order_id.startsWith("mock_order_");
+    const isMock = typeof razorpay_order_id === "string" && razorpay_order_id.startsWith("mock_order_");
+    if (isMock && process.env.NODE_ENV === "production") {
+      return res.status(400).json({ success: false, message: "Mock payments are strictly prohibited in production" });
+    }
 
     if (!isMock) {
+      if (typeof razorpay_signature !== "string" || !/^[a-fA-F0-9]{64}$/.test(razorpay_signature)) {
+        return res.status(400).json({ success: false, message: "Malformed payment signature format" });
+      }
+
       const expectedSignature = crypto
         .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET || "")
         .update(`${razorpay_order_id}|${razorpay_payment_id}`)
         .digest("hex");
 
-      if (expectedSignature !== razorpay_signature) {
+      const expectedBuf = Buffer.from(expectedSignature, "utf8");
+      const actualBuf = Buffer.from(razorpay_signature, "utf8");
+
+      if (expectedBuf.length !== actualBuf.length || !crypto.timingSafeEqual(expectedBuf, actualBuf)) {
         return res.status(400).json({ success: false, message: "Payment verification failed" });
       }
     }
@@ -294,9 +334,30 @@ export const verifyPremiumPayment = async (req, res) => {
       return res.status(404).json({ success: false, message: "Payment record not found" });
     }
 
-    const plan = getPremiumPlan(planId || purchase.planId);
+    if (purchase.status === "paid") {
+      return res.status(200).json({
+        success: true,
+        message: "Payment already verified",
+        purchase,
+        plan: getPremiumPlan(purchase.planId),
+      });
+    }
+
+    if (purchase.pendingUntil && new Date(purchase.pendingUntil).getTime() < Date.now()) {
+      purchase.status = "failed";
+      purchase.failureReason = "Payment order expired";
+      await purchase.save();
+      return res.status(400).json({ success: false, message: "Payment order has expired" });
+    }
+
+    // Authoritative plan check derived from purchase record to prevent tier spoofing
+    const plan = getPremiumPlan(purchase.planId);
     if (!plan) {
       return res.status(400).json({ success: false, message: "Invalid premium plan" });
+    }
+
+    if (planId && planId !== purchase.planId) {
+      return res.status(400).json({ success: false, message: "Payment plan mismatch with order record" });
     }
 
     if (!isMock) {
@@ -315,6 +376,11 @@ export const verifyPremiumPayment = async (req, res) => {
 
       if (!freshPurchase) {
         throw new Error("Payment record not found during verification");
+      }
+
+      if (freshPurchase.status === "paid") {
+        const user = session ? await User.findById(req.userId).session(session) : await User.findById(req.userId);
+        return { purchase: freshPurchase, user };
       }
 
       freshPurchase.status = "paid";
@@ -474,25 +540,54 @@ export const sendCreatorGift = async (req, res) => {
 // Withdraw Creator Earnings Payout
 export const withdrawEarnings = async (req, res) => {
   try {
+    const { amount } = req.body || {};
     let monetization = await Monetization.findOne({ creator: req.userId });
     if (!monetization || monetization.totalEarnings <= 0) {
       return res.status(400).json({ success: false, message: "No earnings available for payout" });
     }
 
-    const withdrawAmount = monetization.totalEarnings;
-    monetization.totalEarnings = 0;
-    monetization.payoutHistory.unshift({
-      amount: withdrawAmount,
-      date: new Date(),
-      status: "paid",
-    });
+    const withdrawAmount = amount ? Number(amount) : monetization.totalEarnings;
+    if (isNaN(withdrawAmount) || withdrawAmount <= 0) {
+      return res.status(400).json({ success: false, message: "Invalid withdrawal amount" });
+    }
 
-    await monetization.save();
+    if (withdrawAmount < 100) {
+      return res.status(400).json({ success: false, message: "Minimum payout withdrawal is ₹100" });
+    }
+
+    if (monetization.totalEarnings < withdrawAmount) {
+      return res.status(400).json({ success: false, message: "Insufficient earnings balance" });
+    }
+
+    // Atomic conditional decrement to eliminate race conditions
+    const updated = await Monetization.findOneAndUpdate(
+      { creator: req.userId, totalEarnings: { $gte: withdrawAmount } },
+      {
+        $inc: { totalEarnings: -withdrawAmount },
+        $push: {
+          payoutHistory: {
+            $each: [
+              {
+                amount: withdrawAmount,
+                date: new Date(),
+                status: "pending_review",
+              },
+            ],
+            $position: 0,
+          },
+        },
+      },
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(409).json({ success: false, message: "Concurrent withdrawal in progress. Please retry." });
+    }
 
     return res.status(200).json({
       success: true,
-      message: `Successfully processed payout of ₹${withdrawAmount.toFixed(2)}`,
-      monetization,
+      message: `Successfully requested payout of ₹${withdrawAmount.toFixed(2)}. Status: Pending Review.`,
+      monetization: updated,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: `withdrawEarnings error: ${error.message}` });
@@ -502,6 +597,10 @@ export const withdrawEarnings = async (req, res) => {
 // Simulate Sandbox Earning for testing
 export const simulateEarning = async (req, res) => {
   try {
+    if (process.env.NODE_ENV === "production") {
+      return res.status(403).json({ success: false, message: "Earning simulation is strictly prohibited in production environments" });
+    }
+
     const { type, amount } = req.body; // type is 'gift' or 'subscriber'
     const earningAmount = Number(amount) || 100;
 

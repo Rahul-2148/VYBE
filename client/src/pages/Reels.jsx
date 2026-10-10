@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { MdOutlineKeyboardBackspace } from "react-icons/md";
-import { ChevronUp, ChevronDown, Sparkles } from "lucide-react";
+import { ChevronUp, ChevronDown, Sparkles, Users } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { useNavigate, useLocation, useSearchParams, useParams } from "react-router-dom";
 import ReelCard from "../components/ReelCard";
@@ -21,18 +21,37 @@ export const Reels = () => {
   const dispatch = useDispatch();
 
   const targetReelId = reelId || searchParams.get("reelId") || location.state?.initialReelId;
-  const reelMode = "for-you";
-  
+  const [reelMode, setReelMode] = useState("for-you");
+  const [friendsReels, setFriendsReels] = useState([]);
+  const [loadingFriends, setLoadingFriends] = useState(false);
+
   // RTK Query with instant cache & stale-while-revalidate
   const { data: reelsResponse, isLoading: loadingReels, isFetching: isReelsFetching, refetch: refetchReels } = useGetAllReelsQuery(reelMode, {
     refetchOnMountOrArgChange: true,
   });
 
   const reelState = useSelector((state) => state.reel);
-  const reelData = useMemo(
-    () => (reelsResponse?.reels !== undefined ? reelsResponse.reels : reelState?.reelData || []),
-    [reelsResponse, reelState?.reelData]
-  );
+  const activeReels = useMemo(() => {
+    if (reelMode === "friends") return friendsReels;
+    return reelsResponse?.reels !== undefined ? reelsResponse.reels : reelState?.reelData || [];
+  }, [reelMode, friendsReels, reelsResponse, reelState?.reelData]);
+
+  const reelData = activeReels;
+
+  useEffect(() => {
+    if (reelMode === "friends") {
+      setLoadingFriends(true);
+      api
+        .get("/reel/friends-activity")
+        .then((res) => {
+          if (res.data?.success) {
+            setFriendsReels(res.data.reels || []);
+          }
+        })
+        .catch(() => setFriendsReels([]))
+        .finally(() => setLoadingFriends(false));
+    }
+  }, [reelMode]);
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [autoScroll, setAutoScroll] = useState(() => {
@@ -208,6 +227,37 @@ export const Reels = () => {
                 <MdOutlineKeyboardBackspace className="w-6 h-6" />
               </button>
             </div>
+          </div>
+
+          {/* Instagram Parity: Top Tabs (For You vs Friends) */}
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-1 bg-black/50 backdrop-blur-xl p-1 rounded-full border border-white/15 shadow-2xl pointer-events-auto">
+            <button
+              onClick={() => {
+                setReelMode("for-you");
+                setCurrentIndex(0);
+              }}
+              className={`px-3.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                reelMode === "for-you"
+                  ? "bg-white text-black shadow-md scale-100"
+                  : "text-white/70 hover:text-white hover:bg-white/10"
+              }`}
+            >
+              For You
+            </button>
+            <button
+              onClick={() => {
+                setReelMode("friends");
+                setCurrentIndex(0);
+              }}
+              className={`px-3.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                reelMode === "friends"
+                  ? "bg-white text-black shadow-md scale-100"
+                  : "text-white/70 hover:text-white hover:bg-white/10"
+              }`}
+            >
+              <Users className="w-3 h-3" />
+              <span>Friends</span>
+            </button>
           </div>
 
           {/* DESKTOP FLOATING UP/DOWN NAVIGATION CONTROLS */}

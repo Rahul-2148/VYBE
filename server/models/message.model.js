@@ -111,9 +111,30 @@ const messageSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["sending", "sent", "delivered", "seen", "failed"],
+      enum: ["sending", "sent", "delivered", "seen", "failed", "scheduled"],
       default: "sent",
     },
+
+    scheduledFor: {
+      type: Date,
+      index: true,
+    },
+
+    dispatchedAt: {
+      type: Date,
+    },
+
+    isViewOnce: {
+      type: Boolean,
+      default: false,
+    },
+
+    viewOnceOpenedBy: [
+      {
+        user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        openedAt: { type: Date, default: Date.now },
+      },
+    ],
 
     seenBy: [
       {

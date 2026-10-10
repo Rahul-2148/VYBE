@@ -10,6 +10,7 @@ import {
   makeCoAdmin,
   removeCoAdmin,
   createInviteLink,
+  getGroupInviteInfo,
   joinViaInvite,
   getUserConversations,
   getConversationDetails,
@@ -46,8 +47,9 @@ conversationRouter.patch("/description/:conversationId", isAuthenticated, update
 conversationRouter.post("/admin/add/:conversationId/:memberId", isAuthenticated, makeCoAdmin);
 conversationRouter.delete("/admin/remove/:conversationId/:memberId", isAuthenticated, removeCoAdmin);
 
-// Invite Links
+// Invite Links & QR Codes
 conversationRouter.post("/invite/:conversationId", isAuthenticated, createInviteLink);
+conversationRouter.get("/invite-info/:token", isAuthenticated, getGroupInviteInfo);
 conversationRouter.post("/join/:token", isAuthenticated, joinViaInvite);
 
 // User Inbox & Details

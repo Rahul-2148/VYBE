@@ -7,6 +7,7 @@ import {
   Video,
   Trash2,
   X,
+  Lock,
 } from "lucide-react";
 import api from "../lib/axios";
 import { snackbar } from "../lib/snackbar";
@@ -24,6 +25,8 @@ export const ChannelSettingsModal = ({
   const [topic, setTopic] = useState(channel?.topic || channel?.description || "");
   const [category, setCategory] = useState(channel?.category || (channel?.type === "text" ? "TEXT CHANNELS" : "VOICE ROOMS"));
   const [slowmode, setSlowmode] = useState(channel?.slowmode || 0);
+  const [isPrivate, setIsPrivate] = useState(channel?.isPrivate || false);
+  const [allowedRoles, setAllowedRoles] = useState(channel?.allowedRoles || ["admin", "moderator"]);
   const [saving, setSaving] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
@@ -40,6 +43,8 @@ export const ChannelSettingsModal = ({
         topic: topic.trim(),
         category: category.trim(),
         slowmode: Number(slowmode),
+        isPrivate,
+        allowedRoles,
       });
 
       if (res.data?.success) {
@@ -147,6 +152,46 @@ export const ChannelSettingsModal = ({
                 <option value={60}>1 minute</option>
                 <option value={300}>5 minutes</option>
               </select>
+            </div>
+          )}
+
+          {/* Private Channel Option */}
+          <div className="flex items-center justify-between py-1 border-t border-border/60 pt-3">
+            <div>
+              <p className="text-xs font-bold text-text flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-amber-500" /> Private Channel
+              </p>
+              <p className="text-[11px] text-text-muted">Only members with selected roles can view and join</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={isPrivate}
+              onChange={(e) => setIsPrivate(e.target.checked)}
+              className="accent-primary w-4 h-4 cursor-pointer"
+            />
+          </div>
+
+          {isPrivate && (
+            <div className="flex flex-col gap-1.5 bg-surface-inset/60 p-3 rounded-xl border border-border">
+              <label className="text-[10px] font-black text-text-muted uppercase tracking-wider">
+                Allowed Roles
+              </label>
+              <div className="flex items-center gap-3">
+                {["admin", "moderator", "member"].map((r) => (
+                  <label key={r} className="flex items-center gap-1.5 text-xs text-text cursor-pointer capitalize">
+                    <input
+                      type="checkbox"
+                      checked={allowedRoles.includes(r)}
+                      onChange={(e) => {
+                        if (e.target.checked) setAllowedRoles((prev) => [...prev, r]);
+                        else setAllowedRoles((prev) => prev.filter((x) => x !== r));
+                      }}
+                      className="accent-primary w-3.5 h-3.5"
+                    />
+                    {r}
+                  </label>
+                ))}
+              </div>
             </div>
           )}
 

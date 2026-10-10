@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CheckCheck, CornerUpLeft, Edit2, EllipsisVertical, SmilePlus, Trash2, MapPin, ExternalLink, Heart, CornerUpRight, Pin, Clock, Phone, Copy, Plus } from "lucide-react";
+import { AlertTriangle, Check, CheckCheck, CornerUpLeft, Edit2, EllipsisVertical, SmilePlus, Trash2, MapPin, ExternalLink, Heart, CornerUpRight, Pin, Clock, Phone, Copy, Plus, Sparkles } from "lucide-react";
 import moment from "moment";
 import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
@@ -648,65 +648,85 @@ const SenderMessage = ({
         })()}
 
         {/* MEDIA PREVIEW */}
-        {mediaList.map((m, i) => {
-          if (m.type === "audio" || message.type === "voice") {
-            return null; // Rendered by VoiceNotePlayer
-          }
-          if (m.type === "sticker" || message.type === "sticker") {
-            const isAnimatedEmoji = m.url?.includes("Animated-Fluent-Emojis") || m.url?.includes(".webp") || m.category === "animated";
-            return (
-              <img
-                key={i}
-                src={m.url}
-                alt="Animated Expression"
-                className={`${isAnimatedEmoji ? "w-20 h-20 sm:w-24 sm:h-24 max-w-[90px] max-h-[90px]" : activeFont.stickerSizeClass || "w-20 h-20 sm:w-24 sm:h-24"} object-contain drop-shadow-md select-none hover:scale-105 transition-all my-1`}
-                style={{
-                  width: isAnimatedEmoji ? "84px" : activeFont.stickerDimension,
-                  height: isAnimatedEmoji ? "84px" : activeFont.stickerDimension,
-                  maxWidth: isAnimatedEmoji ? "90px" : undefined,
-                  maxHeight: isAnimatedEmoji ? "90px" : undefined,
-                }}
-              />
-            );
-          }
-          if (m.type === "image" || m.type === "gif") {
-            return (
-              <img
-                key={i}
-                src={m.url}
-                onClick={(e) => { e.stopPropagation(); setLightboxData({ open: true, url: m.url, type: "image" }); }}
-                className="rounded-2xl max-h-[280px] w-full object-cover cursor-pointer hover:opacity-95 transition my-1 shadow-sm"
-                alt="Attachment"
-              />
-            );
-          }
-          if (m.type === "video") {
-            return (
-              <video
-                key={i}
-                controls
-                onClick={(e) => { e.stopPropagation(); setLightboxData({ open: true, url: m.url, type: "video" }); }}
-                className="rounded-2xl max-h-[300px] w-full cursor-pointer my-1 shadow-sm"
-              >
-                <source src={m.url} />
-              </video>
-            );
-          }
-          if (m.type === "document") {
-            return (
-              <a
-                key={i}
-                href={m.url}
-                target="_blank"
-                rel="noreferrer"
-                className={`text-sm underline flex items-center gap-1.5 py-1 ${isGradientTheme ? "text-white" : "text-text font-medium"}`}
-              >
-                📄 {m.name || "Document"}
-              </a>
-            );
-          }
-          return null;
-        })}
+        {message.isViewOnce ? (
+          <div className="my-1">
+            {message.viewOnceOpenedBy?.length > 0 ? (
+              <div className="flex items-center gap-2.5 px-3.5 py-2 rounded-2xl bg-white/10 border border-white/20 text-white/70 text-xs font-semibold select-none">
+                <div className="w-4 h-4 rounded-full border-2 border-white/40 flex items-center justify-center">
+                  <div className="w-1.5 h-1.5 rounded-full bg-white/40" />
+                </div>
+                <span>Opened</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-white/15 border border-white/25 text-white text-xs font-bold shadow-md select-none">
+                <div className="w-5 h-5 rounded-full border-2 border-dashed border-white/70 flex items-center justify-center animate-spin-slow">
+                  <Sparkles className="w-2.5 h-2.5 text-pink-300" />
+                </div>
+                <span>Photo (View once)</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          mediaList.map((m, i) => {
+            if (m.type === "audio" || message.type === "voice") {
+              return null; // Rendered by VoiceNotePlayer
+            }
+            if (m.type === "sticker" || message.type === "sticker") {
+              const isAnimatedEmoji = m.url?.includes("Animated-Fluent-Emojis") || m.url?.includes(".webp") || m.category === "animated";
+              return (
+                <img
+                  key={i}
+                  src={m.url}
+                  alt="Animated Expression"
+                  className={`${isAnimatedEmoji ? "w-20 h-20 sm:w-24 sm:h-24 max-w-[90px] max-h-[90px]" : activeFont.stickerSizeClass || "w-20 h-20 sm:w-24 sm:h-24"} object-contain drop-shadow-md select-none hover:scale-105 transition-all my-1`}
+                  style={{
+                    width: isAnimatedEmoji ? "84px" : activeFont.stickerDimension,
+                    height: isAnimatedEmoji ? "84px" : activeFont.stickerDimension,
+                    maxWidth: isAnimatedEmoji ? "90px" : undefined,
+                    maxHeight: isAnimatedEmoji ? "90px" : undefined,
+                  }}
+                />
+              );
+            }
+            if (m.type === "image" || m.type === "gif") {
+              return (
+                <img
+                  key={i}
+                  src={m.url}
+                  onClick={(e) => { e.stopPropagation(); setLightboxData({ open: true, url: m.url, type: "image" }); }}
+                  className="rounded-2xl max-h-[280px] w-full object-cover cursor-pointer hover:opacity-95 transition my-1 shadow-sm"
+                  alt="Attachment"
+                />
+              );
+            }
+            if (m.type === "video") {
+              return (
+                <video
+                  key={i}
+                  controls
+                  onClick={(e) => { e.stopPropagation(); setLightboxData({ open: true, url: m.url, type: "video" }); }}
+                  className="rounded-2xl max-h-[300px] w-full cursor-pointer my-1 shadow-sm"
+                >
+                  <source src={m.url} />
+                </video>
+              );
+            }
+            if (m.type === "document") {
+              return (
+                <a
+                  key={i}
+                  href={m.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`text-sm underline flex items-center gap-1.5 py-1 ${isGradientTheme ? "text-white" : "text-text font-medium"}`}
+                >
+                  📄 {m.name || "Document"}
+                </a>
+              );
+            }
+            return null;
+          })
+        )}
 
         {/* TEXT */}
         {!(isContactRequest || isContactDecline || isContactCard) && (message.type === "text" || message.content?.text) && (

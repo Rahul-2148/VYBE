@@ -24,6 +24,7 @@ import {
   notInterestedReel,
   toggleCommentsReel,
   getReelTranscript,
+  getFriendsReelsActivity,
 } from "../controllers/reel.controller.js";
 import isAuthenticated from "../middlewares/isAuthenticated.js";
 import { upload } from "../middlewares/multer.js";
@@ -39,6 +40,7 @@ reelRouter.post("/remix/:originalReelId", isAuthenticated, upload.single("media"
 reelRouter.post("/reshare/:reelId", isAuthenticated, reshareReel);
 
 reelRouter.get("/get-all-reels", isAuthenticated, getAllReels);
+reelRouter.get("/friends-activity", isAuthenticated, getFriendsReelsActivity);
 
 reelRouter.get("/get-all-Of-logged-in-user", isAuthenticated, getAllReelsOfLoggedInUser);
 reelRouter.delete("/delete/:reelId", isAuthenticated, deleteReel);

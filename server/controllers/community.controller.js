@@ -3,6 +3,11 @@ import { Channel } from "../models/channel.model.js";
 import { ChannelMessage } from "../models/channelMessage.model.js";
 import uploadOnCloudinary from "../config/cloudinary.js";
 import crypto from "crypto";
+import {
+  canAccessChannel,
+  canManageTargetMember,
+  getMemberHighestRole,
+} from "../utils/communityPermissionHelper.js";
 
 // 1. Create Community with categorized default channels and roles
 export const createCommunity = async (req, res) => {
@@ -139,12 +144,15 @@ export const getCommunityDetails = async (req, res) => {
       return res.status(403).json({ success: false, message: "Access denied. Private community" });
     }
 
-    const channels = await Channel.find({ community: communityId }).sort({ position: 1 });
+    const allChannels = await Channel.find({ community: communityId }).sort({ position: 1 });
+    const accessibleChannels = allChannels.filter((ch) =>
+      canAccessChannel(community, ch, req.userId)
+    );
 
     return res.status(200).json({
       success: true,
       community,
-      channels,
+      channels: accessibleChannels,
       isMember,
     });
   } catch (error) {
@@ -232,7 +240,8 @@ export const joinPublicCommunity = async (req, res) => {
       .populate("owner", "name userName profileImage")
       .populate("members.user", "name userName profileImage isOnline");
 
-    const channels = await Channel.find({ community: community._id }).sort({ position: 1 });
+    const rawChannels = await Channel.find({ community: community._id }).sort({ position: 1 });
+    const channels = rawChannels.filter((ch) => canAccessChannel(community, ch, req.userId));
 
     return res.status(200).json({
       success: true,
@@ -275,7 +284,8 @@ export const joinCommunity = async (req, res) => {
       .populate("owner", "name userName profileImage")
       .populate("members.user", "name userName profileImage isOnline");
 
-    const channels = await Channel.find({ community: community._id }).sort({ position: 1 });
+    const rawChannels = await Channel.find({ community: community._id }).sort({ position: 1 });
+    const channels = rawChannels.filter((ch) => canAccessChannel(community, ch, req.userId));
 
     return res.status(200).json({
       success: true,
@@ -470,6 +480,31 @@ export const updateMemberRole = async (req, res) => {
       return res.status(400).json({ success: false, message: "Cannot change owner role" });
     }
 
+    // Role hierarchy enforcement:
+    // Only the server owner can grant or revoke admin roles
+    if (role === "admin" && !isOwner) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the community owner can assign the admin role",
+      });
+    }
+
+    // Only owner can demote or modify an existing admin's roles
+    if (targetMember.roles.includes("admin") && !isOwner) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the community owner can modify an admin's role",
+      });
+    }
+
+    // Admins cannot modify peers or callers above them
+    if (!isOwner && !canManageTargetMember(community, req.userId, targetUserId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Permission denied: Cannot modify role of a member with equal or higher rank",
+      });
+    }
+
     // Replace roles with the selected role (keep base member)
     targetMember.roles = role === "member" ? ["member"] : [role, "member"];
     await community.save();
@@ -508,6 +543,14 @@ export const kickMember = async (req, res) => {
 
     if (community.owner.toString() === targetUserId.toString()) {
       return res.status(400).json({ success: false, message: "Cannot kick community owner" });
+    }
+
+    // Enforce role hierarchy: callers cannot kick members of equal or higher rank
+    if (!isOwner && !canManageTargetMember(community, req.userId, targetUserId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Permission denied: You cannot kick a member with equal or higher role",
+      });
     }
 
     community.members = community.members.filter((m) => m.user.toString() !== targetUserId.toString());
@@ -581,7 +624,7 @@ export const createChannel = async (req, res) => {
 export const updateChannel = async (req, res) => {
   try {
     const { communityId, channelId } = req.params;
-    const { name, topic, category, slowmode } = req.body;
+    const { name, topic, category, slowmode, isPrivate, allowedRoles } = req.body;
 
     const channel = await Channel.findOne({ _id: channelId, community: communityId });
     if (!channel) {
@@ -601,6 +644,8 @@ export const updateChannel = async (req, res) => {
     if (topic !== undefined) channel.topic = topic;
     if (category) channel.category = category;
     if (slowmode !== undefined) channel.slowmode = Number(slowmode);
+    if (isPrivate !== undefined) channel.isPrivate = isPrivate === "true" || isPrivate === true;
+    if (allowedRoles !== undefined) channel.allowedRoles = Array.isArray(allowedRoles) ? allowedRoles : [];
 
     await channel.save();
 

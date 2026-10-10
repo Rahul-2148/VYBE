@@ -17,6 +17,9 @@ import {
   reactMessage,
   searchMessages,
   getUnreadMessageCount,
+  getScheduledMessages,
+  cancelScheduledMessage,
+  openViewOnceMedia,
 } from "../controllers/message.controller.js";
 import { getUserConversations } from "../controllers/conversation.controller.js";
 
@@ -42,6 +45,11 @@ messageRouter.get("/:conversationId", isAuthenticated, getMessages);
 messageRouter.post("/seen/:conversationId", isAuthenticated, markConversationSeen);
 messageRouter.post("/message-seen/:messageId", isAuthenticated, markMessageAsSeen);
 messageRouter.post("/react/:messageId", isAuthenticated, reactMessage);
+
+// Scheduled DMs & Ephemeral View-Once
+messageRouter.get("/scheduled/:conversationId", isAuthenticated, getScheduledMessages);
+messageRouter.delete("/scheduled/:messageId", isAuthenticated, cancelScheduledMessage);
+messageRouter.post("/view-once/:messageId/open", isAuthenticated, openViewOnceMedia);
 
 // Editing & Deletions
 messageRouter.patch("/edit/:messageId", isAuthenticated, editMessage);

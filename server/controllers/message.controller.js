@@ -263,6 +263,11 @@ export const sendMessage = async (req, res) => {
       disappearConfig.expireAt = new Date(Date.now() + duration * 1000);
     }
 
+    // Scheduled DM & View Once parameters
+    const isScheduled = req.body.scheduledFor && new Date(req.body.scheduledFor) > new Date(Date.now() + 5000);
+    const scheduledDate = isScheduled ? new Date(req.body.scheduledFor) : null;
+    const isViewOnce = Boolean(req.body.isViewOnce || req.body.viewOnce);
+
     let message;
     try {
       message = await Message.create({
@@ -273,7 +278,9 @@ export const sendMessage = async (req, res) => {
         replyTo,
         isForwarded: Boolean(isForwarded),
         forwardedFrom: forwardedFrom || undefined,
-        status: "sent",
+        status: isScheduled ? "scheduled" : "sent",
+        scheduledFor: scheduledDate || undefined,
+        isViewOnce: isViewOnce,
         disappear: disappearConfig.enabled ? disappearConfig : undefined,
         clientMessageId: clientMessageId || undefined,
       });
@@ -285,6 +292,15 @@ export const sendMessage = async (req, res) => {
         }
       }
       throw createErr;
+    }
+
+    if (isScheduled) {
+      const populatedScheduled = await message.populate("sender", "userName profileImage isVerified");
+      return res.status(201).json({
+        success: true,
+        message: populatedScheduled,
+        scheduled: true,
+      });
     }
 
     // Update lastMessage & unread counts atomically
@@ -1178,6 +1194,172 @@ export const searchMessages = async (req, res) => {
   } catch (error) {
     console.error("searchMessages error:", error);
     return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* ================= SCHEDULED MESSAGES ================= */
+export const getScheduledMessages = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const messages = await Message.find({
+      conversation: conversationId,
+      sender: userId,
+      status: "scheduled",
+    })
+      .populate("sender", "userName profileImage isVerified")
+      .sort({ scheduledFor: 1 });
+
+    return res.status(200).json({ success: true, messages });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+export const cancelScheduledMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const message = await Message.findOneAndDelete({
+      _id: messageId,
+      sender: userId,
+      status: "scheduled",
+    });
+
+    if (!message) {
+      return res.status(404).json({ success: false, message: "Scheduled message not found or already sent" });
+    }
+
+    return res.status(200).json({ success: true, message: "Scheduled message cancelled" });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ================= INSTANTS / VIEW ONCE EPHEMERAL MEDIA ================= */
+export const openViewOnceMedia = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const message = await Message.findById(messageId);
+    if (!message) return res.status(404).json({ success: false, message: "Message not found" });
+
+    if (!message.isViewOnce) {
+      return res.status(400).json({ success: false, message: "Message is not View Once media" });
+    }
+
+    const conversation = await Conversation.findOne({
+      _id: message.conversation,
+      participants: userId,
+    });
+    if (!conversation) {
+      return res.status(403).json({ success: false, message: "Not a participant in this conversation" });
+    }
+
+    const alreadyOpened = message.viewOnceOpenedBy?.some(
+      (v) => v.user?.toString() === userId.toString()
+    );
+
+    if (alreadyOpened) {
+      return res.status(410).json({
+        success: false,
+        message: "This media has already been viewed and expired",
+        expired: true,
+      });
+    }
+
+    message.viewOnceOpenedBy.push({
+      user: userId,
+      openedAt: new Date(),
+    });
+
+    await message.save();
+
+    // Socket real-time broadcast to ALL participants
+    const io = req.app.locals.io;
+    if (io) {
+      conversation.participants.forEach((pId) => {
+        io.to(`user_${pId}`).emit("message:view-once-opened", {
+          conversationId: message.conversation.toString(),
+          messageId: message._id.toString(),
+          openedBy: userId.toString(),
+        });
+      });
+    }
+
+    const mediaList = message.content?.media || [];
+    return res.status(200).json({
+      success: true,
+      messageId: message._id,
+      media: mediaList,
+      viewOnce: true,
+      openedAt: new Date(),
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/* ================= BACKGROUND DISPATCH FOR SCHEDULED MESSAGES ================= */
+export const dispatchScheduledMessages = async (io) => {
+  try {
+    const dueMessages = await Message.find({
+      status: "scheduled",
+      scheduledFor: { $lte: new Date() },
+    }).populate("sender", "userName profileImage isVerified");
+
+    if (!dueMessages || dueMessages.length === 0) return 0;
+
+    for (const msg of dueMessages) {
+      // Atomically claim the message so concurrent workers cannot double-dispatch
+      const claimedMsg = await Message.findOneAndUpdate(
+        { _id: msg._id, status: "scheduled" },
+        { $set: { status: "sent", dispatchedAt: new Date() } },
+        { returnDocument: "after" }
+      ).populate("sender", "userName profileImage isVerified");
+
+      if (!claimedMsg) continue; // Already processed by concurrent worker
+
+      const conv = await Conversation.findById(claimedMsg.conversation);
+      if (!conv) continue;
+
+      const incFields = {};
+      conv.participants.forEach((uid) => {
+        if (uid.toString() !== (claimedMsg.sender?._id || claimedMsg.sender).toString()) {
+          incFields[`unreadCount.${uid.toString()}`] = 1;
+        }
+      });
+
+      const updatedConv = await Conversation.findByIdAndUpdate(
+        msg.conversation,
+        {
+          $set: { lastMessage: msg._id },
+          ...(Object.keys(incFields).length > 0 ? { $inc: incFields } : {}),
+        },
+        { returnDocument: 'after' }
+      );
+
+      if (io && updatedConv) {
+        updatedConv.participants.forEach((participantId) => {
+          io.to(`user_${participantId}`).emit("message-received", {
+            conversationId: msg.conversation.toString(),
+            message: msg,
+            unreadCount: updatedConv.unreadCount?.get(participantId.toString()) || 0,
+          });
+        });
+      }
+    }
+
+    return dueMessages.length;
+  } catch (err) {
+    console.error("dispatchScheduledMessages error:", err.message);
+    return 0;
   }
 };
 

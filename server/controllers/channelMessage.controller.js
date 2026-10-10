@@ -3,6 +3,7 @@ import { Channel } from "../models/channel.model.js";
 import { Community } from "../models/community.model.js";
 import uploadOnCloudinary from "../config/cloudinary.js";
 import { io } from "../socket.js";
+import { canAccessChannel, canManageTargetMember } from "../utils/communityPermissionHelper.js";
 
 // 1. Fetch channel messages history
 export const getChannelMessages = async (req, res) => {
@@ -23,6 +24,10 @@ export const getChannelMessages = async (req, res) => {
     const isMember = community.members.some((m) => m.user.toString() === req.userId.toString());
     if (!isMember && community.isPrivate) {
       return res.status(403).json({ success: false, message: "Access denied. Not a member of this community" });
+    }
+
+    if (!canAccessChannel(community, channel, req.userId)) {
+      return res.status(403).json({ success: false, message: "Access denied. You do not have permission to access this channel" });
     }
 
     const query = { channel: channelId };
@@ -68,6 +73,10 @@ export const sendChannelMessage = async (req, res) => {
     const isMember = community.members.some((m) => m.user.toString() === req.userId.toString());
     if (!isMember) {
       return res.status(403).json({ success: false, message: "Access denied. You are not a member of this community." });
+    }
+
+    if (!canAccessChannel(community, channel, req.userId)) {
+      return res.status(403).json({ success: false, message: "Access denied. You do not have permission to post in this channel" });
     }
 
     const mediaList = [];
@@ -152,14 +161,23 @@ export const toggleMessageReaction = async (req, res) => {
       return res.status(400).json({ success: false, message: "Emoji is required" });
     }
 
+    const channel = await Channel.findById(channelId);
+    if (!channel) {
+      return res.status(404).json({ success: false, message: "Channel not found" });
+    }
+
     const message = await ChannelMessage.findOne({ _id: messageId, channel: channelId });
     if (!message) {
       return res.status(404).json({ success: false, message: "Message not found" });
     }
-    const community = await Community.findById(message.community).select("members isPrivate");
+
+    const community = await Community.findById(message.community).select("owner members isPrivate");
     const isMember = community?.members.some((m) => String(m.user) === String(req.userId));
     if (!community || !isMember) {
       return res.status(403).json({ success: false, message: "Only community members can react to channel messages" });
+    }
+    if (!canAccessChannel(community, channel, req.userId)) {
+      return res.status(403).json({ success: false, message: "Access denied to this channel" });
     }
     if (typeof emoji !== "string" || !emoji.trim() || emoji.length > 32) {
       return res.status(400).json({ success: false, message: "A valid emoji reaction is required" });
@@ -201,6 +219,11 @@ export const deleteChannelMessage = async (req, res) => {
       return res.status(404).json({ success: false, message: "Message not found" });
     }
 
+    const channel = await Channel.findById(channelId);
+    if (!channel) {
+      return res.status(404).json({ success: false, message: "Channel not found" });
+    }
+
     const community = await Community.findById(message.community);
     if (!community) {
       return res.status(404).json({ success: false, message: "Community not found" });
@@ -209,12 +232,24 @@ export const deleteChannelMessage = async (req, res) => {
     if (!member) {
       return res.status(403).json({ success: false, message: "You must be a current community member to delete channel messages" });
     }
+    if (!canAccessChannel(community, channel, req.userId)) {
+      return res.status(403).json({ success: false, message: "Access denied to this channel" });
+    }
+
     const isOwner = String(community.owner) === String(req.userId);
     const isAdmin = member.roles.includes("admin") || member.roles.includes("moderator") || member.roles.includes("owner");
     const isSender = String(message.sender) === String(req.userId);
 
-    if (!isSender && !isOwner && !isAdmin) {
-      return res.status(403).json({ success: false, message: "Permission denied to delete this message" });
+    if (!isSender && !isOwner) {
+      if (!isAdmin) {
+        return res.status(403).json({ success: false, message: "Permission denied to delete this message" });
+      }
+      if (!canManageTargetMember(community, req.userId, message.sender)) {
+        return res.status(403).json({
+          success: false,
+          message: "Permission denied: Cannot delete message of a member with equal or higher rank",
+        });
+      }
     }
 
     await ChannelMessage.findByIdAndDelete(messageId);
@@ -247,7 +282,14 @@ export const togglePinMessage = async (req, res) => {
       return res.status(404).json({ success: false, message: "Message not found" });
     }
 
+    const channel = await Channel.findById(channelId);
+    if (!channel) {
+      return res.status(404).json({ success: false, message: "Channel not found" });
+    }
     const community = await Community.findById(message.community);
+    if (!canAccessChannel(community, channel, req.userId)) {
+      return res.status(403).json({ success: false, message: "Access denied to this channel" });
+    }
     const member = community?.members.find((m) => m.user.toString() === req.userId.toString());
     const isOwner = community?.owner.toString() === req.userId.toString();
     const canPin = isOwner || member?.roles.includes("admin") || member?.roles.includes("moderator");
@@ -277,13 +319,16 @@ export const getPinnedMessages = async (req, res) => {
   try {
     const { channelId } = req.params;
     if (!req.userId) return res.status(401).json({ success: false, message: "Unauthorized" });
-    const channel = await Channel.findById(channelId).select("community");
+    const channel = await Channel.findById(channelId);
     if (!channel) return res.status(404).json({ success: false, message: "Channel not found" });
-    const community = await Community.findById(channel.community).select("members isPrivate");
+    const community = await Community.findById(channel.community).select("owner members isPrivate");
     if (!community) return res.status(404).json({ success: false, message: "Community not found" });
     const isMember = community.members.some((m) => String(m.user) === String(req.userId));
     if (community.isPrivate && !isMember) {
       return res.status(403).json({ success: false, message: "Access denied. Not a member of this private community" });
+    }
+    if (!canAccessChannel(community, channel, req.userId)) {
+      return res.status(403).json({ success: false, message: "Access denied to this channel" });
     }
     const messages = await ChannelMessage.find({ channel: channelId, isPinned: true })
       .populate("sender", "name userName profileImage")
@@ -312,10 +357,17 @@ export const editChannelMessage = async (req, res) => {
     if (!message) {
       return res.status(404).json({ success: false, message: "Message not found" });
     }
-    const community = await Community.findById(message.community).select("members");
+    const channel = await Channel.findById(channelId);
+    if (!channel) {
+      return res.status(404).json({ success: false, message: "Channel not found" });
+    }
+    const community = await Community.findById(message.community).select("owner members");
     const isMember = community?.members.some((m) => String(m.user) === String(req.userId));
     if (!community || !isMember) {
       return res.status(403).json({ success: false, message: "Only current community members can edit channel messages" });
+    }
+    if (!canAccessChannel(community, channel, req.userId)) {
+      return res.status(403).json({ success: false, message: "Access denied to this channel" });
     }
     if (typeof text !== "string" || !text.trim() || text.length > 5000) {
       return res.status(400).json({ success: false, message: "Text must be 1-5000 characters" });

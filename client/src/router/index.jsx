@@ -215,6 +215,14 @@ const router = createBrowserRouter([
             path: "/messages/:conversationId",
             element: lazyPage(() => import("../pages/Messages")),
           },
+          {
+            path: "/join-group/:token",
+            element: lazyPage(() => import("../pages/JoinGroupInvitePage")),
+          },
+          {
+            path: "/invite/:token",
+            element: lazyPage(() => import("../pages/JoinGroupInvitePage")),
+          },
 
           // Vybe Meet (Conferencing)
           {
